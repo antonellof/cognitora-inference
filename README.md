@@ -98,7 +98,7 @@ cognitora/
   Cargo.toml                  Rust workspace root
   Makefile                    build entrypoints
   buf.yaml                    proto governance
-  rust-toolchain.toml         pinned Rust toolchain (1.79+)
+  rust-toolchain.toml         pinned Rust toolchain (1.89+)
 
   proto/cognitora/v1/         gRPC source of truth
                               (common · router · agent · kv · control · metrics)
