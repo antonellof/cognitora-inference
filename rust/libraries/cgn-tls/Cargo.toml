@@ -1,0 +1,21 @@
+[package]
+name = "cgn-tls"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Cognitora: rustls helpers and mTLS bootstrap"
+
+[dependencies]
+cgn-core = { workspace = true }
+
+rustls            = { workspace = true }
+rustls-pemfile    = { workspace = true }
+rustls-pki-types  = { workspace = true }
+rcgen             = { workspace = true }
+tonic             = { workspace = true }
+tracing           = { workspace = true }
+anyhow            = { workspace = true }
+thiserror         = { workspace = true }

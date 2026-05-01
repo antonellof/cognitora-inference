@@ -1,0 +1,25 @@
+[package]
+name = "cgn-telemetry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Cognitora: tracing, OTLP, and Prometheus wiring shared by every binary"
+
+[dependencies]
+cgn-core = { workspace = true }
+
+tracing               = { workspace = true }
+tracing-subscriber    = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+opentelemetry         = { workspace = true }
+opentelemetry_sdk     = { workspace = true }
+opentelemetry-otlp    = { workspace = true }
+prometheus            = { workspace = true }
+anyhow                = { workspace = true }
+thiserror             = { workspace = true }
+tokio                 = { workspace = true }
+axum                  = { workspace = true }
+hyper                 = { workspace = true }

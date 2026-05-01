@@ -1,0 +1,23 @@
+[package]
+name = "cgn-ratelimit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Cognitora: token-bucket rate limiting (in-process + Redis backend)"
+
+[dependencies]
+cgn-core = { workspace = true }
+
+axum            = { workspace = true }
+http            = "1.1"
+governor        = { workspace = true }
+parking_lot     = { workspace = true }
+dashmap         = { workspace = true }
+tokio           = { workspace = true }
+tracing         = { workspace = true }
+async-trait     = { workspace = true }
+anyhow          = { workspace = true }
+thiserror       = { workspace = true }

@@ -1,0 +1,105 @@
+// Cognitora common message types shared across services.
+syntax = "proto3";
+
+package cognitora.v1;
+
+option go_package = "github.com/cognitora/cognitora/go/pkg/proto/cognitora/v1;cognitorav1";
+
+// ----------------------------------------------------------------------------
+// Generation
+// ----------------------------------------------------------------------------
+
+// A single message in a chat-style conversation. Mirrors the OpenAI shape.
+message Message {
+  string role    = 1;  // "system" | "user" | "assistant" | "tool"
+  string content = 2;
+  string name    = 3;  // optional, used for tool messages
+}
+
+// Sampling parameters forwarded to vLLM.
+message SamplingParams {
+  float    temperature       = 1;
+  float    top_p             = 2;
+  uint32   top_k             = 3;
+  uint32   max_tokens        = 4;
+  repeated string stop       = 5;
+  bool     logprobs          = 6;
+  uint32   seed              = 7;
+  float    frequency_penalty = 8;
+  float    presence_penalty  = 9;
+  float    repetition_penalty = 10;
+}
+
+// A single token emitted by an inference engine. The router fans these from
+// agent → gateway → client unchanged.
+message Token {
+  string id          = 1;  // request id
+  string text        = 2;  // utf-8 fragment
+  uint32 token_id    = 3;  // model-specific token id
+  float  logprob     = 4;
+  string finish      = 5;  // "" while streaming; "stop"/"length"/... at end
+  bytes  prefix_hash = 6;  // optional, set on first chunk for caching
+}
+
+// ----------------------------------------------------------------------------
+// Status / errors
+// ----------------------------------------------------------------------------
+
+message Status {
+  enum Code {
+    OK               = 0;
+    INVALID_ARGUMENT = 1;
+    NOT_FOUND        = 2;
+    ALREADY_EXISTS   = 3;
+    PERMISSION_DENIED = 4;
+    RESOURCE_EXHAUSTED = 5;
+    FAILED_PRECONDITION = 6;
+    UNAVAILABLE      = 7;
+    INTERNAL         = 8;
+    UNAUTHENTICATED  = 9;
+  }
+  Code   code    = 1;
+  string message = 2;
+}
+
+// ----------------------------------------------------------------------------
+// Models
+// ----------------------------------------------------------------------------
+
+enum NodeRole {
+  NODE_ROLE_UNSPECIFIED = 0;
+  NODE_ROLE_PREFILL     = 1;
+  NODE_ROLE_DECODE      = 2;
+  NODE_ROLE_BOTH        = 3;
+}
+
+message ModelRef {
+  string name    = 1;
+  string version = 2;  // optional
+}
+
+message ModelSpec {
+  ModelRef ref                = 1;
+  uint32   tensor_parallel    = 2;
+  uint32   max_model_len      = 3;
+  bool     enable_chunked_prefill = 4;
+  NodeRole role               = 5;
+  // Free-form vLLM args appended to the spawn command line.
+  repeated string extra_args  = 6;
+}
+
+// Block manifest entry used by the KV daemon.
+message BlockInfo {
+  enum Tier {
+    TIER_UNSPECIFIED = 0;
+    TIER_GPU         = 1;  // hot
+    TIER_RAM         = 2;  // warm
+    TIER_SSD         = 3;  // cold
+    TIER_REMOTE      = 4;  // owned by another node
+  }
+  bytes  prefix_hash = 1;
+  Tier   tier        = 2;
+  uint64 size_bytes  = 3;
+  string owner_node  = 4;  // empty if local
+  uint64 last_access_unix_ms = 5;
+}

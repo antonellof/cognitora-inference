@@ -1,0 +1,65 @@
+// Agent service: per-node sidecar to vLLM.
+syntax = "proto3";
+
+package cognitora.v1;
+
+import "google/protobuf/empty.proto";
+import "cognitora/v1/common.proto";
+
+option go_package = "github.com/cognitora/cognitora/go/pkg/proto/cognitora/v1;cognitorav1";
+
+// The router speaks Agent over gRPC mTLS; agents may also be reached over UDS
+// by ctl on the same host.
+service Agent {
+  rpc Generate(stream AgentGenerateRequest) returns (stream Token);
+  rpc LoadModel(ModelSpec) returns (Status);
+  rpc UnloadModel(ModelRef) returns (Status);
+  rpc KvHandoff(KvHandoffSpec) returns (Status);
+  rpc Health(google.protobuf.Empty) returns (NodeHealth);
+  rpc Drain(google.protobuf.Empty) returns (Status);
+}
+
+// Lower-level than router.GenerateRequest: includes phase hints used for
+// prefill/decode disaggregation.
+message AgentGenerateRequest {
+  string         id           = 1;
+  string         model        = 2;
+  repeated Message messages   = 3;
+  SamplingParams params       = 4;
+  bool           prefill_only = 5;
+  bool           decode_only  = 6;
+  // When decode_only=true, the agent may receive a list of pre-loaded block
+  // hashes that have already been transferred via cgn-kvcached.
+  repeated bytes blocks       = 7;
+  string         traceparent  = 8;
+  string         tracestate   = 9;
+}
+
+message KvHandoffSpec {
+  enum Direction {
+    DIRECTION_UNSPECIFIED = 0;
+    PUSH = 1;  // current node pushes to target
+    PULL = 2;  // current node pulls from source
+  }
+  Direction direction       = 1;
+  bytes     prefix_hash     = 2;
+  string    peer_node_id    = 3;
+  string    peer_endpoint   = 4;  // QUIC endpoint or RDMA address
+  bool      use_rdma        = 5;
+}
+
+message NodeHealth {
+  string node_id           = 1;
+  bool   ready             = 2;
+  uint32 queue_depth       = 3;
+  uint32 max_queue         = 4;
+  uint32 free_kv_blocks    = 5;
+  float  gpu_util_pct      = 6;
+  float  gpu_mem_used_pct  = 7;
+  float  gpu_temp_c        = 8;
+  float  rack_watts        = 9;
+  float  rack_watt_limit   = 10;
+  uint64 last_seen_unix_ms = 11;
+  repeated string loaded_models = 12;
+  NodeRole role             = 13;
+}

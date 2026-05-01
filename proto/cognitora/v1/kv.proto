@@ -1,0 +1,54 @@
+// KV service: process-local control surface for cgn-kvcached.
+//
+// Reachable over UDS (`/run/cognitora/kv.sock`) by the local agent, or over
+// gRPC mTLS for cross-node block transfer coordination.
+syntax = "proto3";
+
+package cognitora.v1;
+
+import "cognitora/v1/common.proto";
+
+option go_package = "github.com/cognitora/cognitora/go/pkg/proto/cognitora/v1;cognitorav1";
+
+service Kv {
+  rpc Lookup(Hash) returns (BlockInfo);
+  rpc BatchLookup(HashList) returns (BlockInfoList);
+  rpc Promote(Hash) returns (Status);
+  rpc Push(PushSpec) returns (Status);
+  rpc Pull(PullSpec) returns (Status);
+  rpc Stats(StatsRequest) returns (StatsResponse);
+}
+
+message Hash      { bytes value = 1; }
+message HashList  { repeated bytes values = 1; }
+message BlockInfoList { repeated BlockInfo entries = 1; }
+
+message PushSpec {
+  bytes  prefix_hash    = 1;
+  string target_node_id = 2;
+  string target_endpoint = 3;  // QUIC or RDMA address
+  bool   use_rdma       = 4;
+}
+
+message PullSpec {
+  bytes  prefix_hash    = 1;
+  string source_node_id = 2;
+  string source_endpoint = 3;
+  bool   use_rdma       = 4;
+}
+
+message StatsRequest {}
+message StatsResponse {
+  uint64 ram_used_bytes  = 1;
+  uint64 ram_cap_bytes   = 2;
+  uint64 ssd_used_bytes  = 3;
+  uint64 ssd_cap_bytes   = 4;
+  uint64 hot_blocks      = 5;
+  uint64 warm_blocks     = 6;
+  uint64 cold_blocks     = 7;
+  uint64 hits            = 8;
+  uint64 misses          = 9;
+  uint64 evictions       = 10;
+  uint64 bytes_pushed    = 11;
+  uint64 bytes_pulled    = 12;
+}

@@ -1,0 +1,62 @@
+// Control service: cluster-level admin RPCs invoked by cgn-ctl and the
+// Kubernetes operator.
+syntax = "proto3";
+
+package cognitora.v1;
+
+import "google/protobuf/empty.proto";
+import "cognitora/v1/common.proto";
+
+option go_package = "github.com/cognitora/cognitora/go/pkg/proto/cognitora/v1;cognitorav1";
+
+service Control {
+  rpc ClusterStatus(google.protobuf.Empty) returns (ClusterStatusResponse);
+  rpc ListNodes(google.protobuf.Empty)     returns (NodeList);
+  rpc CordonNode(NodeRef)                  returns (Status);
+  rpc DrainNode(NodeRef)                   returns (Status);
+  rpc LoadModel(LoadModelRequest)          returns (Status);
+  rpc UnloadModel(ModelRef)                returns (Status);
+  rpc UpdateRoutingPolicy(RoutingPolicy)   returns (Status);
+}
+
+message NodeRef { string node_id = 1; }
+
+message NodeInfo {
+  string  node_id  = 1;
+  string  address  = 2;
+  bool    ready    = 3;
+  bool    cordoned = 4;
+  NodeRole role    = 5;
+  repeated string loaded_models = 6;
+  uint64  last_seen_unix_ms     = 7;
+}
+
+message NodeList { repeated NodeInfo nodes = 1; }
+
+message ClusterStatusResponse {
+  string         cluster_name  = 1;
+  uint32         node_count    = 2;
+  uint32         model_count   = 3;
+  string         router_leader = 4;
+  string         backend       = 5;  // "etcd" | "gossip"
+  repeated NodeInfo nodes      = 6;
+}
+
+message LoadModelRequest {
+  ModelSpec spec       = 1;
+  uint32    replicas   = 2;
+  string    gpu_class  = 3;  // optional, k8s node selector hint
+}
+
+message RoutingPolicy {
+  message ScoreWeights {
+    float kv       = 1;
+    float load     = 2;
+    float power    = 3;
+    float capacity = 4;
+  }
+  ScoreWeights weights = 1;
+  uint32 max_queue        = 2;
+  uint32 ttft_slo_ms      = 3;
+  map<string, uint32> tenant_quotas_rps = 4;
+}

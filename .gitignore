@@ -1,1 +1,45 @@
+# Cognitora .gitignore
 .temp/
+
+# Rust
+target/
+Cargo.lock.bak
+**/*.rs.bk
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local secrets / certs
+*.key
+*.pem
+!docs/**/*.pem.example
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+dist/
+out/
+release/
+
+# Terraform
+**/.terraform/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+
+# Helm
+deploy/kubernetes/helm/*/charts/
+deploy/kubernetes/helm/*.tgz
+
+# Logs
+*.log
+
+# Docker
+.docker/

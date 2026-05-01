@@ -1,0 +1,33 @@
+[package]
+name = "cgn-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Cognitora shared library: config, errors, hashing, prefix-trie"
+
+[dependencies]
+serde         = { workspace = true }
+serde_json    = { workspace = true }
+toml          = { workspace = true }
+config        = { workspace = true }
+anyhow        = { workspace = true }
+thiserror     = { workspace = true }
+tracing       = { workspace = true }
+blake3        = { workspace = true }
+arc-swap      = { workspace = true }
+parking_lot   = { workspace = true }
+dashmap       = { workspace = true }
+clap          = { workspace = true }
+notify        = { workspace = true }
+uuid          = { workspace = true }
+chrono        = { workspace = true }
+humantime-serde = { workspace = true }
+tokio         = { workspace = true }
+tonic         = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+proptest = { workspace = true }

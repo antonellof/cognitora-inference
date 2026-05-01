@@ -1,0 +1,33 @@
+[package]
+name = "cgn-kv"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Cognitora: KV cache primitives, RocksDB index, QUIC transfer wire format"
+
+[dependencies]
+cgn-core  = { workspace = true }
+cgn-proto = { workspace = true }
+
+tokio        = { workspace = true }
+tokio-util   = { workspace = true }
+futures      = { workspace = true }
+bytes        = "1.7"
+rocksdb      = { workspace = true }
+quinn        = { workspace = true }
+serde        = { workspace = true }
+bincode      = { workspace = true }
+parking_lot  = { workspace = true }
+dashmap      = { workspace = true }
+arc-swap     = { workspace = true }
+tracing      = { workspace = true }
+anyhow       = { workspace = true }
+thiserror    = { workspace = true }
+blake3       = { workspace = true }
+sysinfo      = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

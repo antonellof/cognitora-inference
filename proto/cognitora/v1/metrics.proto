@@ -1,0 +1,42 @@
+// Metrics service: telemetry pushed from agent → metrics aggregator.
+//
+// Most metrics are exposed via Prometheus /metrics; this RPC carries the
+// derived signals that need a structured, time-aligned source (rack power,
+// vLLM internal counters, KV manifest stats).
+syntax = "proto3";
+
+package cognitora.v1;
+
+import "google/protobuf/empty.proto";
+import "cognitora/v1/common.proto";
+
+option go_package = "github.com/cognitora/cognitora/go/pkg/proto/cognitora/v1;cognitorav1";
+
+service Metrics {
+  rpc PushSample(stream Sample) returns (google.protobuf.Empty);
+}
+
+message Sample {
+  string node_id    = 1;
+  uint64 unix_ms    = 2;
+  // Counter / gauge / histogram triplets.
+  map<string, double> gauges   = 3;
+  map<string, double> counters = 4;
+  // Per-request span (optional).
+  RequestSpan span = 5;
+}
+
+message RequestSpan {
+  string id              = 1;
+  string model           = 2;
+  string tenant          = 3;
+  uint64 start_unix_ms   = 4;
+  uint32 ttft_ms         = 5;
+  uint32 total_ms        = 6;
+  uint32 prompt_tokens   = 7;
+  uint32 completion_tokens = 8;
+  bool   cache_hit       = 9;
+  string finish_reason   = 10;
+  string error           = 11;
+  string node_id         = 12;
+}

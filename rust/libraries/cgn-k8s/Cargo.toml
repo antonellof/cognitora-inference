@@ -1,0 +1,26 @@
+[package]
+name = "cgn-k8s"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Cognitora: kube-rs helpers and CRD types"
+
+[dependencies]
+cgn-core    = { workspace = true }
+
+kube         = { workspace = true }
+k8s-openapi  = { workspace = true }
+schemars     = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+serde_yaml   = { workspace = true }
+tokio        = { workspace = true }
+tracing      = { workspace = true }
+anyhow       = { workspace = true }
+thiserror    = { workspace = true }
+async-trait  = { workspace = true }
+chrono       = { workspace = true }
+futures      = { workspace = true }

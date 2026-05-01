@@ -1,0 +1,44 @@
+// Router service: client-facing inference orchestrator.
+syntax = "proto3";
+
+package cognitora.v1;
+
+import "cognitora/v1/common.proto";
+
+option go_package = "github.com/cognitora/cognitora/go/pkg/proto/cognitora/v1;cognitorav1";
+
+// The router exposes Generate (streaming chat/completion) and Embed
+// (unary embedding). Gateway speaks gRPC to the router; the router fans
+// out to per-node Agents (see agent.proto).
+service Router {
+  rpc Generate(stream GenerateRequest) returns (stream Token);
+  rpc Embed(EmbedRequest) returns (EmbedResponse);
+}
+
+message GenerateRequest {
+  string         model        = 1;
+  repeated Message messages   = 2;
+  SamplingParams params       = 3;
+  string         tenant       = 4;  // for quotas / audit
+  bytes          prefix_hash  = 5;  // optional gateway-side pre-hash
+  bool           stream       = 6;
+  // Optional cascade override; router otherwise uses model policy file.
+  repeated string cascade     = 7;
+  // Tracing context (W3C traceparent + tracestate).
+  string         traceparent  = 8;
+  string         tracestate   = 9;
+  // Per-request soft latency budget; influences admission control.
+  uint32         deadline_ms  = 10;
+}
+
+message EmbedRequest {
+  string         model   = 1;
+  repeated string inputs = 2;
+  string         tenant  = 3;
+}
+
+message EmbedResponse {
+  message Vector { repeated float values = 1; }
+  repeated Vector embeddings = 1;
+  uint32          tokens     = 2;
+}
