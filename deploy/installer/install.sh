@@ -1,7 +1,12 @@
 #!/usr/bin/env sh
-# Cognitora one-line installer.
+# Cognitora one-line installer (Linux x86_64 / aarch64).
 #
 #   curl -fsSL https://raw.githubusercontent.com/antonellof/cognitora-inference/main/deploy/installer/install.sh | sh
+#
+# Cognitora ships prebuilt Linux binaries only — bare metal, Kubernetes,
+# and cloud VM images are the supported deployment surface. macOS is
+# supported as a *development* platform via `cargo build` from source;
+# see the README for the from-source path.
 #
 # Pin a version:
 #
@@ -60,8 +65,10 @@ case "${OS}/${ARCH}" in
   Linux/x86_64)        TARGET="x86_64-unknown-linux-gnu"  ;;
   Linux/aarch64)       TARGET="aarch64-unknown-linux-gnu" ;;
   Linux/arm64)         TARGET="aarch64-unknown-linux-gnu" ;;
-  Darwin/arm64)        TARGET="aarch64-apple-darwin"      ;;
-  Darwin/x86_64)       TARGET="x86_64-apple-darwin"       ;;
+  Darwin/*)
+    fatal "macOS prebuilt binaries are not shipped. Build from source: \
+'cargo build --release --no-default-features -p cgn-router -p cgn-agent -p cgn-kvcached -p cgn-ctl'"
+    ;;
   *) fatal "unsupported platform: ${OS}/${ARCH}" ;;
 esac
 
@@ -120,17 +127,9 @@ fetch "${ARCHIVE_URL}" "${TMP}/${ARCHIVE}"
 fetch "${SUM_URL}"     "${TMP}/${ARCHIVE}.sha256"
 
 log "verifying sha256"
-# Linux: sha256sum, macOS: shasum -a 256. The .sha256 file from the workflow
-# is in plain `<sum>  <name>` shasum format which both tools accept via -c.
-( cd "${TMP}"
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum -c "${ARCHIVE}.sha256"
-  elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 -c "${ARCHIVE}.sha256"
-  else
-    fatal "neither sha256sum nor shasum available; cannot verify checksum"
-  fi
-) || fatal "checksum mismatch — refusing to install"
+# .sha256 is in POSIX `<sum>  <name>` format produced by sha256sum(1).
+( cd "${TMP}" && sha256sum -c "${ARCHIVE}.sha256" ) \
+  || fatal "checksum mismatch — refusing to install"
 
 if command -v cosign >/dev/null 2>&1; then
   if fetch "${SIG_URL}" "${TMP}/${ARCHIVE}.sig" 2>/dev/null; then
@@ -147,7 +146,7 @@ if command -v cosign >/dev/null 2>&1; then
     fi
   fi
 else
-  warn "cosign not installed — skipping signature check (install via 'brew install cosign' or sigstore.dev)"
+  warn "cosign not installed — skipping signature check (see sigstore.dev)"
 fi
 
 # ---- Extract + place ------------------------------------------------------

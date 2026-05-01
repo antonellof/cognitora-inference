@@ -33,8 +33,11 @@ case "${OS}/${ARCH}" in
   Linux/x86_64)        TARGET="x86_64-unknown-linux-gnu"  ;;
   Linux/aarch64)       TARGET="aarch64-unknown-linux-gnu" ;;
   Linux/arm64)         TARGET="aarch64-unknown-linux-gnu" ;;
-  Darwin/arm64)        TARGET="aarch64-apple-darwin"      ;;
-  Darwin/x86_64)       TARGET="x86_64-apple-darwin"       ;;
+  Darwin/*)
+    echo "Cognitora ships Linux-only release artefacts; pack.sh requires a Linux host." >&2
+    echo "On macOS, build directly: cargo build --release --no-default-features -p cgn-router -p cgn-agent -p cgn-kvcached -p cgn-ctl" >&2
+    exit 1
+    ;;
   *) echo "unsupported host: ${OS}/${ARCH}" >&2; exit 1 ;;
 esac
 
@@ -87,8 +90,7 @@ ARCHIVE="${STAGING}.tar.gz"
 ( cd "$DIST" && tar -czf "${ARCHIVE}" "${STAGING}" )
 rm -rf "$WORK"
 
-# Use shasum (POSIX) so the file works on both linux and mac install paths.
-( cd "$DIST" && shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256" )
+( cd "$DIST" && sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256" )
 
 log "wrote ${DIST}/${ARCHIVE}"
 log "wrote ${DIST}/${ARCHIVE}.sha256"

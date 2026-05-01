@@ -55,7 +55,7 @@ All Rust. Built from one workspace.
 
 ## Quick start
 
-### One-liner install (Linux + macOS, x86_64 + arm64)
+### One-liner install (Linux x86_64 + aarch64)
 
 Pulls a signed, sha256-verified release tarball from GitHub and drops the
 binaries into `/usr/local/bin` (or `~/.cognitora/bin` if not writable):
@@ -72,9 +72,13 @@ curl -fsSL .../install.sh | CGN_PREFIX=$HOME/.local sh
 curl -fsSL .../install.sh | CGN_REPO=acme/cognitora-fork sh
 ```
 
+> Cognitora targets Linux for production deployment (bare metal, Kubernetes,
+> cloud VMs). macOS is supported as a development platform via the from-source
+> path below.
+
 Then bring up a real LLM in <30 s — see
-[`examples/local-mac`](examples/local-mac) (Ollama-backed, macOS) or
-[`examples/multi-llm`](examples/multi-llm) (vLLM/llama-cpp, Linux/GPU).
+[`examples/multi-llm`](examples/multi-llm) (vLLM/llama-cpp on Linux/GPU) or
+[`examples/local-mac`](examples/local-mac) (Ollama-backed dev loop on macOS).
 
 ### From source
 
@@ -98,9 +102,10 @@ helm install cognitora oci://ghcr.io/antonellof/charts/cognitora \
 ### Releases
 
 Tagged builds are produced by [`.github/workflows/release.yml`](.github/workflows/release.yml)
-for every `v*.*.*` tag — four targets (`{x86_64,aarch64}-{linux-gnu,apple-darwin}`),
-each archive shipped with a sha256 sum and an aggregated `SHA256SUMS`
-manifest. Multi-arch container images are published to `ghcr.io` for
+for every `v*.*.*` tag — two Linux targets (`x86_64-unknown-linux-gnu`,
+`aarch64-unknown-linux-gnu`), each archive shipped with a sha256 sum and an
+aggregated `SHA256SUMS` manifest. Multi-arch container images
+(`linux/amd64` + `linux/arm64`) are published to `ghcr.io` for
 `cgn-router`, `cgn-agent`, `cgn-kvcached`, and `cgn-ctl`.
 
 To dry-run the full publish flow locally:

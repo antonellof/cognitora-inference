@@ -8,9 +8,9 @@ laptop test, or a CI smoke check.
 
 ## Prerequisites
 
-- Linux or macOS (Apple Silicon works; we'll use `--no-default-features`
-  to skip rocksdb).
-- Rust 1.89+ (or use the prebuilt installer below).
+- **Linux** for prebuilt binaries (`x86_64` or `aarch64`). macOS is
+  supported as a dev platform via the from-source path below.
+- Rust 1.89+ if building from source.
 - ~2 minutes to build.
 
 ## 1. Install
@@ -18,12 +18,12 @@ laptop test, or a CI smoke check.
 Pick one of:
 
 ```bash
-# Option A — prebuilt binaries (Linux x86_64/aarch64, macOS arm64/x86_64).
+# Option A — prebuilt binaries (Linux x86_64 / aarch64).
 # Pulls a sha256-verified release tarball from GitHub. Override CGN_PREFIX
 # to install somewhere other than /usr/local/bin or ~/.cognitora/bin.
 curl -fsSL https://raw.githubusercontent.com/antonellof/cognitora-inference/main/deploy/installer/install.sh | sh
 
-# Option B — from source
+# Option B — from source (any platform; required on macOS)
 git clone https://github.com/antonellof/cognitora-inference cognitora
 cd cognitora
 cargo build --release --no-default-features \

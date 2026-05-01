@@ -20,7 +20,11 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Build cross-platform release binaries.
+  # Build Linux release binaries.
+  #
+  # Linux-only by design: the deployment surface (bare metal, Kubernetes,
+  # bare-VM cloud images) is Linux. Local mac development is supported via
+  # `cargo build` from source; we just don't ship prebuilt mac binaries.
   # ---------------------------------------------------------------------------
   build:
     name: build (${{ matrix.target }})
@@ -30,16 +34,8 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-24.04
-            cross: false
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
-            cross: false
-          - target: aarch64-apple-darwin
-            runner: macos-14
-            cross: false
-          - target: x86_64-apple-darwin
-            runner: macos-13
-            cross: false
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -56,8 +52,7 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      - name: Install build deps (linux)
-        if: contains(matrix.runner, 'ubuntu')
+      - name: Install build deps
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -120,9 +115,8 @@ jobs:
           ( cd dist && tar -czf "${STAGING}.tar.gz" "${STAGING}" )
           rm -rf "dist/${STAGING}"
 
-          # shasum (POSIX format: "<sum>  <name>"). install.sh consumes it
-          # via either sha256sum -c (linux) or shasum -a 256 -c (mac).
-          ( cd dist && shasum -a 256 "${STAGING}.tar.gz" > "${STAGING}.tar.gz.sha256" )
+          # POSIX `<sum>  <name>` format consumed by install.sh via sha256sum -c.
+          ( cd dist && sha256sum "${STAGING}.tar.gz" > "${STAGING}.tar.gz.sha256" )
 
           ls -la dist/
 
