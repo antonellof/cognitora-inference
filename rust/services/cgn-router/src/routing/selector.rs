@@ -11,8 +11,8 @@ use std::sync::Arc;
 use cgn_core::{Error, Result};
 use cgn_proto::v1::NodeRole;
 
-use crate::cluster::{NodeEntry, NodeRegistry};
-use crate::state::{RoutingPolicy, SharedState};
+use crate::cluster::NodeEntry;
+use crate::state::SharedState;
 
 use super::score::{score_node, Score};
 
