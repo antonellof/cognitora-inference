@@ -35,7 +35,7 @@ cognitora/
 │   │   │                   src/{gateway,routing,cluster,cascade,disagg,admission}
 │   │   ├── cgn-agent/      vLLM supervision, NVML, KvHandoff
 │   │   ├── cgn-kvcached/   tiered KV daemon (GPU/RAM/SSD)
-│   │   ├── cgn-metrics/    Prometheus + tokens/joule
+│   │   ├── cgn-metrics/    Prometheus aggregator + power telemetry
 │   │   ├── cgn-ctl/        admin CLI + installer
 │   │   └── cgn-operator/   kube-rs operator (CRDs in deploy/kubernetes/crds/)
 │   │

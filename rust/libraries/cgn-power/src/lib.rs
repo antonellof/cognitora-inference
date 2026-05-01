@@ -1,4 +1,4 @@
-//! Power readers for the `tokens/joule` SLO.
+//! Power readers feeding Cognitora's energy-aware scheduling.
 //!
 //! Three sources, in preference order:
 //!
@@ -11,7 +11,8 @@
 //!    derive `gpu_share`.
 //!
 //! `cgn-metrics` polls these readers on a configurable interval and
-//! emits `cgn_power_watts{component=...}` and `cgn_tokens_per_joule`.
+//! exports `cgn_power_watts{component=...}` plus derived gauges that the
+//! router consumes through its `power` score component.
 
 #![forbid(unsafe_code)]
 
