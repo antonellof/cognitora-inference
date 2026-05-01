@@ -51,6 +51,7 @@ thiserror      = { workspace = true }
 uuid           = { workspace = true }
 chrono         = { workspace = true }
 blake3         = { workspace = true }
+bytes          = "1.7"
 reqwest        = { workspace = true }
 
 [dev-dependencies]
