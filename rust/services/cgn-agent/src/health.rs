@@ -143,9 +143,14 @@ async fn publish_one(
     gpu: &GpuSnapshot,
 ) -> Result<()> {
     use cgn_core::Error;
+    let scheme = if supervisor.cfg.security.require_mtls {
+        "https"
+    } else {
+        "http"
+    };
     let value = serde_json::json!({
         "node_id": supervisor.cfg.agent.node_id,
-        "address": format!("https://{}", supervisor.cfg.agent.listen),
+        "address": format!("{scheme}://{}", supervisor.cfg.agent.listen),
         "role":    role_to_int(&supervisor.cfg.agent.role),
         "gpu_index": supervisor.cfg.agent.gpu_index,
         "model": supervisor.cfg.models.keys().next().cloned(),
