@@ -1,0 +1,37 @@
+[Unit]
+Description=Cognitora Agent (per-node engine supervisor)
+Documentation=https://github.com/cognitora/cognitora
+After=network-online.target nvidia-persistenced.service
+Wants=network-online.target
+Requires=cgn-kvcached.service
+
+[Service]
+Type=notify
+User=cognitora
+Group=cognitora
+SupplementaryGroups=video render
+EnvironmentFile=-/etc/cognitora/cgn-agent.env
+ExecStart=/usr/local/bin/cgn-agent --config /etc/cognitora/cognitora.toml
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=1048576
+LimitMEMLOCK=infinity
+LimitCORE=infinity
+TasksMax=infinity
+TimeoutStopSec=120s
+KillMode=mixed
+
+# GPU access required
+PrivateDevices=no
+DeviceAllow=/dev/nvidia* rw
+DeviceAllow=/dev/nvidia-uvm* rw
+DeviceAllow=/dev/nvidiactl rw
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/cognitora /var/log/cognitora /run/cognitora
+
+[Install]
+WantedBy=multi-user.target

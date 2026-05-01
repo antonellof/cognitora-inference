@@ -1,0 +1,61 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: modelpools.cognitora.dev
+spec:
+  group: cognitora.dev
+  scope: Namespaced
+  names:
+    kind: ModelPool
+    listKind: ModelPoolList
+    plural: modelpools
+    singular: modelpool
+    shortNames: [mp]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [model]
+              properties:
+                model:
+                  type: string
+                  description: HuggingFace repo, OCI artifact, or local path.
+                tensorParallel:
+                  type: integer
+                  minimum: 1
+                  default: 1
+                dtype:
+                  type: string
+                  enum: [bfloat16, float16, float8, int8]
+                  default: bfloat16
+                replicas:
+                  type: integer
+                  minimum: 0
+                  default: 1
+                cascade:
+                  type: array
+                  items: { type: string }
+                  description: Optional fallback chain (smaller -> larger).
+                nodeSelector:
+                  type: object
+                  additionalProperties: { type: string }
+            status:
+              type: object
+              properties:
+                phase: { type: string }
+                readyReplicas: { type: integer }
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - { name: Model,   type: string,  jsonPath: .spec.model }
+        - { name: TP,      type: integer, jsonPath: .spec.tensorParallel }
+        - { name: Ready,   type: integer, jsonPath: .status.readyReplicas }
+        - { name: Phase,   type: string,  jsonPath: .status.phase }
+        - { name: Age,     type: date,    jsonPath: .metadata.creationTimestamp }

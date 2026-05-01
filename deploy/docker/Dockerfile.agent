@@ -1,0 +1,23 @@
+# cgn-agent ships side-by-side with vLLM so the runtime image needs CUDA +
+# Python; we use the upstream NVIDIA Container Toolkit image as the base
+# and copy the static cgn-agent binary on top.
+# syntax=docker/dockerfile:1.7
+
+FROM rust:1.89-slim-bookworm AS build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential pkg-config libssl-dev clang lld cmake protobuf-compiler ca-certificates git \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY . .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo build --release -p cgn-agent \
+ && cp /src/target/release/cgn-agent /usr/local/bin/cgn-agent
+
+# Pin a specific vLLM tag in production. The base image already has
+# CUDA 12.1, PyTorch 2.3, and Python 3.10.
+FROM vllm/vllm-openai:v0.6.3 AS runtime
+COPY --from=build /usr/local/bin/cgn-agent /usr/local/bin/cgn-agent
+USER 1000:1000
+ENTRYPOINT ["/usr/local/bin/cgn-agent"]
+CMD ["--config", "/etc/cognitora/cognitora.toml"]

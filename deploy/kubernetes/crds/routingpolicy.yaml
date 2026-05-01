@@ -1,0 +1,53 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: routingpolicies.cognitora.dev
+spec:
+  group: cognitora.dev
+  scope: Namespaced
+  names:
+    kind: RoutingPolicy
+    listKind: RoutingPolicyList
+    plural: routingpolicies
+    singular: routingpolicy
+    shortNames: [rp]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                scoreWeights:
+                  type: object
+                  description: Weights summing to ~1.0; the operator normalises before publishing.
+                  properties:
+                    kv:       { type: number, default: 0.55 }
+                    load:     { type: number, default: 0.25 }
+                    power:    { type: number, default: 0.10 }
+                    capacity: { type: number, default: 0.10 }
+                admission:
+                  type: object
+                  properties:
+                    maxQueue:       { type: integer, default: 4096 }
+                    ttftSloMs:      { type: integer, default: 800 }
+                    queueTimeoutMs: { type: integer, default: 30000 }
+                cascade:
+                  type: object
+                  properties:
+                    enabled:              { type: boolean, default: false }
+                    confidenceThreshold:  { type: number,  default: -1.0 }
+                disagg:
+                  type: object
+                  properties:
+                    enabled:               { type: boolean, default: false }
+                    colocateBelowTokens:   { type: integer, default: 256 }
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}

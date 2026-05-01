@@ -1,0 +1,105 @@
+# Cognitora — example configuration.
+#
+# All sections are optional. Values shown below are the built-in defaults
+# (see rust/libraries/cgn-core/src/config.rs).
+#
+# Place this file at /etc/cognitora/cognitora.toml and reference it from
+# every binary's --config flag, or set COGNITORA_CONFIG=/etc/...
+
+[cluster]
+name      = "default"
+data_dir  = "/var/lib/cognitora"
+etcd      = ["127.0.0.1:2379"]
+# node_id is derived from a stable file on first boot if unset.
+
+[security]
+require_mtls   = true
+ca_file        = "/etc/cognitora/pki/ca.crt"
+cert_file      = "/etc/cognitora/pki/leaf.crt"
+key_file       = "/etc/cognitora/pki/leaf.key"
+client_ca_file = "/etc/cognitora/pki/ca.crt"
+
+[auth]
+# When false, the OpenAI HTTP surface is open. CI / dev only.
+enabled         = true
+api_keys_file   = "/etc/cognitora/keys.txt"
+oidc_issuer     = ""        # e.g. "https://your-idp.example.com"
+oidc_audience   = ""        # JWT `aud`
+oidc_jwks_ttl   = "10m"
+
+# ---- Router (combined gateway + orchestrator) ------------------------------
+
+[router]
+listen_http  = "0.0.0.0:8080"   # OpenAI-compatible API
+listen_grpc  = "0.0.0.0:7070"   # internal RPC (mTLS)
+listen_admin = "127.0.0.1:9091" # /metrics, /healthz, /readyz
+worker_threads = 0              # 0 = num_cpus
+
+[router.score_weights]
+kv       = 0.55
+load     = 0.25
+power    = 0.10
+capacity = 0.10
+
+[router.admission]
+max_queue        = 4096    # global cap on requests in flight per (model,role)
+ttft_slo_ms      = 800
+queue_timeout_ms = 30_000
+
+[router.rate_limit]
+enabled        = false
+rps_per_subject = 50
+burst           = 100
+
+[router.cascade]
+enabled              = false
+confidence_threshold = -1.0   # mean logprob; below this -> escalate
+
+[router.disagg]
+enabled                 = false
+colocate_below_tokens   = 256
+
+# ---- Agent (per-GPU-host engine supervisor) --------------------------------
+
+[agent]
+listen_grpc      = "0.0.0.0:7071"
+listen_admin     = "127.0.0.1:9091"
+engine           = "vllm"      # only "vllm" today
+engine_binary    = "vllm"
+engine_workdir   = "/var/lib/cognitora/engine"
+engine_args      = ["--model", "{model}", "--tensor-parallel-size", "{tp}"]
+ready_probe_url  = "http://127.0.0.1:8000/v1/models"
+ready_timeout    = "120s"
+heartbeat        = "5s"
+
+# ---- KV cache daemon -------------------------------------------------------
+
+[kv]
+listen_grpc = "0.0.0.0:7072"
+listen_quic = "0.0.0.0:7073"
+ssd_dir     = "/var/lib/cognitora/kv/ssd"
+index_dir   = "/var/lib/cognitora/kv/index"
+ram_gib     = 8
+ssd_gib     = 256
+
+# ---- Metrics aggregator ----------------------------------------------------
+
+[metrics]
+listen_admin    = "0.0.0.0:9092"
+scrape_interval = "10s"
+redfish_url     = ""           # https://bmc.example/redfish/v1
+redfish_user    = ""
+redfish_pass_file = ""
+
+# ---- Models declared up front (optional; can also be done at runtime) ------
+
+[models.llama3-8b]
+hf_repo  = "meta-llama/Meta-Llama-3-8B-Instruct"
+tp       = 1
+dtype    = "bfloat16"
+cascade  = []                  # []  | ["llama3-8b","llama3-70b"]
+
+[models.llama3-70b]
+hf_repo  = "meta-llama/Meta-Llama-3-70B-Instruct"
+tp       = 4
+dtype    = "bfloat16"

@@ -1,0 +1,47 @@
+{{- if .Values.agent.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "cognitora.fullname" . }}-agent
+  labels:
+    {{- include "cognitora.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  selector:
+    matchLabels:
+      {{- include "cognitora.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: agent
+  template:
+    metadata:
+      labels:
+        {{- include "cognitora.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: agent
+    spec:
+      serviceAccountName: {{ include "cognitora.fullname" . }}
+      nodeSelector: {{- toYaml .Values.agent.nodeSelector | nindent 8 }}
+      tolerations: {{- toYaml .Values.agent.tolerations | nindent 8 }}
+      hostNetwork: true
+      containers:
+        - name: cgn-agent
+          image: {{ include "cognitora.image" . }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          args:
+            - --config
+            - /etc/cognitora/cognitora.toml
+          ports:
+            - { name: grpc,  containerPort: 7071 }
+            - { name: admin, containerPort: 9091 }
+          resources: {{- toYaml .Values.agent.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/cognitora }
+            - { name: pki,    mountPath: /etc/cognitora/pki, readOnly: true }
+            - { name: socks,  mountPath: /run/cognitora }
+      volumes:
+        - name: config
+          configMap: { name: {{ include "cognitora.fullname" . }}-config }
+        - name: pki
+          secret:
+            secretName: {{ default (printf "%s-pki" (include "cognitora.fullname" .)) .Values.pki.existingSecret }}
+        - name: socks
+          emptyDir: {}
+{{- end }}

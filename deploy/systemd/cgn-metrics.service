@@ -1,0 +1,24 @@
+[Unit]
+Description=Cognitora metrics aggregator (Prometheus federation + power)
+Documentation=https://github.com/cognitora/cognitora
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=cognitora
+Group=cognitora
+EnvironmentFile=-/etc/cognitora/cgn-metrics.env
+ExecStart=/usr/local/bin/cgn-metrics --config /etc/cognitora/cognitora.toml
+Restart=on-failure
+RestartSec=2s
+LimitNOFILE=65536
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/log/cognitora
+
+[Install]
+WantedBy=multi-user.target

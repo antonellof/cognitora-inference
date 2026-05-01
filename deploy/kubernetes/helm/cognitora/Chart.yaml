@@ -1,0 +1,19 @@
+apiVersion: v2
+name: cognitora
+description: Cognitora AI inference platform — KV-aware routing, prefill/decode disagg, multi-tier KV cache.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://cognitora.dev
+sources:
+  - https://github.com/cognitora/cognitora
+maintainers:
+  - name: Cognitora maintainers
+    url: https://cognitora.dev
+keywords:
+  - llm
+  - inference
+  - vllm
+  - kv-cache
+  - openai-compatible
+icon: https://raw.githubusercontent.com/cognitora/cognitora/main/docs/logo.svg

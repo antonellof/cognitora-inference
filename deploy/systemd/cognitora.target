@@ -1,0 +1,7 @@
+[Unit]
+Description=Cognitora platform target (router + agent + kvcached + metrics)
+Wants=cgn-router.service cgn-agent.service cgn-kvcached.service cgn-metrics.service
+After=cgn-router.service cgn-agent.service cgn-kvcached.service cgn-metrics.service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,104 @@
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            runner: macos-14
+          - target: x86_64-apple-darwin
+            runner: macos-13
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: "${{ matrix.target }}" }
+      - uses: arduino/setup-protoc@v3
+        with: { repo-token: "${{ secrets.GITHUB_TOKEN }}" }
+      - uses: Swatinem/rust-cache@v2
+      - name: Install build deps (linux)
+        if: contains(matrix.runner, 'ubuntu')
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev clang lld pkg-config
+      - run: cargo build --release --target ${{ matrix.target }} --workspace
+      - name: Pack
+        run: |
+          mkdir -p dist
+          BINS=(cgn-ctl cgn-router cgn-agent cgn-kvcached cgn-metrics cgn-operator)
+          STAGING=cognitora-${GITHUB_REF_NAME}-${{ matrix.target }}
+          mkdir -p "$STAGING"
+          for b in "${BINS[@]}"; do
+            cp "target/${{ matrix.target }}/release/${b}" "$STAGING/"
+          done
+          tar -czf "dist/${STAGING}.tar.gz" "$STAGING"
+          ( cd dist && shasum -a 256 "${STAGING}.tar.gz" > "${STAGING}.tar.gz.sha256" )
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          STAGING=cognitora-${GITHUB_REF_NAME}-${{ matrix.target }}
+          cosign sign-blob --yes --output-signature "dist/${STAGING}.tar.gz.sig" "dist/${STAGING}.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/
+
+  publish:
+    needs: [build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist }
+      - name: Flatten
+        run: find dist -mindepth 2 -type f -print -exec mv {} dist/ \;
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+
+  docker:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        bin: [cgn-router, cgn-kvcached, cgn-metrics, cgn-ctl, cgn-operator]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          build-args: BIN=${{ matrix.bin }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.bin }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.bin }}:latest

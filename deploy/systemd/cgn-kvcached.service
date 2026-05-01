@@ -1,0 +1,29 @@
+[Unit]
+Description=Cognitora KV cache daemon (RAM/SSD tiers + QUIC transfer)
+Documentation=https://github.com/cognitora/cognitora
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=cognitora
+Group=cognitora
+EnvironmentFile=-/etc/cognitora/cgn-kvcached.env
+ExecStart=/usr/local/bin/cgn-kvcached --config /etc/cognitora/cognitora.toml
+Restart=on-failure
+RestartSec=2s
+LimitNOFILE=1048576
+LimitMEMLOCK=infinity
+LimitCORE=infinity
+TasksMax=infinity
+TimeoutStopSec=60s
+KillMode=mixed
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/cognitora /var/log/cognitora /run/cognitora
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cognitora.fullname" . }}-router
+  labels:
+    {{- include "cognitora.labels" . | nindent 4 }}
+    app.kubernetes.io/component: router
+spec:
+  replicas: {{ .Values.router.replicas }}
+  selector:
+    matchLabels:
+      {{- include "cognitora.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: router
+  template:
+    metadata:
+      labels:
+        {{- include "cognitora.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: router
+    spec:
+      serviceAccountName: {{ include "cognitora.fullname" . }}
+      containers:
+        - name: cgn-router
+          image: {{ include "cognitora.image" . }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          args:
+            - --config
+            - /etc/cognitora/cognitora.toml
+          ports:
+            - { name: http,  containerPort: {{ .Values.router.service.httpPort }} }
+            - { name: grpc,  containerPort: {{ .Values.router.service.grpcPort }} }
+            - { name: admin, containerPort: 9091 }
+          readinessProbe:
+            httpGet: { path: /readyz,  port: admin }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: admin }
+            periodSeconds: 10
+          resources: {{- toYaml .Values.router.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/cognitora }
+            - { name: pki,    mountPath: /etc/cognitora/pki, readOnly: true }
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "cognitora.fullname" . }}-config
+        - name: pki
+          secret:
+            secretName: {{ default (printf "%s-pki" (include "cognitora.fullname" .)) .Values.pki.existingSecret }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cognitora.fullname" . }}-router
+  labels:
+    {{- include "cognitora.labels" . | nindent 4 }}
+    app.kubernetes.io/component: router
+spec:
+  type: {{ .Values.router.service.type }}
+  selector:
+    {{- include "cognitora.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: router
+  ports:
+    - { name: http,  port: {{ .Values.router.service.httpPort }}, targetPort: http }
+    - { name: grpc,  port: {{ .Values.router.service.grpcPort }}, targetPort: grpc }

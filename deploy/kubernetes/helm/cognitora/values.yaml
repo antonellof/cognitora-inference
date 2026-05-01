@@ -1,0 +1,97 @@
+# Default values for cognitora.
+
+global:
+  image:
+    registry: ghcr.io
+    repository: cognitora/cognitora
+    tag: ""               # default: chart appVersion
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+
+cluster:
+  name: default
+
+# OpenID Connect / API key auth for the OpenAI HTTP surface.
+auth:
+  enabled: false
+  existingSecret: ""      # secret with keys: api-keys, oidc-client-id, oidc-issuer
+
+# mTLS material between cluster components. When createCa is true the
+# operator will issue a self-signed CA on first install.
+pki:
+  createCa: true
+  existingSecret: ""
+
+# ---- Router ---------------------------------------------------------------
+router:
+  replicas: 2
+  resources:
+    requests: { cpu: "500m", memory: "1Gi" }
+    limits:   { cpu: "4",    memory: "4Gi" }
+  service:
+    type: ClusterIP
+    httpPort: 8080
+    grpcPort: 7070
+  ingress:
+    enabled: false
+    className: ""
+    host: ""
+  scoreWeights:
+    kv: 0.55
+    load: 0.25
+    power: 0.10
+    capacity: 0.10
+  admission:
+    maxQueue: 4096
+    ttftSloMs: 800
+    queueTimeoutMs: 30000
+  rateLimit:
+    enabled: false
+    rpsPerSubject: 50
+    burst: 100
+  cascade:
+    enabled: false
+    confidenceThreshold: -1.0
+  disagg:
+    enabled: false
+    colocateBelowTokens: 256
+
+# ---- Agent (DaemonSet on GPU nodes) ---------------------------------------
+agent:
+  enabled: true
+  nodeSelector:
+    nvidia.com/gpu.present: "true"
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+  resources:
+    limits:
+      nvidia.com/gpu: 1
+      memory: "32Gi"
+    requests:
+      cpu: "2"
+      memory: "16Gi"
+  engine: vllm
+  engineImage: ""         # default: pulls vLLM image from values.global
+
+# ---- KV cache daemon ------------------------------------------------------
+kvcached:
+  enabled: true
+  replicas: 0             # 0 == DaemonSet alongside agent
+  ramGib: 8
+  ssdGib: 256
+  storageClassName: ""    # uses default if empty
+
+# ---- Metrics aggregator ---------------------------------------------------
+metrics:
+  enabled: true
+  scrapeInterval: 10s
+  redfish:
+    url: ""
+    existingSecret: ""
+
+# ---- Operator (CRD reconciliation) ----------------------------------------
+operator:
+  enabled: true
+  watchAllNamespaces: true

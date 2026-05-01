@@ -1,0 +1,62 @@
+name: e2e
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'rust/**'
+      - 'deploy/**'
+      - '.github/workflows/e2e.yml'
+
+# E2E suite assumes a Linux host with Docker. The job stands up a
+# minimal cluster (router + a vllm-shaped HTTP fake) and exercises the
+# OpenAI-compatible HTTP surface end to end. Real GPU-backed tests live
+# behind a self-hosted runner labelled `gpu`.
+
+jobs:
+  http-only:
+    name: e2e (CPU, fake engine)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+        with: { repo-token: "${{ secrets.GITHUB_TOKEN }}" }
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev clang lld pkg-config etcd-server
+      - name: Boot etcd
+        run: |
+          sudo systemctl start etcd || (
+            etcd --listen-client-urls http://127.0.0.1:2379 \
+                 --advertise-client-urls http://127.0.0.1:2379 &
+            sleep 2
+          )
+      - run: cargo build --release -p cgn-router -p cgn-ctl
+      - name: Generate dev PKI
+        run: ./target/release/cgn-ctl pki bootstrap --out-dir /tmp/pki
+      - name: Boot router
+        run: |
+          mkdir -p /etc/cognitora
+          sudo cp configs/cognitora.toml.example /etc/cognitora/cognitora.toml
+          ./target/release/cgn-router --config /etc/cognitora/cognitora.toml &
+          sleep 3
+      - name: Probe /healthz
+        run: |
+          curl -fsSL http://127.0.0.1:9091/healthz
+      - name: Probe /v1/models
+        run: |
+          curl -fsSL -H 'authorization: bearer dev' http://127.0.0.1:8080/v1/models | tee /tmp/models.json
+          test -s /tmp/models.json
+
+  gpu:
+    name: e2e (GPU, real vLLM)
+    runs-on: [self-hosted, gpu]
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'run-gpu-e2e') }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/e2e-gpu.sh
