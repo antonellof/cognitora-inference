@@ -21,6 +21,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info, warn};
 
+use crate::cascade::{Cascade, StepOutcome};
 use crate::routing;
 use crate::state::SharedState;
 
@@ -56,13 +57,24 @@ pub async fn completions(
         return sse::into_response(stream);
     }
 
-    match buffered_run(state.clone(), proto_req).await {
-        Ok((text, completion_tokens, finish)) => {
+    // Cascade kicks in only on the buffered path (we need a complete
+    // response before we can read its mean logprob and decide whether to
+    // escalate). Streaming requests bypass the cascade — that path is
+    // tracked under M4-followups.
+    let casc = Cascade::from_config(&state.cfg, &model, &[]);
+    let result = match casc {
+        Some(c) => buffered_with_cascade(state.clone(), proto_req, c).await,
+        None    => buffered_run(state.clone(), proto_req).await
+            .map(|(text, n, finish)| (text, n, finish, model.clone())),
+    };
+
+    match result {
+        Ok((text, completion_tokens, finish, used_model)) => {
             let resp = ChatResponse {
                 id,
                 object: "chat.completion",
                 created,
-                model,
+                model: used_model,
                 choices: vec![ChatChoice {
                     index: 0,
                     message: ChatMessage { role: "assistant".into(), content: text, name: None },
@@ -81,6 +93,52 @@ pub async fn completions(
             error_json(&e)
         }
     }
+}
+
+/// Run a buffered completion through a model cascade. Each step
+/// re-routes through `routing::pick` so we always pick the best node
+/// for that particular model.
+async fn buffered_with_cascade(
+    state: Arc<SharedState>,
+    proto: GenerateRequest,
+    casc:  Cascade,
+) -> cgn_core::Result<(String, u32, String, String)> {
+    let result = casc.run(|model| {
+        let state = state.clone();
+        let mut step_proto = proto.clone();
+        step_proto.model = model.to_string();
+        async move {
+            match buffered_run(state, step_proto).await {
+                Ok((text, n, finish)) => StepOutcome {
+                    // Without engine-side logprobs, approximate with a
+                    // length-based heuristic: longer responses imply
+                    // higher confidence. Real impl plugs in the engine's
+                    // mean-logprob output once exposed.
+                    logprob: -1.0 / ((n as f32).max(1.0)).ln().max(0.5),
+                    text,
+                    tokens: n,
+                    finish,
+                },
+                Err(e) => {
+                    tracing::warn!(error=?e, "cascade step failed; escalating");
+                    StepOutcome::default()
+                }
+            }
+        }
+    }).await;
+
+    info!(
+        used = %result.model_used,
+        attempts = result.steps_attempted.len(),
+        tokens = result.outcome.tokens,
+        "cascade complete"
+    );
+    Ok((
+        result.outcome.text,
+        result.outcome.tokens,
+        result.outcome.finish,
+        result.model_used,
+    ))
 }
 
 fn build_proto_request(r: &ChatRequest) -> GenerateRequest {
@@ -215,18 +273,49 @@ async fn run_to_token_stream(
     req:   GenerateRequest,
 ) -> cgn_core::Result<impl futures::Stream<Item = Result<cgn_proto::v1::Token, tonic::Status>> + Unpin> {
     use cgn_proto::v1::{agent_client::AgentClient, AgentGenerateRequest};
+    use crate::disagg::{self, Plan};
 
     let token_ids = approximate_token_ids(&join_messages(&req.messages));
-    let role = NodeRole::Both;
-    let decision = routing::pick(&state, &req.model, role, &token_ids).await?;
+    let prompt_tokens = token_ids.len() as u32;
+
+    // Disagg plan: maybe split into (prefill, decode) or stay colocate.
+    let cfg_disagg = &state.cfg.router.disagg;
+    let plan = disagg::plan(cfg_disagg.enabled, cfg_disagg.colocate_below_tokens, prompt_tokens);
+
+    let (prefill_decision, decode_decision) = match plan {
+        Plan::Colocate => {
+            let d = routing::pick(&state, &req.model, NodeRole::Both, &token_ids).await?;
+            (d.clone(), d)
+        }
+        Plan::Split { prefill_role, decode_role } => {
+            let (p, d) = routing::pick_pair(&state, &req.model, prefill_role, decode_role, &token_ids).await?;
+            info!(
+                prefill = %p.node.node_id,
+                decode  = %d.node.node_id,
+                "disagg pair selected"
+            );
+            (p, d)
+        }
+    };
+
     info!(
-        node = %decision.node.node_id,
-        score = decision.score.total,
-        overlap = decision.overlap,
+        node = %decode_decision.node.node_id,
+        score = decode_decision.score.total,
+        overlap = decode_decision.overlap,
         "openai → routing decision"
     );
 
-    let mut client = AgentClient::connect(decision.node.address.clone())
+    // Phase 1: prefill (only when split *and* prefill node ≠ decode node).
+    let prefill_blocks: Vec<Vec<u8>> =
+        if prefill_decision.node.node_id != decode_decision.node.node_id {
+            run_prefill(&prefill_decision.node.address, &req).await.unwrap_or_default()
+        } else {
+            vec![]
+        };
+
+    // Phase 2: decode. Pass the prefill block list so the engine can
+    // skip the first forward pass.
+    let mut client = AgentClient::connect(decode_decision.node.address.clone())
         .await
         .map_err(|e| cgn_core::Error::Unavailable(format!("agent connect: {e}")))?;
 
@@ -236,8 +325,8 @@ async fn run_to_token_stream(
         messages:     req.messages,
         params:       req.params,
         prefill_only: false,
-        decode_only:  false,
-        blocks:       vec![],
+        decode_only:  !prefill_blocks.is_empty(),
+        blocks:       prefill_blocks,
         traceparent:  req.traceparent,
         tracestate:   req.tracestate,
     };
@@ -248,6 +337,38 @@ async fn run_to_token_stream(
         .map_err(|s| cgn_core::Error::Internal(format!("agent generate: {s}")))?
         .into_inner();
     Ok(response)
+}
+
+/// Issue a prefill-only request to the prefill agent and collect the
+/// returned block list. On any error returns an empty vec and the
+/// caller falls back to colocate execution.
+async fn run_prefill(
+    address: &str,
+    req: &cgn_proto::v1::GenerateRequest,
+) -> Option<Vec<Vec<u8>>> {
+    use cgn_proto::v1::{agent_client::AgentClient, AgentGenerateRequest};
+
+    let mut client = AgentClient::connect(address.to_string()).await.ok()?;
+    let prefill_req = AgentGenerateRequest {
+        id:           uuid::Uuid::new_v4().to_string(),
+        model:        req.model.clone(),
+        messages:     req.messages.clone(),
+        params:       req.params.clone(),
+        prefill_only: true,
+        decode_only:  false,
+        blocks:       vec![],
+        traceparent:  req.traceparent.clone(),
+        tracestate:   req.tracestate.clone(),
+    };
+    let req_stream = futures::stream::iter(vec![prefill_req]);
+    let mut stream = client.generate(tonic::Request::new(req_stream)).await.ok()?
+        .into_inner();
+    // The prefill agent terminates the stream after publishing the KV
+    // handoff metadata. We don't currently surface that metadata back —
+    // M3 will lift the handoff message into a side-channel so the
+    // router can drive the QUIC push between agents.
+    let _ = stream.next().await;
+    Some(vec![])
 }
 
 fn join_messages(msgs: &[PMessage]) -> String {

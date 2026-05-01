@@ -8,6 +8,12 @@ homepage.workspace = true
 authors.workspace = true
 description = "Cognitora: token-bucket rate limiting (in-process + Redis backend)"
 
+[features]
+default = []
+# Redis-backed token bucket. Enable for multi-replica deployments where
+# the in-process governor would let bursts slip through one replica.
+redis-backend = ["dep:redis"]
+
 [dependencies]
 cgn-core = { workspace = true }
 
@@ -21,3 +27,4 @@ tracing         = { workspace = true }
 async-trait     = { workspace = true }
 anyhow          = { workspace = true }
 thiserror       = { workspace = true }
+redis           = { version = "0.27", default-features = false, features = ["tokio-comp", "tokio-rustls-comp", "connection-manager"], optional = true }

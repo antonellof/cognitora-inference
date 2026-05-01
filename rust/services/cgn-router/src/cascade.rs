@@ -6,8 +6,12 @@
 //! response's confidence (mean logprob) drops below
 //! `confidence_threshold`, the next model in the cascade is tried.
 //!
-//! Today this module exposes the FSM and selector logic; the gateway
-//! invokes it as a wrapper around `routing::pick`.
+//! `Cascade::run` is an async orchestrator: it takes a closure that
+//! executes a single step (model name) and returns the produced text +
+//! mean logprob, and drives the chain until either confidence is met or
+//! the chain is exhausted.
+
+use std::future::Future;
 
 use cgn_core::config::Config;
 
@@ -15,6 +19,24 @@ use cgn_core::config::Config;
 pub struct Cascade {
     pub steps: Vec<String>,
     pub threshold: f32,
+}
+
+/// Single-step output the cascade evaluates.
+#[derive(Debug, Clone, Default)]
+pub struct StepOutcome {
+    pub text:    String,
+    pub logprob: f32,
+    /// Number of completion tokens — 0 means the engine did not return
+    /// any usable output and the cascade should escalate.
+    pub tokens:  u32,
+    pub finish:  String,
+}
+
+#[derive(Debug, Clone)]
+pub struct CascadeResult {
+    pub outcome:        StepOutcome,
+    pub model_used:     String,
+    pub steps_attempted: Vec<String>,
 }
 
 impl Cascade {
@@ -32,9 +54,39 @@ impl Cascade {
         })
     }
 
-    /// Decide whether to escalate after observing `logprob_mean`.
-    pub fn should_escalate(&self, logprob_mean: f32) -> bool {
-        logprob_mean < self.threshold
+    /// Decide whether to escalate after observing `outcome`.
+    pub fn should_escalate(&self, outcome: &StepOutcome) -> bool {
+        outcome.tokens == 0 || outcome.logprob < self.threshold
+    }
+
+    /// Drive the cascade. `step_fn` is invoked once per step with the
+    /// model name; the first step whose confidence ≥ threshold wins.
+    /// If every step escalates, the last outcome is returned anyway —
+    /// the caller can log it as a low-confidence answer.
+    pub async fn run<F, Fut>(&self, mut step_fn: F) -> CascadeResult
+    where
+        F: FnMut(&str) -> Fut,
+        Fut: Future<Output = StepOutcome>,
+    {
+        let mut last = StepOutcome::default();
+        let mut last_model = String::new();
+        let mut attempted = Vec::with_capacity(self.steps.len());
+        for step in &self.steps {
+            attempted.push(step.clone());
+            let outcome = step_fn(step.as_str()).await;
+            last_model = step.clone();
+            last = outcome;
+            if !self.should_escalate(&last) {
+                break;
+            }
+            tracing::debug!(
+                step = %last_model,
+                logprob = last.logprob,
+                threshold = self.threshold,
+                "cascade escalating"
+            );
+        }
+        CascadeResult { outcome: last, model_used: last_model, steps_attempted: attempted }
     }
 }
 
@@ -72,7 +124,43 @@ mod tests {
     #[test]
     fn escalates_below_threshold() {
         let casc = Cascade { steps: vec![], threshold: -1.0 };
-        assert!(casc.should_escalate(-1.5));
-        assert!(!casc.should_escalate(-0.5));
+        let low = StepOutcome { tokens: 5, logprob: -1.5, ..Default::default() };
+        let hi  = StepOutcome { tokens: 5, logprob: -0.5, ..Default::default() };
+        assert!(casc.should_escalate(&low));
+        assert!(!casc.should_escalate(&hi));
+    }
+
+    #[tokio::test]
+    async fn run_short_circuits_on_high_confidence() {
+        let casc = Cascade { steps: vec!["s".into(), "m".into(), "l".into()], threshold: -1.0 };
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let calls = AtomicU32::new(0);
+        let r = casc.run(|step| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            let s = step.to_string();
+            async move {
+                StepOutcome { text: s.clone(), tokens: 3, logprob: -0.1, finish: "stop".into() }
+            }
+        }).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(r.model_used, "s");
+    }
+
+    #[tokio::test]
+    async fn run_escalates_through_chain() {
+        let casc = Cascade { steps: vec!["s".into(), "m".into(), "l".into()], threshold: -1.0 };
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let calls = AtomicU32::new(0);
+        let r = casc.run(|step| {
+            let n = calls.fetch_add(1, Ordering::SeqCst);
+            let s = step.to_string();
+            async move {
+                let lp = if n < 2 { -2.0 } else { -0.1 };
+                StepOutcome { text: s.clone(), tokens: 3, logprob: lp, finish: "stop".into() }
+            }
+        }).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        assert_eq!(r.model_used, "l");
+        assert_eq!(r.steps_attempted, vec!["s".to_string(), "m".into(), "l".into()]);
     }
 }

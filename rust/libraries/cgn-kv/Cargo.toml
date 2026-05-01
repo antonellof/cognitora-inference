@@ -14,6 +14,8 @@ description = "Cognitora: KV cache primitives, RocksDB index, QUIC transfer wire
 # trip on the bundled rocksdb 8.10 source).
 default          = ["persistent-index"]
 persistent-index = ["dep:rocksdb"]
+# RDMA fast-path (Linux + ibverbs). Off by default; QUIC handles transfers.
+rdma             = []
 
 [dependencies]
 cgn-core  = { workspace = true }

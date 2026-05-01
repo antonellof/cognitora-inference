@@ -15,4 +15,4 @@ pub mod score;
 pub mod selector;
 
 pub use score::{score_node, Score};
-pub use selector::{pick, RoutingDecision};
+pub use selector::{pick, pick_pair, RoutingDecision};

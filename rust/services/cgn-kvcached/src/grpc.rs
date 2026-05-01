@@ -82,24 +82,82 @@ impl Kv for KvSvc {
         Ok(Response::new(BlockInfoList { entries }))
     }
 
-    async fn promote(&self, _req: Request<Hash>) -> Result<Response<PStatus>, Status> {
-        Ok(Response::new(PStatus { code: 0, message: "ok".into() }))
+    async fn promote(&self, req: Request<Hash>) -> Result<Response<PStatus>, Status> {
+        let h = req.into_inner();
+        let digest = digest_from_bytes(&h.value)?;
+        let addr = cgn_kv::BlockAddress { digest, layer: 0 };
+        // Promotion currently means: ensure the block is in RAM. With only
+        // RAM + index tiers wired, this is a no-op when present and a
+        // miss otherwise.
+        let resp = match self.store.lookup(&addr) {
+            Some(_) => PStatus { code: 0, message: "promoted".into() },
+            None    => PStatus { code: 5, message: "miss".into() },
+        };
+        Ok(Response::new(resp))
     }
 
-    async fn push(&self, _req: Request<PushSpec>) -> Result<Response<PStatus>, Status> {
-        Ok(Response::new(PStatus { code: 0, message: "ok".into() }))
+    async fn push(&self, req: Request<PushSpec>) -> Result<Response<PStatus>, Status> {
+        let spec = req.into_inner();
+        let digest = digest_from_bytes(&spec.prefix_hash)?;
+        let addr = cgn_kv::BlockAddress { digest, layer: 0 };
+        let bytes = match self.store.ram.get_bytes(&addr) {
+            Some(b) => b,
+            None => return Ok(Response::new(PStatus {
+                code: 5,
+                message: "block not resident".into(),
+            })),
+        };
+        let remote: SocketAddr = match spec.target_endpoint.parse() {
+            Ok(a) => a,
+            Err(e) => return Ok(Response::new(PStatus {
+                code: 3, message: format!("bad target_endpoint: {e}"),
+            })),
+        };
+        match crate::transport::peer_push(remote, addr, bytes).await {
+            Ok(()) => Ok(Response::new(PStatus { code: 0, message: "pushed".into() })),
+            Err(e) => Ok(Response::new(PStatus {
+                code: 14, message: format!("push: {e}"),
+            })),
+        }
     }
 
-    async fn pull(&self, _req: Request<PullSpec>) -> Result<Response<PStatus>, Status> {
-        Ok(Response::new(PStatus { code: 0, message: "ok".into() }))
+    async fn pull(&self, req: Request<PullSpec>) -> Result<Response<PStatus>, Status> {
+        let spec = req.into_inner();
+        let digest = digest_from_bytes(&spec.prefix_hash)?;
+        let addr = cgn_kv::BlockAddress { digest, layer: 0 };
+        let remote: SocketAddr = match spec.source_endpoint.parse() {
+            Ok(a) => a,
+            Err(e) => return Ok(Response::new(PStatus {
+                code: 3, message: format!("bad source_endpoint: {e}"),
+            })),
+        };
+        match crate::transport::peer_pull(remote, addr).await {
+            Ok(bytes) if bytes.is_empty() => Ok(Response::new(PStatus {
+                code: 5, message: "peer returned empty".into(),
+            })),
+            Ok(bytes) => {
+                if let Err(e) = self.store.put_ram(addr, bytes, "") {
+                    return Ok(Response::new(PStatus {
+                        code: 13, message: format!("local insert: {e}"),
+                    }));
+                }
+                Ok(Response::new(PStatus { code: 0, message: "pulled".into() }))
+            }
+            Err(e) => Ok(Response::new(PStatus {
+                code: 14, message: format!("pull: {e}"),
+            })),
+        }
     }
 
     async fn stats(&self, _req: Request<StatsRequest>) -> Result<Response<StatsResponse>, Status> {
         Ok(Response::new(StatsResponse {
             ram_used_bytes: self.store.ram.used_bytes(),
             ram_cap_bytes:  self.store.ram.capacity_bytes(),
-            ssd_used_bytes: 0, ssd_cap_bytes: 0,
-            hot_blocks: 0, warm_blocks: 0, cold_blocks: 0,
+            ssd_used_bytes: self.store.ssd.used_bytes(),
+            ssd_cap_bytes:  self.store.ssd.capacity(),
+            hot_blocks: 0,
+            warm_blocks: self.store.ram.block_count() as u64,
+            cold_blocks: 0,
             hits: 0, misses: 0, evictions: 0,
             bytes_pushed: 0, bytes_pulled: 0,
         }))

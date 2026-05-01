@@ -8,31 +8,55 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use cgn_core::{config::KvConfig, Error, Result};
+use cgn_core::{config::KvConfig, Result};
 use cgn_kv::{
     block::{BlockAddress, BlockHandle, BlockMeta},
+    ssd::SsdTier,
     tier::{RamTier, Tier, TierKind},
 };
 
 pub struct Store {
-    pub ram:     Arc<RamTier>,
-    pub index:   IndexImpl,
-    pub ssd_dir: std::path::PathBuf,
+    pub ram:   Arc<RamTier>,
+    pub ssd:   Arc<SsdTier>,
+    pub index: IndexImpl,
 }
 
 impl Store {
     pub async fn open(cfg: &KvConfig) -> Result<Self> {
-        std::fs::create_dir_all(&cfg.ssd_dir)
-            .map_err(|e| Error::Internal(format!("ssd dir: {e}")))?;
+        let ssd_cap = cfg.ssd_gib as u64 * 1024 * 1024 * 1024;
+        let ssd = Arc::new(SsdTier::open(&cfg.ssd_dir, ssd_cap)?);
         let index = IndexImpl::open(&cfg.index_dir)?;
         let ram = Arc::new(RamTier::new(cfg.ram_gib as u64 * 1024 * 1024 * 1024));
-        Ok(Self { ram, index, ssd_dir: cfg.ssd_dir.clone() })
+        Ok(Self { ram, ssd, index })
     }
 
+    /// Probe RAM, SSD, then the persistent index. Returns a handle when
+    /// present in any tier.
     pub fn lookup(&self, addr: &BlockAddress) -> Option<BlockHandle> {
         if let Some(h) = self.ram.get(addr) { return Some(h); }
         if let Ok(Some(meta)) = self.index.get(addr) {
             return Some(BlockHandle { addr: *addr, meta });
+        }
+        None
+    }
+
+    /// Async lookup that may hit SSD. Returns the bytes (and promotes
+    /// them into RAM as a side effect) when the block is found cold.
+    pub async fn lookup_with_promote(&self, addr: &BlockAddress) -> Option<bytes::Bytes> {
+        if let Some(b) = self.ram.get_bytes(addr) { return Some(b); }
+        if let Ok(Some(b)) = self.ssd.read(addr).await {
+            // Promote: bring back into RAM, update tier hint.
+            let bytes = b.clone();
+            self.ram.put(*addr, bytes);
+            let _ = self.index.put(addr, &BlockMeta {
+                model: String::new(),
+                layer: addr.layer,
+                bytes: b.len() as u64,
+                created_unix: chrono::Utc::now().timestamp() as u64,
+                last_seen_unix: chrono::Utc::now().timestamp() as u64,
+                tier: TierKind::Ram,
+            });
+            return Some(b);
         }
         None
     }
@@ -51,17 +75,33 @@ impl Store {
         Ok(())
     }
 
-    pub fn forget(&self, addr: &BlockAddress) -> Result<()> {
+    /// Spill a block from RAM to SSD. Used by the eviction policy.
+    pub async fn spill_to_ssd(&self, addr: BlockAddress, model: &str) -> Result<()> {
+        let Some(bytes) = self.ram.get_bytes(&addr) else { return Ok(()); };
+        self.ssd.write(&addr, &bytes).await?;
+        self.ram.evict(&addr);
+        self.index.put(&addr, &BlockMeta {
+            model: model.to_string(),
+            layer: addr.layer,
+            bytes: bytes.len() as u64,
+            created_unix: chrono::Utc::now().timestamp() as u64,
+            last_seen_unix: chrono::Utc::now().timestamp() as u64,
+            tier: TierKind::Ssd,
+        })?;
+        Ok(())
+    }
+
+    pub async fn forget(&self, addr: &BlockAddress) -> Result<()> {
         self.ram.evict(addr);
+        self.ssd.evict(addr).await?;
         self.index.delete(addr)
     }
 
     pub fn ssd_path(&self, addr: &BlockAddress) -> std::path::PathBuf {
-        let hex = cgn_core::hash::short(&addr.digest);
-        self.ssd_dir.join(format!("{}-{}.kvb", hex, addr.layer))
+        self.ssd.path_for(addr)
     }
 
-    pub fn _ssd_dir(&self) -> &Path { &self.ssd_dir }
+    pub fn ssd_root(&self) -> &Path { self.ssd.root() }
 }
 
 // ---------------------------------------------------------------------------

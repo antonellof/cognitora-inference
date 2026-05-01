@@ -71,6 +71,18 @@ impl RamTier {
             .map(|d| d.as_secs())
             .unwrap_or_default()
     }
+
+    /// Return a clone of the bytes for `addr`, or `None` on miss.
+    /// Used by the QUIC transport to serve `Pull` requests without
+    /// re-hashing the prefix.
+    pub fn get_bytes(&self, addr: &BlockAddress) -> Option<bytes::Bytes> {
+        let slot = self.inner.get(addr)?;
+        slot.last.store(Self::now(), std::sync::atomic::Ordering::Relaxed);
+        Some(slot.bytes.clone())
+    }
+
+    /// Approximate count of resident blocks.
+    pub fn block_count(&self) -> usize { self.inner.len() }
 }
 
 impl Tier for RamTier {

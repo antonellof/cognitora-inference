@@ -13,22 +13,81 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cgn_core::Result;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::supervisor::Supervisor;
 
+/// Heartbeat interval; the etcd lease TTL is 3× this so two missed
+/// heartbeats still leave the entry visible.
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+
 pub async fn loop_emit(supervisor: Arc<Supervisor>) -> Result<()> {
-    let interval = Duration::from_secs(5);
+    let endpoints = supervisor.cfg.cluster.etcd_endpoints.clone();
+    if endpoints.is_empty() {
+        info!("no etcd endpoints configured; running in single-node mode");
+        loop {
+            let ready = supervisor.engine.ready().await;
+            let _gpu = read_nvml_blocking().unwrap_or_default();
+            debug!(ready, "single-node health snapshot");
+            tokio::time::sleep(HEARTBEAT_INTERVAL).await;
+        }
+    }
+
+    // Outer loop reconnects on lease loss / etcd hiccups.
+    loop {
+        match emit_with_lease(&supervisor, &endpoints).await {
+            Ok(()) => {
+                warn!("etcd publisher exited cleanly; restarting");
+            }
+            Err(e) => {
+                warn!(error=?e, "etcd publisher died; reconnecting in 5s");
+            }
+        }
+        tokio::time::sleep(HEARTBEAT_INTERVAL).await;
+    }
+}
+
+/// Acquire a TTL lease, write the node entry against it, and keep it
+/// alive until the connection breaks.
+async fn emit_with_lease(
+    supervisor: &Supervisor,
+    endpoints: &[String],
+) -> Result<()> {
+    use cgn_core::Error;
+    let mut client = etcd_client::Client::connect(endpoints, None).await
+        .map_err(|e| Error::Etcd(format!("connect: {e}")))?;
+
+    // Lease lives 3× heartbeat. KeepAlive ticks every heartbeat.
+    let lease_ttl = (HEARTBEAT_INTERVAL.as_secs() as i64) * 3;
+    let lease = client.lease_grant(lease_ttl, None).await
+        .map_err(|e| Error::Etcd(format!("lease_grant: {e}")))?;
+    let lease_id = lease.id();
+
+    let (mut keeper, mut stream) = client.lease_keep_alive(lease_id).await
+        .map_err(|e| Error::Etcd(format!("lease_keep_alive: {e}")))?;
+    info!(%lease_id, ttl = lease_ttl, "etcd lease acquired");
 
     loop {
         let ready = supervisor.engine.ready().await;
         let gpu = read_nvml_blocking().unwrap_or_default();
         debug!(ready, ?gpu, "health snapshot");
 
-        if let Err(e) = publish_to_etcd(&supervisor, ready, &gpu).await {
-            warn!(error=?e, "etcd publish failed");
+        if let Err(e) = publish_one(&mut client, supervisor, lease_id, ready, &gpu).await {
+            warn!(error=?e, "publish failed; will retry");
         }
-        tokio::time::sleep(interval).await;
+
+        // Renew the lease.
+        keeper.keep_alive().await
+            .map_err(|e| Error::Etcd(format!("lease keep_alive: {e}")))?;
+        // Drain any pending response so the server-side stream stays healthy.
+        match tokio::time::timeout(Duration::from_millis(100), stream.message()).await {
+            Ok(Ok(Some(_))) => {}
+            Ok(Ok(None)) => return Ok(()),
+            Ok(Err(e)) => return Err(Error::Etcd(format!("keep_alive recv: {e}"))),
+            Err(_) => {}
+        }
+
+        tokio::time::sleep(HEARTBEAT_INTERVAL).await;
     }
 }
 
@@ -61,15 +120,16 @@ fn read_nvml_blocking() -> Option<GpuSnapshot> {
     Some(out)
 }
 
-async fn publish_to_etcd(
+/// Write the node-health entry under the lease, so it disappears
+/// automatically if the agent dies or partitions away.
+async fn publish_one(
+    client: &mut etcd_client::Client,
     supervisor: &Supervisor,
+    lease_id: i64,
     ready: bool,
     gpu: &GpuSnapshot,
 ) -> Result<()> {
     use cgn_core::Error;
-    let endpoints = &supervisor.cfg.cluster.etcd_endpoints;
-    if endpoints.is_empty() { return Ok(()); }
-
     let value = serde_json::json!({
         "node_id": supervisor.cfg.agent.node_id,
         "address": format!("https://{}", supervisor.cfg.agent.listen),
@@ -81,12 +141,10 @@ async fn publish_to_etcd(
         "total_blocks": 0u32,
         "power_watts": gpu.power_watts,
         "ready": ready,
+        "version": env!("CARGO_PKG_VERSION"),
     });
-
-    let mut client = etcd_client::Client::connect(endpoints, None).await
-        .map_err(|e| Error::Etcd(format!("connect: {e}")))?;
     let key = format!("{}{}", cgn_core::etcd_keys::NODES, supervisor.cfg.agent.node_id);
-    let opts = etcd_client::PutOptions::new();
+    let opts = etcd_client::PutOptions::new().with_lease(lease_id);
     client.put(key, value.to_string(), Some(opts)).await
         .map_err(|e| Error::Etcd(format!("put: {e}")))?;
     Ok(())

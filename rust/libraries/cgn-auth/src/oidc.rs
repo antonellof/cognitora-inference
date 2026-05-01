@@ -17,10 +17,17 @@ use super::{Principal, PrincipalKind};
 
 #[derive(Clone)]
 pub struct OidcVerifier {
-    issuer:   String,
-    audience: Option<String>,
-    jwks:     Arc<ArcSwap<JwksCache>>,
-    refresh:  Arc<Mutex<Instant>>,
+    issuer:        String,
+    audience:      Option<String>,
+    /// Optional mapping from a JWT group claim to a tenant scope (the
+    /// resulting scope set on the principal). When `None`, the
+    /// principal carries the raw `scope` claim instead.
+    group_to_scope: Option<Vec<(String, String)>>,
+    /// Name of the JWT claim that carries group memberships. Defaults
+    /// to `"groups"` (which is what most IdPs emit).
+    groups_claim:  String,
+    jwks:          Arc<ArcSwap<JwksCache>>,
+    refresh:       Arc<Mutex<Instant>>,
 }
 
 #[derive(Default)]
@@ -64,9 +71,29 @@ impl OidcVerifier {
         Self {
             issuer:   issuer.into(),
             audience,
+            group_to_scope: None,
+            groups_claim:   "groups".into(),
             jwks:     Arc::new(ArcSwap::from_pointee(JwksCache::default())),
             refresh:  Arc::new(Mutex::new(Instant::now() - Duration::from_secs(86400))),
         }
+    }
+
+    /// Configure a group → scope translation. Each `(group, scope)` pair
+    /// is checked against the JWT's group claim; matching pairs add the
+    /// scope to the issued principal. Tenant-mapped clusters use this
+    /// to bind IdP groups (`cognitora-tenant-acme`) to internal scopes
+    /// (`tenant:acme`).
+    pub fn with_group_scope_map(mut self, mapping: Vec<(String, String)>) -> Self {
+        self.group_to_scope = Some(mapping);
+        self
+    }
+
+    /// Override the JWT claim name that carries group memberships.
+    /// Default is `"groups"` (Auth0, Keycloak, Okta). Some IdPs use
+    /// `"cognito:groups"` or `"https://hasura.io/jwt/claims/groups"`.
+    pub fn with_groups_claim(mut self, claim: impl Into<String>) -> Self {
+        self.groups_claim = claim.into();
+        self
     }
 
     pub async fn verify(&self, token: &str) -> Result<Principal> {
@@ -89,10 +116,22 @@ impl OidcVerifier {
         if let Some(aud) = &self.audience { v.set_audience(&[aud]); }
         let token_data = decode::<Claims>(token, &entry.key, &v)
             .map_err(|e| Error::InvalidArgument(format!("oidc verify: {e}")))?;
-        let scopes = token_data.claims
+        let mut scopes: Vec<String> = token_data.claims
             .scope
             .map(|s| s.split_whitespace().map(String::from).collect())
             .unwrap_or_default();
+
+        // Group-claim derived scopes: read the configured groups claim
+        // out of the raw `extra` map (jsonwebtoken doesn't auto-deserialise
+        // unknown claims). Map each matching group to its scope.
+        if let Some(mapping) = &self.group_to_scope {
+            let groups = extract_groups(&token_data.claims.extra, &self.groups_claim);
+            for (g, s) in mapping {
+                if groups.iter().any(|x| x == g) && !scopes.iter().any(|x| x == s) {
+                    scopes.push(s.clone());
+                }
+            }
+        }
 
         Ok(Principal {
             subject: token_data.claims.sub,
@@ -127,6 +166,23 @@ impl OidcVerifier {
 struct Claims {
     sub:   String,
     scope: Option<String>,
+    /// Catch-all bag for non-standard claims (groups, custom roles, …).
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Extract a list of group strings from the raw claim map. Accepts
+/// either a JSON array (`["a","b"]`) or a space-separated string —
+/// both shapes occur in the wild.
+fn extract_groups(extra: &serde_json::Map<String, serde_json::Value>, claim: &str) -> Vec<String> {
+    let Some(v) = extra.get(claim) else { return Vec::new(); };
+    match v {
+        serde_json::Value::Array(arr) => arr.iter()
+            .filter_map(|x| x.as_str().map(String::from))
+            .collect(),
+        serde_json::Value::String(s) => s.split_whitespace().map(String::from).collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn build_entry(k: &Jwk) -> Option<JwkEntry> {

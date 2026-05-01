@@ -12,6 +12,12 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "redis-backend")]
+pub mod redis_backend;
+
+#[cfg(feature = "redis-backend")]
+pub use redis_backend::RedisLimiter;
+
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
