@@ -54,7 +54,8 @@ log "out    = ${DIST}"
 log "building binaries (cargo build --release --no-default-features)"
 cd "$ROOT"
 cargo build --release --no-default-features \
-  -p cgn-router -p cgn-agent -p cgn-kvcached -p cgn-ctl
+  -p cgn-router -p cgn-agent -p cgn-kvcached \
+  -p cgn-metrics -p cgn-ctl -p cgn-operator
 
 # ---- pack -----------------------------------------------------------------
 
@@ -64,14 +65,19 @@ WORK="${DIST}/${STAGING}"
 rm -rf "$WORK"
 mkdir -p "$WORK"
 
-for b in cgn-router cgn-agent cgn-kvcached cgn-ctl; do
+missing=()
+for b in cgn-router cgn-agent cgn-kvcached cgn-metrics cgn-ctl cgn-operator; do
   src="${ROOT}/target/release/${b}"
   if [ -x "$src" ]; then
     cp "$src" "${WORK}/${b}"
   else
-    echo "warn: missing binary $src" >&2
+    missing+=("$b")
   fi
 done
+if [ "${#missing[@]}" -gt 0 ]; then
+  echo "error: missing release binaries: ${missing[*]}" >&2
+  exit 1
+fi
 
 cp "${ROOT}/LICENSE" "${WORK}/" 2>/dev/null || true
 {

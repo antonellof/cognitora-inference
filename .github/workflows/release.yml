@@ -69,17 +69,19 @@ jobs:
           fi
 
       - name: Build binaries
-        # Build only the binaries we ship. `--no-default-features` mirrors
+        # Build all six binaries we ship. `--no-default-features` mirrors
         # the local dev build and avoids dragging in optional features
-        # (redis-backend, k8s controller, etc.) that aren't needed for
-        # the standard release.
+        # (redis-backend, etc.) that are not needed for the standard
+        # release. Must stay in sync with `BINS` in deploy/installer/install.sh.
         run: |
           cargo build --release --no-default-features \
             --target ${{ matrix.target }} \
             -p cgn-router \
             -p cgn-agent \
             -p cgn-kvcached \
-            -p cgn-ctl
+            -p cgn-metrics \
+            -p cgn-ctl \
+            -p cgn-operator
 
       - name: Pack archive
         id: pack
@@ -90,15 +92,20 @@ jobs:
           STAGING="cognitora-${TAG}-${{ matrix.target }}"
           mkdir -p "dist/${STAGING}"
 
-          BINS=(cgn-router cgn-agent cgn-kvcached cgn-ctl)
+          BINS=(cgn-router cgn-agent cgn-kvcached cgn-metrics cgn-ctl cgn-operator)
+          missing=()
           for b in "${BINS[@]}"; do
             src="target/${{ matrix.target }}/release/${b}"
             if [ -x "$src" ]; then
               cp "$src" "dist/${STAGING}/${b}"
             else
-              echo "::warning ::missing binary: $src"
+              missing+=("$b")
             fi
           done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error ::missing release binaries: ${missing[*]}"
+            exit 1
+          fi
 
           # Bundle license + a small README so the tarball is self-contained.
           cp LICENSE "dist/${STAGING}/" 2>/dev/null || true
@@ -254,7 +261,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        bin: [cgn-router, cgn-agent, cgn-kvcached, cgn-ctl]
+        bin: [cgn-router, cgn-agent, cgn-kvcached, cgn-metrics, cgn-ctl, cgn-operator]
     steps:
       - uses: actions/checkout@v4
 
