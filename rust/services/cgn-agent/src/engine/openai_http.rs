@@ -1,7 +1,18 @@
-//! vLLM engine driver.
+//! Generic driver for any OpenAI-compatible HTTP engine.
 //!
-//! Talks to a locally-spawned vLLM process via its OpenAI-compatible HTTP
-//! surface. Streaming generation uses vLLM's SSE response on `/v1/completions`.
+//! vLLM, llama.cpp's `python -m llama_cpp.server`, the standalone
+//! `llama-server` binary, sgLang, TGI, and several proxy services all
+//! expose a `/v1/completions` route that streams Server-Sent Events with
+//! the same shape:
+//!
+//! ```text
+//! data: {"choices":[{"text":"...","finish_reason":null}]}
+//!
+//! data: [DONE]
+//! ```
+//!
+//! Cognitora doesn't care which engine is on the other end — this driver
+//! hits whichever HTTP server is running at `engine.url`.
 
 use std::time::Duration;
 
@@ -15,13 +26,17 @@ use tracing::warn;
 
 use super::{Engine, GenerateReq, ModelSpec};
 
-pub struct VllmEngine {
+/// HTTP driver for any OpenAI-compatible inference engine.
+pub struct OpenAiHttpEngine {
     client: reqwest::Client,
     base: String,
+    /// Logged in tracing spans and used for metric labels. e.g. "vllm",
+    /// "llama_cpp", "openai_compat".
+    kind: &'static str,
 }
 
-impl VllmEngine {
-    pub fn new(base_url: impl Into<String>) -> Result<Self> {
+impl OpenAiHttpEngine {
+    pub fn new(kind: &'static str, base_url: impl Into<String>) -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(600)) // long-running streams
             .pool_max_idle_per_host(8)
@@ -30,20 +45,21 @@ impl VllmEngine {
         Ok(Self {
             client,
             base: base_url.into().trim_end_matches('/').to_string(),
+            kind,
         })
     }
 }
 
 #[async_trait]
-impl Engine for VllmEngine {
+impl Engine for OpenAiHttpEngine {
     fn name(&self) -> &'static str {
-        "vllm"
+        self.kind
     }
 
     async fn load_model(&self, _spec: ModelSpec) -> Result<()> {
-        // vLLM loads its model when spawned; the supervisor handles process
-        // lifecycle. This call exists to support future engines (SGLang)
-        // that accept dynamic model swaps over their control plane.
+        // Engines load their model when spawned; the supervisor handles
+        // process lifecycle. This call exists to support engines that
+        // accept dynamic model swaps over their control plane.
         Ok(())
     }
 
@@ -66,12 +82,12 @@ impl Engine for VllmEngine {
             .json(&body)
             .send()
             .await
-            .map_err(|e| Error::Unavailable(format!("vllm post: {e}")))?;
+            .map_err(|e| Error::Unavailable(format!("{} post: {e}", self.kind)))?;
 
         if !resp.status().is_success() {
             let s = resp.status();
             let txt = resp.text().await.unwrap_or_default();
-            return Err(Error::Internal(format!("vllm status {s}: {txt}")));
+            return Err(Error::Internal(format!("{} status {s}: {txt}", self.kind)));
         }
 
         let mut stream = resp.bytes_stream();
@@ -79,7 +95,7 @@ impl Engine for VllmEngine {
         let id = req.id.clone();
 
         while let Some(item) = stream.next().await {
-            let bytes = item.map_err(|e| Error::Internal(format!("vllm stream: {e}")))?;
+            let bytes = item.map_err(|e| Error::Internal(format!("{} stream: {e}", self.kind)))?;
             buf.extend_from_slice(&bytes);
             // SSE frames are `data: <json>\n\n`. Pop complete frames.
             while let Some(idx) = find_subseq(&buf, b"\n\n") {
@@ -102,7 +118,7 @@ impl Engine for VllmEngine {
                         .await;
                     return Ok(());
                 }
-                match serde_json::from_str::<VllmStreamFrame>(payload) {
+                match serde_json::from_str::<StreamFrame>(payload) {
                     Ok(f) => {
                         for choice in f.choices {
                             let token = Token {
@@ -118,7 +134,12 @@ impl Engine for VllmEngine {
                             }
                         }
                     }
-                    Err(e) => warn!(error=?e, payload, "skipping unparsable vllm frame"),
+                    Err(e) => warn!(
+                        error=?e,
+                        engine=self.kind,
+                        payload,
+                        "skipping unparsable engine frame"
+                    ),
                 }
             }
         }
@@ -126,11 +147,24 @@ impl Engine for VllmEngine {
     }
 
     async fn ready(&self) -> bool {
-        let url = format!("{}/health", self.base);
-        matches!(
-            self.client.get(&url).timeout(Duration::from_secs(2)).send().await,
-            Ok(r) if r.status().is_success()
-        )
+        // Try the standard OpenAI-style endpoints. vLLM and llama.cpp both
+        // expose /health; if it's missing we fall back to /v1/models which
+        // every OpenAI-compatible server implements.
+        for path in ["/health", "/v1/models"] {
+            let url = format!("{}{}", self.base, path);
+            if let Ok(r) = self
+                .client
+                .get(&url)
+                .timeout(Duration::from_secs(2))
+                .send()
+                .await
+            {
+                if r.status().is_success() {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 
@@ -139,12 +173,12 @@ fn find_subseq(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 #[derive(Deserialize)]
-struct VllmStreamFrame {
-    choices: Vec<VllmChoice>,
+struct StreamFrame {
+    choices: Vec<Choice>,
 }
 
 #[derive(Deserialize)]
-struct VllmChoice {
+struct Choice {
     #[serde(default)]
     text: Option<String>,
     #[serde(default)]

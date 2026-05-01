@@ -22,6 +22,7 @@ pub struct Config {
     pub cluster: ClusterConfig,
     pub router: RouterConfig,
     pub agent: AgentConfig,
+    pub engine: EngineConfig,
     pub kv: KvConfig,
     pub security: SecurityConfig,
     pub metrics: MetricsConfig,
@@ -242,35 +243,136 @@ impl Default for AutoscalerConfig {
 #[serde(default)]
 pub struct AgentConfig {
     pub listen: String,
-    pub vllm_url: String,
-    pub vllm_cmd: Vec<String>,
     pub role: NodeRoleCfg,
     pub node_id: String,
     pub kv_uds: PathBuf,
     pub gpu_index: Option<u32>,
+
+    // Legacy aliases for the engine block. If `[engine]` is unset we fall
+    // back to these fields so older configs keep working.
+    #[serde(default)]
+    pub vllm_url: Option<String>,
+    #[serde(default)]
+    pub vllm_cmd: Option<Vec<String>>,
 }
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             listen: format!("0.0.0.0:{}", crate::ports::AGENT_GRPC),
-            vllm_url: format!("http://127.0.0.1:{}", crate::ports::VLLM_HTTP),
-            vllm_cmd: default_vllm_cmd(),
             role: NodeRoleCfg::Both,
             node_id: default_node_id("agent"),
             kv_uds: PathBuf::from("/run/cognitora/kv.sock"),
             gpu_index: None,
+            vllm_url: None,
+            vllm_cmd: None,
         }
     }
 }
-fn default_vllm_cmd() -> Vec<String> {
-    vec![
-        "vllm".into(),
-        "serve".into(),
-        "{model}".into(),
-        "--tensor-parallel-size".into(),
-        "{tp}".into(),
-        "--enable-chunked-prefill".into(),
-    ]
+
+// ---------------------------------------------------------------------------
+// Engine (vLLM, llama.cpp, or any OpenAI-compatible HTTP server)
+// ---------------------------------------------------------------------------
+
+/// Inference engine driver.
+///
+/// Cognitora's `cgn-agent` proxies to an OpenAI-compatible HTTP server. This
+/// block describes which engine to spawn and how. Three kinds are supported:
+///
+/// * `vllm`          — the agent spawns `vllm serve <model> ...` (GPU).
+/// * `llama_cpp`     — the agent spawns `python -m llama_cpp.server` or a
+///                     standalone `llama-server` binary (CPU or GPU offload).
+/// * `openai_compat` — the agent does not spawn anything; it just proxies to
+///                     `engine.url`. Use this when the engine is managed by
+///                     systemd / Kubernetes / a sidecar.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EngineConfig {
+    pub kind: EngineKind,
+    /// HTTP base URL where the engine exposes the OpenAI surface.
+    pub url: String,
+    /// vLLM-specific knobs (used when `kind = "vllm"`).
+    pub vllm: VllmEngineConfig,
+    /// llama.cpp-specific knobs (used when `kind = "llama_cpp"`).
+    pub llama_cpp: LlamaCppEngineConfig,
+}
+impl Default for EngineConfig {
+    fn default() -> Self {
+        Self {
+            kind: EngineKind::Vllm,
+            url: format!("http://127.0.0.1:{}", crate::ports::VLLM_HTTP),
+            vllm: VllmEngineConfig::default(),
+            llama_cpp: LlamaCppEngineConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EngineKind {
+    Vllm,
+    LlamaCpp,
+    OpenaiCompat,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VllmEngineConfig {
+    /// Path or PATH-name of the `vllm` CLI. Default: `vllm`.
+    pub binary: String,
+    /// Arguments appended after the auto-rendered `serve <model> --tp <N>
+    /// --max-model-len <M>` flags.
+    pub extra_args: Vec<String>,
+}
+impl Default for VllmEngineConfig {
+    fn default() -> Self {
+        Self {
+            binary: "vllm".into(),
+            extra_args: vec!["--enable-chunked-prefill".into()],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlamaCppEngineConfig {
+    /// Path or PATH-name of the python interpreter (mode = "python_server")
+    /// or the standalone server binary (mode = "binary"). Default: `python`.
+    pub binary: String,
+    /// "python_server" → invoked as `<binary> -m llama_cpp.server …`.
+    /// "binary"        → invoked as `<binary> --model … --host … --port …`.
+    pub mode: LlamaCppMode,
+    pub host: String,
+    pub port: u16,
+    /// Context window. Mapped to `--n_ctx`.
+    pub n_ctx: u32,
+    /// CPU thread count. Mapped to `--n_threads`.
+    pub n_threads: u32,
+    /// GPU layer offload count. -1 = "offload everything to GPU", 0 = "CPU
+    /// only". Mapped to `--n_gpu_layers`.
+    pub n_gpu_layers: i32,
+    /// Arguments appended after the auto-rendered base flags.
+    pub extra_args: Vec<String>,
+}
+impl Default for LlamaCppEngineConfig {
+    fn default() -> Self {
+        Self {
+            binary: "python".into(),
+            mode: LlamaCppMode::PythonServer,
+            host: "127.0.0.1".into(),
+            port: crate::ports::VLLM_HTTP,
+            n_ctx: 4096,
+            n_threads: 4,
+            n_gpu_layers: 0,
+            extra_args: vec![],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LlamaCppMode {
+    PythonServer,
+    Binary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -390,6 +492,10 @@ pub struct ModelConfig {
     pub tp: u32,
     pub max_model_len: Option<u32>,
     pub extra_args: Vec<String>,
+    /// Filesystem path to the model weights. Required for `engine.kind =
+    /// "llama_cpp"` (a `.gguf` file). Optional for `vllm` (which resolves
+    /// the model name as a HuggingFace repo id).
+    pub path: Option<PathBuf>,
 }
 impl Default for ModelConfig {
     fn default() -> Self {
@@ -400,6 +506,7 @@ impl Default for ModelConfig {
             tp: 1,
             max_model_len: None,
             extra_args: vec![],
+            path: None,
         }
     }
 }

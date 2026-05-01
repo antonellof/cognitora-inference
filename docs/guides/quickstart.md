@@ -107,21 +107,50 @@ curl -N -sS http://127.0.0.1:8080/v1/chat/completions \
   }'
 ```
 
-## 7. What's next
+## 7. Run a real engine (vLLM or llama.cpp)
 
-You've now seen the gateway, the auth layer, and the routing
-contract. To go further:
+The fake engine above is fine for proving the gateway/auth/routing path,
+but for an actual model end-to-end use one of the bundled engine drivers:
 
-- **Add a real engine** → [bare-metal guide](baremetal.md) or
-  [Kubernetes guide](kubernetes.md).
+| Engine kind     | When to pick it                                              |
+| --------------- | ------------------------------------------------------------ |
+| `vllm`          | NVIDIA GPU node. The agent spawns `vllm serve <model> …`.    |
+| `llama_cpp`     | CPU node, Apple Silicon, or GPU offload via `n_gpu_layers`.  |
+| `openai_compat` | The engine is managed by systemd / k8s; the agent only proxies. |
+
+A complete two-engine example lives in
+[`examples/multi-llm`](../../examples/multi-llm/README.md). The short
+version, on a CPU box:
+
+```bash
+bash scripts/install/bootstrap-debian.sh        # apt + rustup
+bash scripts/install/install-engine-cpu.sh      # llama-cpp-python venv
+bash scripts/install/install-etcd.sh            # local etcd
+bash scripts/install/download-model.sh \
+  --gguf qwen2.5-0.5b-instruct-q4_k_m.gguf  Qwen/Qwen2.5-0.5B-Instruct-GGUF
+cargo build --release -p cgn-router -p cgn-agent --no-default-features
+bash scripts/run/up.sh examples/multi-llm
+bash examples/multi-llm/demo.sh
+```
+
+The same TOML profile boots a vLLM stack on a GPU host — only the
+`[engine]` block in `agent-*.toml` changes.
+
+## 8. What's next
+
 - **Understand the route** → [routing deep dive](../architecture/routing.md).
 - **Cluster of one becomes cluster of N** → drop the
   `etcd = []` line, point at a real etcd, and start more agents.
 - **Skim the OpenAI surface** → [API reference](../api/openai.md).
+- **Production install** → [bare-metal guide](baremetal.md) or
+  [Kubernetes guide](kubernetes.md).
 
-## 8. Tear down
+## 9. Tear down
 
 ```bash
 kill %1                                # the backgrounded router
 rm -rf /tmp/cognitora /tmp/pki
+
+# or, if you used scripts/run/up.sh:
+bash scripts/run/down.sh
 ```

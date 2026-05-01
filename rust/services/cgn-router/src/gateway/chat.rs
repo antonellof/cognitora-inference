@@ -320,7 +320,7 @@ async fn run_to_token_stream(
     impl futures::Stream<Item = Result<cgn_proto::v1::Token, tonic::Status>> + Unpin,
 > {
     use crate::disagg::{self, Plan};
-    use cgn_proto::v1::{agent_client::AgentClient, AgentGenerateRequest};
+    use cgn_proto::v1::AgentGenerateRequest;
 
     let token_ids = approximate_token_ids(&join_messages(&req.messages));
     let prompt_tokens = token_ids.len() as u32;
@@ -364,7 +364,7 @@ async fn run_to_token_stream(
     // Phase 1: prefill (only when split *and* prefill node ≠ decode node).
     let prefill_blocks: Vec<Vec<u8>> =
         if prefill_decision.node.node_id != decode_decision.node.node_id {
-            run_prefill(&prefill_decision.node.address, &req)
+            run_prefill(state.clone(), &prefill_decision.node.address, &req)
                 .await
                 .unwrap_or_default()
         } else {
@@ -373,9 +373,7 @@ async fn run_to_token_stream(
 
     // Phase 2: decode. Pass the prefill block list so the engine can
     // skip the first forward pass.
-    let mut client = AgentClient::connect(decode_decision.node.address.clone())
-        .await
-        .map_err(|e| cgn_core::Error::Unavailable(format!("agent connect: {e}")))?;
+    let mut client = state.connect_agent(&decode_decision.node.address).await?;
 
     let agent_req = AgentGenerateRequest {
         id: uuid::Uuid::new_v4().to_string(),
@@ -400,10 +398,14 @@ async fn run_to_token_stream(
 /// Issue a prefill-only request to the prefill agent and collect the
 /// returned block list. On any error returns an empty vec and the
 /// caller falls back to colocate execution.
-async fn run_prefill(address: &str, req: &cgn_proto::v1::GenerateRequest) -> Option<Vec<Vec<u8>>> {
-    use cgn_proto::v1::{agent_client::AgentClient, AgentGenerateRequest};
+async fn run_prefill(
+    state: Arc<SharedState>,
+    address: &str,
+    req: &cgn_proto::v1::GenerateRequest,
+) -> Option<Vec<Vec<u8>>> {
+    use cgn_proto::v1::AgentGenerateRequest;
 
-    let mut client = AgentClient::connect(address.to_string()).await.ok()?;
+    let mut client = state.connect_agent(address).await.ok()?;
     let prefill_req = AgentGenerateRequest {
         id: uuid::Uuid::new_v4().to_string(),
         model: req.model.clone(),

@@ -1,0 +1,39 @@
+# Agent serving Qwen2.5-0.5B via llama.cpp (CPU). To run on GPU instead,
+# set [engine].kind = "vllm", drop the [engine.llama_cpp] block, and remove
+# [models."…"].path (vLLM uses the model name as a HuggingFace repo id).
+
+[cluster]
+name           = "cognitora-multi-llm"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7080"
+role     = "both"
+node_id  = "agent-qwen"
+kv_uds   = "/tmp/cognitora-kv.sock"
+
+[engine]
+kind = "llama_cpp"
+url  = "http://127.0.0.1:8001"
+
+[engine.llama_cpp]
+binary       = "python"
+mode         = "python_server"
+host         = "127.0.0.1"
+port         = 8001
+n_ctx        = 2048
+n_threads    = 2
+n_gpu_layers = 0
+
+[models."Qwen/Qwen2.5-0.5B-Instruct"]
+tp            = 1
+max_model_len = 2048
+# Replace this with the path printed by scripts/install/download-model.sh.
+path          = "~/models/qwen2.5-0.5b-instruct-q4_k_m.gguf"

@@ -49,12 +49,25 @@ fn router(state: Arc<SharedState>) -> Router {
     let auth = build_auth_state(&state);
     let auth_active = auth.required || auth.api_keys.is_some() || auth.oidc.is_some();
 
+    let rl = cgn_ratelimit::RateLimit::new(
+        state.cfg.router.rate_limit.rps,
+        state.cfg.router.rate_limit.burst,
+    );
+
     let mut api = Router::new()
         .route("/v1/chat/completions", post(chat::completions))
         .route("/v1/completions", post(chat::completions))
         .route("/v1/embeddings", post(embed::embeddings))
         .route("/v1/models", get(models::list))
         .with_state(state.clone());
+
+    // Rate limit is applied first (innermost layer runs last on the request
+    // path; we want auth to populate the principal before the limiter keys
+    // on it via the `x-cgn-subject` header).
+    api = api.layer(axum::middleware::from_fn_with_state(
+        rl,
+        cgn_ratelimit::ratelimit_middleware,
+    ));
 
     if auth_active {
         api = api.layer(axum::middleware::from_fn_with_state(

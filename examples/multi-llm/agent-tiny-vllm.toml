@@ -1,0 +1,28 @@
+[cluster]
+name           = "cognitora-multi-llm"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7081"
+role     = "both"
+node_id  = "agent-tiny"
+kv_uds   = "/tmp/cognitora-kv.sock"
+
+[engine]
+kind = "vllm"
+url  = "http://127.0.0.1:8002"
+
+[engine.vllm]
+binary     = "vllm"
+extra_args = ["--enable-chunked-prefill", "--port", "8002", "--host", "127.0.0.1"]
+
+[models."TinyLlama/TinyLlama-1.1B-Chat-v1.0"]
+tp            = 1
+max_model_len = 4096

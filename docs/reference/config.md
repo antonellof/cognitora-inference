@@ -16,9 +16,46 @@ the canonical example with every section documented inline lives at
 | `[auth]`           | `cgn-auth`          | `cgn-router`                                 |
 | `[router.*]`       | `cgn-router`        | `cgn-router`                                 |
 | `[agent.*]`        | `cgn-agent`         | `cgn-agent`                                  |
+| `[engine.*]`       | `cgn-agent`         | `cgn-agent` (which engine to spawn / proxy)  |
 | `[kv.*]`           | `cgn-kv`            | `cgn-kvcached`                               |
 | `[metrics.*]`      | `cgn-metrics`       | `cgn-metrics`                                |
 | `[models.<name>]`  | `cgn-core::config`  | `cgn-router` (declarative model registry)    |
+
+## `[engine]` — pluggable inference engine
+
+Cognitora's `cgn-agent` is engine-agnostic: any process that exposes the
+OpenAI HTTP surface (`/v1/completions`, `/health`, `/v1/models`) plugs in.
+
+| Key                     | Type   | Default                          | Notes |
+|-------------------------|--------|----------------------------------|-------|
+| `engine.kind`           | enum   | `"vllm"`                         | One of `vllm`, `llama_cpp`, `openai_compat`. |
+| `engine.url`            | string | `http://127.0.0.1:8000`          | OpenAI HTTP base URL. |
+| `engine.vllm.binary`    | string | `"vllm"`                         | Path or PATH-name of the `vllm` CLI. |
+| `engine.vllm.extra_args`| array  | `["--enable-chunked-prefill"]`   | Appended after the auto-rendered argv. |
+| `engine.llama_cpp.binary`     | string | `"python"`                  | Python interpreter (`mode = python_server`) or `llama-server` binary (`mode = binary`). |
+| `engine.llama_cpp.mode`       | enum   | `"python_server"`           | `python_server` or `binary`. |
+| `engine.llama_cpp.host`       | string | `"127.0.0.1"`               | Where the engine listens. |
+| `engine.llama_cpp.port`       | u16    | `8000`                      | Must match `engine.url`. |
+| `engine.llama_cpp.n_ctx`      | u32    | `4096`                      | Context window. |
+| `engine.llama_cpp.n_threads`  | u32    | `4`                         | CPU thread count. |
+| `engine.llama_cpp.n_gpu_layers` | i32  | `0`                         | `0` = CPU only, `-1` = all to GPU. |
+| `engine.llama_cpp.extra_args` | array  | `[]`                        | Extra flags passed to the engine. |
+
+When `kind = "openai_compat"` the agent does **not** spawn a child process;
+it only proxies to whatever is at `engine.url`. Use this with systemd /
+Kubernetes / a sidecar that owns the engine lifecycle.
+
+### Per-model knobs
+
+`[models."<name>"].path` is required when `engine.kind = "llama_cpp"` (the
+filesystem path to a `.gguf` file). It is ignored for vLLM, which resolves
+the model name as a HuggingFace repo id.
+
+### Legacy aliases
+
+`[agent].vllm_url` and `[agent].vllm_cmd` from older configs still work
+but emit a one-time warning. Migrate them to `[engine].url` and
+`[engine.vllm].extra_args` respectively.
 
 ## Overrides
 

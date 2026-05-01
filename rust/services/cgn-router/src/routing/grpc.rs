@@ -74,7 +74,11 @@ impl Router for RouterGrpc {
             .await
             .map_err(Status::from)?;
 
-        let mut client = connect_agent(&decision.node.address).await?;
+        let mut client = self
+            .state
+            .connect_agent(&decision.node.address)
+            .await
+            .map_err(|e| Status::unavailable(format!("agent: {e}")))?;
         let resp = client.embed_via_router_compat(body).await?.into_inner();
         Ok(Response::new(resp))
     }
@@ -110,9 +114,7 @@ async fn forward(
         "forwarding to agent"
     );
 
-    let mut client = connect_agent(&decision.node.address)
-        .await
-        .map_err(|s| Error::Unavailable(format!("agent: {s}")))?;
+    let mut client = state.connect_agent(&decision.node.address).await?;
 
     let agent_req = AgentGenerateRequest {
         id: uuid::Uuid::new_v4().to_string(),
@@ -147,12 +149,6 @@ async fn forward(
         }
     }
     Ok::<_, Error>(())
-}
-
-async fn connect_agent(endpoint: &str) -> Result<AgentClient<tonic::transport::Channel>, Status> {
-    AgentClient::connect(endpoint.to_string())
-        .await
-        .map_err(|e| Status::unavailable(format!("agent connect {endpoint}: {e}")))
 }
 
 /// Join chat-style messages for prefix-hashing purposes. Stable across

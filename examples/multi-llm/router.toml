@@ -1,0 +1,34 @@
+[cluster]
+name           = "cognitora-multi-llm"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[router]
+listen_http  = "127.0.0.1:8080"
+listen_grpc  = "127.0.0.1:9090"
+listen_admin = "127.0.0.1:9091"
+node_id      = "router-multi-llm"
+
+[router.score_weights]
+kv       = 0.55
+load     = 0.25
+power    = 0.10
+capacity = 0.10
+
+[router.rate_limit]
+rps   = 50
+burst = 200
+
+# The router only needs to know which models exist. Routing decisions are
+# made dynamically against whatever agents register themselves in etcd.
+[models."Qwen/Qwen2.5-0.5B-Instruct"]
+tp = 1
+
+[models."TinyLlama/TinyLlama-1.1B-Chat-v1.0"]
+tp = 1
