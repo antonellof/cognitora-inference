@@ -117,29 +117,24 @@ cognitora/
     systemd/                  *.service units (single-node / bare metal)
     kubernetes/
       crds/                   InferenceCluster, ModelPool, RoutingPolicy
-      helm/cognitora/         Helm chart (values, templates, dashboards)
-      operator-manifests/     standalone CRD + RBAC bundle
+      helm/cognitora/         Helm chart (values, templates)
     terraform/
-      modules/                aws/, gcp/, azure/, hetzner/, baremetal/
-      examples/               single-node/, multi-node-eks/, …
+      aws/  gcp/  azure/  hetzner/  baremetal/
     installer/                install.sh (cosign-verified one-liner)
 
   docs/
     ARCHITECTURE.md           top-level architecture
-    architecture/             deep dives (protocols, kv-tiering, routing, …)
-    guides/                   quickstart, kubernetes, bare-metal, cloud/{aws,gcp,…}
-    operations/               observability, SLO, runbooks/
-    api/                      OpenAI surface, gRPC surface
-    reference/                config reference, env vars, exit codes
+    architecture/             repo-layout, security, protocols, routing, kv-tiering
+    guides/                   quickstart, kubernetes, baremetal, cloud/{aws,gcp,azure,hetzner}
+    operations/               observability, slo, runbooks/
+    api/                      openai (HTTP), grpc (internal)
+    reference/                config, env, exit-codes
 
-  ci/                         pipeline scripts and fixtures
+  configs/                    cognitora.toml.example
+  SECURITY/                   cosign.pub for release verification
+  tests/e2e/                  single_node.sh, multi_node_kv.sh
+  scripts/                    e2e-gpu.sh + dev/, bench/, release/
   .github/workflows/          ci.yml, release.yml, e2e.yml
-
-  tests/
-    e2e/  integration/  perf/ fixtures/{configs,models}/
-
-  scripts/                    dev/, bench/, release/
-  examples/                   single-node/, k8s-multi-node/, bench/
 ```
 
 ## Performance targets (CI gates)
@@ -156,12 +151,33 @@ cognitora/
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md)
-- [Repo layout](docs/architecture/repo-layout.md)
-- [Configuration reference](docs/reference/config.md)
+**Get started**
+
+- [5-minute quickstart](docs/guides/quickstart.md)
+- [Bare-metal guide](docs/guides/baremetal.md) · [Kubernetes guide](docs/guides/kubernetes.md)
+- [Cloud guides](docs/guides/cloud/) — [AWS](docs/guides/cloud/aws.md) · [GCP](docs/guides/cloud/gcp.md) · [Azure](docs/guides/cloud/azure.md) · [Hetzner](docs/guides/cloud/hetzner.md)
+
+**Architecture**
+
+- [Top-level architecture](docs/ARCHITECTURE.md) · [Repo layout](docs/architecture/repo-layout.md)
+- Deep dives: [Routing](docs/architecture/routing.md) · [KV tiering](docs/architecture/kv-tiering.md) · [Protocols](docs/architecture/protocols.md)
 - [Security model](docs/architecture/security.md)
-- [Kubernetes guide](docs/guides/kubernetes.md)
-- [Bare-metal guide](docs/guides/baremetal.md)
+
+**API**
+
+- [OpenAI HTTP surface](docs/api/openai.md) · [Internal gRPC surface](docs/api/grpc.md)
+
+**Operations**
+
+- [Observability](docs/operations/observability.md) · [SLOs](docs/operations/slo.md) · [Runbooks](docs/operations/runbooks/)
+
+**Reference**
+
+- [Configuration](docs/reference/config.md) · [Environment variables](docs/reference/env.md) · [Exit codes](docs/reference/exit-codes.md)
+
+**Project**
+
+- [Engineering plan (M1–M6)](plan.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 
 ## Status
 

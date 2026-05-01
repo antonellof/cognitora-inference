@@ -27,30 +27,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: |
           sudo apt-get update
-          sudo apt-get install -y libssl-dev clang lld pkg-config etcd-server
-      - name: Boot etcd
-        run: |
-          sudo systemctl start etcd || (
-            etcd --listen-client-urls http://127.0.0.1:2379 \
-                 --advertise-client-urls http://127.0.0.1:2379 &
-            sleep 2
-          )
-      - run: cargo build --release -p cgn-router -p cgn-ctl
-      - name: Generate dev PKI
-        run: ./target/release/cgn-ctl pki bootstrap --out-dir /tmp/pki
-      - name: Boot router
-        run: |
-          mkdir -p /etc/cognitora
-          sudo cp configs/cognitora.toml.example /etc/cognitora/cognitora.toml
-          ./target/release/cgn-router --config /etc/cognitora/cognitora.toml &
-          sleep 3
-      - name: Probe /healthz
-        run: |
-          curl -fsSL http://127.0.0.1:9091/healthz
-      - name: Probe /v1/models
-        run: |
-          curl -fsSL -H 'authorization: bearer dev' http://127.0.0.1:8080/v1/models | tee /tmp/models.json
-          test -s /tmp/models.json
+          sudo apt-get install -y libssl-dev clang lld pkg-config jq
+      - name: Single-node smoke
+        run: ./tests/e2e/single_node.sh
 
   gpu:
     name: e2e (GPU, real vLLM)

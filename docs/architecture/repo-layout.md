@@ -18,7 +18,7 @@ cognitora/
 ├── Cargo.toml              Rust workspace root
 ├── Makefile                build entrypoints
 ├── buf.yaml                proto lint
-├── rust-toolchain.toml     pinned Rust toolchain (1.79+)
+├── rust-toolchain.toml     pinned Rust toolchain (1.89+)
 ├── README.md, LICENSE
 │
 ├── proto/cognitora/v1/     gRPC source of truth
@@ -52,37 +52,36 @@ cognitora/
 │       └── cgn-power/      Redfish + IPMI power readers
 │
 ├── deploy/
-│   ├── docker/             one Dockerfile per binary (distroless)
+│   ├── docker/             Dockerfile, Dockerfile.agent (distroless / vllm)
 │   ├── systemd/            *.service units for bare-metal install
 │   ├── kubernetes/
-│   │   ├── crds/                 InferenceCluster, ModelPool, RoutingPolicy
-│   │   ├── helm/cognitora/       templates/, values.yaml, dashboards/
-│   │   └── operator-manifests/   standalone CRD + RBAC bundle
+│   │   ├── crds/           inferencecluster, modelpool, routingpolicy
+│   │   └── helm/cognitora/ templates/, values.yaml
 │   ├── terraform/
-│   │   ├── modules/{aws,gcp,azure,hetzner,baremetal}/
-│   │   └── examples/{single-node,multi-node-eks,multi-node-hetzner}/
+│   │   └── {aws,gcp,azure,hetzner,baremetal}/
 │   └── installer/install.sh      cosign-verified one-liner
 │
 ├── docs/
 │   ├── ARCHITECTURE.md
-│   ├── architecture/             repo-layout, protocols, kv-tiering, routing
-│   ├── guides/                   quickstart, kubernetes, bare-metal, cloud/
-│   ├── operations/               observability, SLO, runbooks/
-│   ├── api/                      openai.md, grpc.md
-│   └── reference/                config-ref, env-vars, exit-codes
+│   ├── architecture/       repo-layout, security, routing, kv-tiering, protocols
+│   ├── guides/             quickstart, kubernetes, baremetal, cloud/{aws,gcp,…}
+│   ├── operations/         observability, slo, runbooks/
+│   ├── api/                openai.md (HTTP), grpc.md (internal)
+│   └── reference/          config, env, exit-codes
 │
-├── ci/                     pipeline helper scripts and fixtures
-├── .github/workflows/      ci.yml, release.yml, e2e.yml
+├── configs/                cognitora.toml.example
+├── SECURITY/               cosign.pub for release verification
 │
-├── tests/
-│   ├── e2e/                full-system tests against kind + GPU runners
-│   ├── integration/        cross-service tests with mocked vLLM
-│   ├── perf/               criterion-driven perf harness
-│   └── fixtures/{configs,models}/
-│
-├── scripts/                dev/, bench/, release/
-└── examples/               single-node/, k8s-multi-node/, bench/
+├── tests/e2e/              single_node.sh, multi_node_kv.sh
+│                           (integration/, perf/, fixtures/ added in M2+)
+├── scripts/                e2e-gpu.sh
+└── .github/workflows/      ci.yml, release.yml, e2e.yml
 ```
+
+The repo deliberately ships only the directories that have content
+today. `tests/integration/`, `tests/perf/`, `tests/fixtures/`, and
+`examples/` will be added in M2 along with the work that populates
+them — see [`plan.md`](../../plan.md) for the milestone schedule.
 
 ## Conventions
 

@@ -82,4 +82,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           sudo apt-get update && sudo apt-get install -y shellcheck
-          shellcheck deploy/installer/install.sh
+          shellcheck \
+            deploy/installer/install.sh \
+            scripts/e2e-gpu.sh \
+            tests/e2e/single_node.sh \
+            tests/e2e/multi_node_kv.sh
