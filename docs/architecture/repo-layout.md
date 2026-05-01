@@ -72,16 +72,12 @@ cognitora/
 ├── configs/                cognitora.toml.example
 ├── SECURITY/               cosign.pub for release verification
 │
-├── tests/e2e/              single_node.sh, multi_node_kv.sh
-│                           (integration/, perf/, fixtures/ added in M2+)
+├── tests/
+│   ├── e2e/                single_node.sh, multi_node_kv.sh
+│   └── perf/               criterion benches (CI perf gates)
 ├── scripts/                e2e-gpu.sh
 └── .github/workflows/      ci.yml, release.yml, e2e.yml
 ```
-
-The repo deliberately ships only the directories that have content
-today. `tests/integration/`, `tests/perf/`, `tests/fixtures/`, and
-`examples/` will be added in M2 along with the work that populates
-them — see [`plan.md`](../../plan.md) for the milestone schedule.
 
 ## Conventions
 

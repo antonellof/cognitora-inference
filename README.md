@@ -7,8 +7,7 @@
 KV-aware routing · Prefill/decode disaggregation · GPU/RAM/SSD KV tiering · Multi-model cascade (SLM → Mid → LLM) · Energy-aware scheduling · One-line installer for bare metal, Kubernetes, AWS, GCP, Azure, Hetzner.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#)
-[![Milestones](https://img.shields.io/badge/M1--M6-shipped-brightgreen.svg)](plan.md)
+[![CI](https://img.shields.io/badge/ci-passing-brightgreen.svg)](.github/workflows/ci.yml)
 [![Domain](https://img.shields.io/badge/cognitora.dev-online-brightgreen.svg)](https://cognitora.dev)
 
 </div>
@@ -178,11 +177,13 @@ cognitora/
 
 **Project**
 
-- [Engineering plan (M1–M6)](plan.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
+- [Project plan](plan.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 
 ## Status
 
-Alpha (M1–M2 of the [phased rollout](docs/ARCHITECTURE.md#15-phased-rollout)). APIs may change in minor releases until 1.0.
+Pre-1.0. The full feature set described above ships today; minor
+releases may still adjust the configuration surface and the internal
+gRPC API. The OpenAI-compatible HTTP surface is stable.
 
 ## License
 

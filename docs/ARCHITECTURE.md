@@ -100,21 +100,19 @@ toward energy-efficient nodes when the operator turns the weight up.
 * All commits land on a release branch only after `clippy -D warnings`,
   `cargo test`, and `helm lint` pass in CI.
 
-## 7. Phased rollout
+## 7. Capabilities
 
-| Milestone | Scope                                                                |
-|-----------|----------------------------------------------------------------------|
-| **M1**    | Single node end-to-end: router, agent, kvcached, vLLM, OpenAI HTTP   |
-| **M2**    | Multi-node KV-aware routing + RAM/SSD tiers + Helm chart             |
-| **M3**    | QUIC/RDMA cross-node fetch + prefill/decode disagg                   |
-| **M4**    | Cascade (SLM→Mid→LLM) + multi-tenant rate limit + OIDC SSO           |
-| **M5**    | `cgn-operator` GA + multi-cluster federation                         |
-| **M6**    | Energy-aware autoscaler + per-tenant SLO admission                   |
+| Area                    | What ships                                                          |
+|-------------------------|---------------------------------------------------------------------|
+| Single-node serving     | `cgn-router`, `cgn-agent`, `cgn-kvcached`, vLLM, OpenAI HTTP/SSE    |
+| Multi-node routing      | KV-aware scoring + RAM/SSD KV tiers + Helm chart + operator         |
+| Cross-node KV transport | QUIC frame codec; RDMA behind a feature flag; prefill/decode disagg |
+| Multi-tenancy           | OIDC SSO with group → scope mapping; in-process and Redis rate limit|
+| Cascade                 | SLM → Mid → LLM via `cascade::Cascade::run`                         |
+| Kubernetes              | `cgn-operator` reconciles `InferenceCluster`, `ModelPool`, `RoutingPolicy` |
+| Federation              | Cross-cluster forwarder in `cgn-router::federation`                 |
+| Energy-aware autoscale  | Closed-loop drain hints written to etcd, picked up by the operator  |
+| SLO admission           | Per-tenant deadline propagation in `cgn-router::deadline`           |
 
-Today: M1 + M2 + M3 + M4 + M5 implementations have landed end-to-end
-(routing, KV tiering with RAM + SSD, QUIC transport, RDMA feature flag,
-cascade, Redis-backed rate limit, OIDC group claims, full operator
-reconciliation, federation forwarder). M6 ships the energy-aware
-autoscaler and deadline-aware admission as opt-in modules. The
-[`tests/perf/`](../tests/perf) harness gates every PR against the
+The [`tests/perf/`](../tests/perf) harness gates every PR against the
 performance targets in the README.

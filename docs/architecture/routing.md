@@ -95,8 +95,8 @@ into `cgn-kvcached`, and a decode agent that picks up those blocks
 trip but pays for itself on long-prompt / short-completion workloads
 because decode-only nodes can be smaller / cheaper.
 
-Today this path lives behind a feature flag while the QUIC transport
-matures (M3 milestone in [`plan.md`](../../plan.md)).
+The QUIC transport is the default; RDMA is available behind the
+`rdma` feature flag on Linux hosts with ibverbs.
 
 ## Where the code lives
 

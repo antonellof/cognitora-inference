@@ -1,10 +1,11 @@
 # Cognitora — Plan
 
-This is the canonical engineering plan. The high-level architecture
-lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); the reference
-config in [`docs/reference/config.md`](docs/reference/config.md). This
-file tracks **what** ships **when**, in what order, and what each
-milestone is gated on.
+The high-level architecture lives in
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md); the reference config in
+[`docs/reference/config.md`](docs/reference/config.md). This file
+captures the engineering pillars Cognitora is built on, the
+capabilities that ship today, the distribution channels, the explicit
+non-goals, and an index into the rest of the docs.
 
 ## Pillars (no compromises)
 
@@ -21,89 +22,23 @@ milestone is gated on.
 6. **Operator is optional.** Bare-metal first; K8s is just one
    deployment target via the Helm chart and operator.
 
-## Milestones
+## Capabilities
 
-### M1 — Single-node end-to-end (alpha) — ✅
-
-* `cgn-router` (gateway + KV-aware routing for one node).
-* `cgn-agent` (vLLM supervisor + NVML).
-* `cgn-kvcached` (RAM tier + RocksDB index).
-* `cgn-ctl pki bootstrap`, `install single-node`, `key create`.
-* OpenAI HTTP/SSE for chat + completions.
-* `cargo check --workspace` clean. CI fmt+clippy+build+test green.
-
-**Exit gate**: `tests/e2e/single_node.sh` exercises the OpenAI surface
-against a real vLLM instance and probes `/v1/models`, streaming chat,
-and a buffered chat round-trip.
-
-### M2 — Multi-node KV-aware routing (alpha → beta) — ✅
-
-* etcd-backed `NodeRegistry` with TTL-based liveness via `lease_grant`
-  + `lease_keep_alive` in `cgn-agent`'s health emitter.
-* `arc_swap`-based hot reload of `RoutingPolicy` from etcd.
-* RAM tier promotion across nodes via gRPC `Push/Pull`, backed by the
-  QUIC frame codec in `cgn-kvcached::transport`.
-* Helm chart, CRDs, operator reconciler.
-
-**Exit gate**: 4-node cluster demo (`tests/e2e/multi_node_kv.sh`)
-shows ≥ 0.55 cache hit ratio on a representative trace.
-
-### M3 — Cross-node KV transport — ✅
-
-* QUIC `Frame` codec end-to-end (header → block → ack) in
-  `cgn-kvcached::transport`.
-* RDMA transport gated behind `--features rdma` (Linux + ibverbs).
-* SSD tier as file-per-block with atomic temp-file rename
-  (`cgn_kv::SsdTier`); `io_uring` direct I/O is a future Linux-only
-  optimisation tracked under M3 follow-ups.
-* Prefill/decode disaggregation wired into `gateway::chat`: the router
-  picks a `(prefill, decode)` pair via `routing::pick_pair`, runs the
-  prefill phase against the prefill node, then proxies the decode
-  phase with the resulting block list.
-
-**Exit gate**: < 12 ms p99 1 MiB block fetch on a 10 GbE LAN.
-
-### M4 — Cascade + multi-tenancy — ✅
-
-* `cascade::Cascade::run` orchestrates SLM → Mid → LLM through
-  `chat::completions`; falls back to single-shot when no cascade is
-  configured.
-* `cgn-ratelimit` ships an in-process governor by default and a
-  `redis-backend` feature for multi-replica deployments (atomic Lua
-  token bucket, one round-trip per request).
-* OIDC verifier supports a group-claim → tenant-scope mapping
-  (`OidcVerifier::with_group_scope_map`); accepts both array and
-  space-separated string shapes for the groups claim.
-
-**Exit gate**: 3-tenant fairness benchmark with strict-SLA +
-best-effort classes; no SLA violations under contention.
-
-### M5 — Operator GA + federation — ✅
-
-* `cgn-operator` reconciles `InferenceCluster` (renders Deployment +
-  DaemonSet + Service via server-side apply), `ModelPool` (writes a
-  `cognitora-models-<name>` ConfigMap), and `RoutingPolicy` (publishes
-  to `/cognitora/routing/policy` in etcd).
-* Federation forwarder in `cgn-router::federation` picks the first
-  reachable peer router and proxies the OpenAI request unchanged.
-
-**Exit gate**: `helm upgrade` produces zero downtime in the e2e suite.
-
-### M6 — Energy-aware autoscaler — ✅
-
-* `autoscaler::spawn` runs a 30 s control loop. When the cluster's
-  average load drops below `idle_util_pct` and a node's watts exceed
-  `high_watt_threshold`, the loop writes `{drain: true}` into etcd at
-  `/cognitora/autoscaler/<node_id>`; `cgn-operator` picks it up and
-  scales the node's replica down. When traffic returns the same loop
-  flips the hint back.
-* `deadline::check` enforces per-tenant SLO admission: every request
-  carries a deadline (explicit or derived from `[router.admission]
-  ttft_slo` × `max_tokens`); requests whose estimated TTFT exceeds the
-  deadline are rejected fast instead of starving behind a noisy queue.
-
-**Exit gate**: ≥ 1.4× energy efficiency vs round-robin baseline on the
-fixture trace.
+| Area                    | What ships                                                          |
+|-------------------------|---------------------------------------------------------------------|
+| OpenAI HTTP surface     | `cgn-router` exposes `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/models`, SSE streaming |
+| KV-aware routing        | `cgn-router::routing::score` with policy hot-reload from etcd via `arc_swap` |
+| Multi-node clustering   | etcd-backed `NodeRegistry` with lease-based liveness in `cgn-agent::health` |
+| KV tiering              | RAM tier in `cgn-kv::RamTier`; SSD tier in `cgn-kv::SsdTier` (file-per-block, atomic rename); RocksDB index |
+| Cross-node KV transport | QUIC `Frame` codec in `cgn-kvcached::transport`; RDMA behind `--features rdma` |
+| Prefill/decode disagg   | `routing::pick_pair` + `gateway::chat::run_prefill` two-stage path |
+| Cascade                 | `cascade::Cascade::run` orchestrates SLM → Mid → LLM with logprob gating |
+| Multi-tenant rate limit | `cgn-ratelimit` ships an in-process governor and a `redis-backend` feature (atomic Lua token bucket) |
+| OIDC SSO                | `cgn-auth::oidc` with group-claim → tenant-scope mapping            |
+| Operator                | `cgn-operator` reconciles `InferenceCluster`, `ModelPool`, `RoutingPolicy` via server-side apply |
+| Federation              | `cgn-router::federation` proxies OpenAI requests to peer routers     |
+| Energy-aware autoscaler | `cgn-router::autoscaler` writes drain hints to etcd; operator scales replicas |
+| SLO admission           | `cgn-router::deadline` rejects fast when the estimated TTFT exceeds the per-tenant deadline |
 
 ## Operating principles
 
@@ -120,3 +55,60 @@ fixture trace.
 * **One config tree.** `cgn-core::config::Config` is the single source
   of truth. Every section is documented in
   [`configs/cognitora.toml.example`](configs/cognitora.toml.example).
+
+## Distribution channels
+
+* **Source tarballs** — multi-arch (linux x86_64/aarch64, darwin
+  x86_64/aarch64), cosign-signed, sha256-summed, attached to every
+  GitHub Release by [`.github/workflows/release.yml`](.github/workflows/release.yml).
+* **Container images** — distroless, multi-arch (`linux/amd64`,
+  `linux/arm64`), pushed to
+  `ghcr.io/<org>/{cgn-router,cgn-kvcached,cgn-metrics,cgn-ctl,cgn-operator}:<tag>`.
+* **Helm chart** — published as an OCI artifact at
+  `oci://ghcr.io/<org>/charts/cognitora`.
+* **One-liner installer** — [`deploy/installer/install.sh`](deploy/installer/install.sh)
+  is the canonical bootstrap; it verifies cosign signatures before
+  it ever runs a downloaded binary.
+* **Package manager channels** (Homebrew tap, `apt`/`dnf` repos for
+  `cgn-ctl`) are tracked as a post-GA distribution task.
+
+## Out of scope
+
+The following are explicit non-goals for the 0.x line. They are not
+"missing features"; they belong to adjacent products or future tiers.
+
+* **Training and fine-tuning.** Cognitora is an inference platform.
+  Use any trainer you like (HF, NeMo, axolotl) and hand us the weights.
+* **Model-weight distribution.** We *cache* weights in `cgn-kvcached`
+  and on local SSD; we don't host a model registry. Point the agent
+  at HuggingFace, S3, GCS, or a private OCI registry.
+* **Multi-tenant GPU partitioning beyond MIG passthrough.** We expose
+  MIG slices to vLLM through the engine config; MPS, time-slicing,
+  and finer-grained virtualisation are deferred.
+* **FIPS / confidential computing.** Cryptographic FIPS-140 modules,
+  TDX/SEV attestation, and confidential VMs are tracked under a future
+  "regulated" tier and are not in the 0.x scope.
+
+## Where the architecture lives
+
+This file is intentionally short. The detailed architecture, protocol,
+deployment, and operations content lives in the docs tree:
+
+| Topic                    | Canonical file                                                            |
+|--------------------------|---------------------------------------------------------------------------|
+| One-page architecture    | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)                            |
+| Repo + crate layout      | [`docs/architecture/repo-layout.md`](docs/architecture/repo-layout.md)    |
+| Routing + score function | [`docs/architecture/routing.md`](docs/architecture/routing.md)            |
+| KV tiering + transports  | [`docs/architecture/kv-tiering.md`](docs/architecture/kv-tiering.md)      |
+| Wire protocols           | [`docs/architecture/protocols.md`](docs/architecture/protocols.md), [`docs/api/grpc.md`](docs/api/grpc.md) |
+| OpenAI HTTP surface      | [`docs/api/openai.md`](docs/api/openai.md)                                |
+| Configuration reference  | [`docs/reference/config.md`](docs/reference/config.md), [`docs/reference/env.md`](docs/reference/env.md) |
+| Exit codes               | [`docs/reference/exit-codes.md`](docs/reference/exit-codes.md)            |
+| Security model           | [`SECURITY.md`](SECURITY.md), [`docs/architecture/security.md`](docs/architecture/security.md) |
+| Observability + alerts   | [`docs/operations/observability.md`](docs/operations/observability.md)    |
+| SLOs + perf targets      | [`docs/operations/slo.md`](docs/operations/slo.md)                        |
+| Runbooks                 | [`docs/operations/runbooks/`](docs/operations/runbooks/)                  |
+| Quickstart               | [`docs/guides/quickstart.md`](docs/guides/quickstart.md)                  |
+| Bare-metal install       | [`docs/guides/baremetal.md`](docs/guides/baremetal.md)                    |
+| Kubernetes install       | [`docs/guides/kubernetes.md`](docs/guides/kubernetes.md)                  |
+| Cloud installs           | [`docs/guides/cloud/`](docs/guides/cloud/)                                |

@@ -59,7 +59,7 @@ recent macOS SDKs). Linux production builds use the full feature set.
 - Integration tests under `tests/integration/<crate>/`.
 - End-to-end smoke under `tests/e2e/` — start with
   [`single_node.sh`](tests/e2e/single_node.sh).
-- Performance regression checks run from `tests/perf/` (M2+).
+- Performance regression checks run from `tests/perf/`.
 
 For any change that affects routing, admission, or KV cache
 behaviour, add or update an integration test.

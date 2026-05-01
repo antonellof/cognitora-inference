@@ -3,7 +3,7 @@
 ## Supported versions
 
 We provide security fixes for the latest minor release of Cognitora.
-During the alpha (M1–M2) we may also patch the previous minor release
+While we are pre-1.0, we may also patch the previous minor release
 when the fix is straightforward to backport.
 
 | Version | Supported          |
