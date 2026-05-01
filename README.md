@@ -2,9 +2,9 @@
 
 # Cognitora
 
-**The open distributed inference platform for vLLM.**
+**Open, distributed LLM inference platform.**
 
-KV-aware routing · Prefill/decode disaggregation · GPU/RAM/SSD KV tiering · Tokens/joule optimisation · One-line installer for bare metal, Kubernetes, AWS, GCP, Azure, Hetzner.
+KV-aware routing · Prefill/decode disaggregation · GPU/RAM/SSD KV tiering · Multi-model cascade (SLM → Mid → LLM) · Tokens/joule optimisation · One-line installer for bare metal, Kubernetes, AWS, GCP, Azure, Hetzner.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-alpha-orange.svg)](#)
@@ -16,13 +16,17 @@ KV-aware routing · Prefill/decode disaggregation · GPU/RAM/SSD KV tiering · T
 
 ## What is Cognitora?
 
-Cognitora is a low-overhead, open-source orchestration layer that turns one or many vLLM workers into a production-grade inference cluster. Every binary is **a single statically-linked Rust executable** — no Python, Go, or JVM runtime in any container. vLLM itself is left untouched and runs as a child process per node.
+Cognitora is a low-overhead orchestration layer that turns one or many LLM inference workers into a production-grade cluster — with **KV-aware routing**, **prefill/decode disaggregation**, **multi-tier KV caching** (GPU/RAM/SSD), and **tokens/joule** energy optimisation as first-class concerns.
+
+It is **engine-agnostic by design**: the agent process drives the inference engine over a stable internal contract. vLLM is the canonical engine and ships in v1; SGLang, TensorRT-LLM, and llama.cpp engines are tracked for v2. The engine itself is left untouched and runs as a supervised child process per node.
+
+Every Cognitora binary is **a single statically-linked Rust executable** — no Python, Go, or JVM runtime in any container.
 
 ```
 ┌─────────────┐    ┌────────────────────────────────┐    ┌──────────┐
-│   Client    │───▶│           cgn-router           │───▶│ cgn-agent│──▶ vLLM
-│ OpenAI SDK  │HTTP│ OpenAI-compat + KV-aware route │gRPC│ (Rust)   │HTTP
-└─────────────┘    │   gateway · score · cascade    │    └─────┬────┘
+│   Client    │───▶│           cgn-router           │───▶│ cgn-agent│──▶ engine
+│ OpenAI SDK  │HTTP│ OpenAI-compat + KV-aware route │gRPC│ (Rust)   │HTTP   (vLLM, SGLang,
+└─────────────┘    │   gateway · score · cascade    │    └─────┬────┘        TRT-LLM, …)
                    └───────────────┬────────────────┘          │
                                    │                            ▼
                                    │                    ┌──────────────┐
@@ -36,28 +40,30 @@ Cognitora is a low-overhead, open-source orchestration layer that turns one or m
 
 ## Why Cognitora?
 
-| Capability                     | Cognitora            | vLLM alone | NVIDIA Dynamo | KServe |
-| ------------------------------ | -------------------- | ---------- | ------------- | ------ |
-| KV-aware prefix routing        | yes (BLAKE3 trie)    | local only | yes           | basic  |
-| Prefill/decode disaggregate    | yes (QUIC handoff)   | no         | yes           | no     |
-| GPU/RAM/SSD KV tiering         | yes (RocksDB index)  | host only  | partial       | no     |
-| Tokens/joule SLO               | yes (Redfish + IPMI) | no         | no            | no     |
-| Single static executable / svc | yes (all Rust)       | n/a        | no            | no     |
-| Bare-metal first-class         | yes (systemd units)  | no         | k8s-only      | k8s    |
-| Apache-2.0, OSS-only           | yes                  | yes        | yes           | yes    |
+| Capability                     | Cognitora            | Single engine | NVIDIA Dynamo | KServe |
+| ------------------------------ | -------------------- | ------------- | ------------- | ------ |
+| KV-aware prefix routing        | yes (BLAKE3 trie)    | local only    | yes           | basic  |
+| Prefill/decode disaggregate    | yes (QUIC handoff)   | no            | yes           | no     |
+| GPU/RAM/SSD KV tiering         | yes (RocksDB index)  | host only     | partial       | no     |
+| Multi-model cascade (SLM→LLM)  | yes (logprob gating) | no            | partial       | no     |
+| Engine-agnostic agent          | yes (vLLM v1, more)  | engine-locked | engine-locked | yes    |
+| Tokens/joule SLO               | yes (Redfish + IPMI) | no            | no            | no     |
+| Single static executable / svc | yes (all Rust)       | n/a           | no            | no     |
+| Bare-metal first-class         | yes (systemd units)  | varies        | k8s-only      | k8s    |
+| Apache-2.0, OSS-only           | yes                  | varies        | yes           | yes    |
 
 ## The six binaries
 
 All Rust. Built from one workspace.
 
-| Binary          | Role                                                                              |
-| --------------- | --------------------------------------------------------------------------------- |
-| `cgn-router`    | OpenAI-compatible HTTP/SSE **and** KV-aware orchestrator (gateway + router)       |
-| `cgn-agent`     | Per-node sidecar to vLLM. NVML telemetry, KV handoff, model load                  |
-| `cgn-kvcached` | GPU(hot)/RAM(warm)/SSD(cold) KV daemon + QUIC/RDMA cross-node fetch               |
-| `cgn-metrics`   | Prometheus aggregator. Derives `cgn_tokens_per_joule` from Redfish/IPMI + DCGM    |
-| `cgn-ctl`       | Admin CLI: install / cluster / model / pki / bench / key. Embeds `helm` binary    |
-| `cgn-operator`  | Kubernetes operator (kube-rs). CRDs in `deploy/kubernetes/crds/`                  |
+| Binary          | Role                                                                                  |
+| --------------- | ------------------------------------------------------------------------------------- |
+| `cgn-router`    | OpenAI-compatible HTTP/SSE **and** KV-aware orchestrator (gateway + router)           |
+| `cgn-agent`     | Per-node engine supervisor (vLLM today; pluggable). NVML telemetry, KV handoff        |
+| `cgn-kvcached`  | GPU(hot)/RAM(warm)/SSD(cold) KV daemon + QUIC/RDMA cross-node fetch                   |
+| `cgn-metrics`   | Prometheus aggregator. Derives `cgn_tokens_per_joule` from Redfish/IPMI + DCGM        |
+| `cgn-ctl`       | Admin CLI: install / cluster / model / pki / bench / key. Embeds `helm` binary        |
+| `cgn-operator`  | Kubernetes operator (kube-rs). CRDs in `deploy/kubernetes/crds/`                      |
 
 ## Quick start
 
@@ -100,7 +106,7 @@ cognitora/
   rust/
     services/                 Binary crates (six)
       cgn-router/             OpenAI gateway + KV-aware router (hot path)
-      cgn-agent/              Per-node vLLM sidecar
+      cgn-agent/              Per-node engine supervisor (vLLM, …)
       cgn-kvcached/           Tiered KV daemon
       cgn-metrics/            Prometheus + tokens/joule
       cgn-ctl/                Admin CLI + installer
@@ -153,7 +159,7 @@ cognitora/
 | Metric                                      | Target          |
 | ------------------------------------------- | --------------- |
 | `cgn-router` routing decision p99           | < 500 µs / vCPU |
-| `cgn-router` HTTP overhead vs direct vLLM   | < 3 ms p99      |
+| `cgn-router` HTTP overhead vs direct engine | < 3 ms p99      |
 | `cgn-kvcached` warm tier hit                | < 200 µs        |
 | `cgn-kvcached` cold tier hit                | < 5 ms          |
 | Cross-node QUIC fetch (1 MiB block, 10 GbE) | < 12 ms         |
