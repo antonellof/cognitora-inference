@@ -1,0 +1,42 @@
+[package]
+name = "cgn-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Cognitora agent: per-node engine supervisor (vLLM, …)"
+
+[[bin]]
+name = "cgn-agent"
+path = "src/main.rs"
+
+[dependencies]
+cgn-core      = { workspace = true }
+cgn-proto     = { workspace = true }
+cgn-tls       = { workspace = true }
+cgn-telemetry = { workspace = true }
+
+tokio          = { workspace = true }
+tokio-stream   = { workspace = true }
+tonic          = { workspace = true }
+prost          = { workspace = true }
+prost-types    = { workspace = true }
+async-trait    = { workspace = true }
+futures        = { workspace = true }
+serde          = { workspace = true }
+serde_json     = { workspace = true }
+reqwest        = { workspace = true }
+clap           = { workspace = true }
+anyhow         = { workspace = true }
+thiserror      = { workspace = true }
+tracing        = { workspace = true }
+parking_lot    = { workspace = true }
+arc-swap       = { workspace = true }
+nvml-wrapper   = { workspace = true }
+sysinfo        = { workspace = true }
+nix            = { workspace = true }
+uuid           = { workspace = true }
+chrono         = { workspace = true }
+etcd-client    = { workspace = true }
