@@ -752,6 +752,7 @@ dependencies = [
  "cgn-telemetry",
  "chrono",
  "clap",
+ "etcd-client",
  "futures",
  "k8s-openapi",
  "kube",
@@ -762,6 +763,16 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "cgn-perf"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "cgn-core",
+ "criterion",
+ "tokio",
 ]
 
 [[package]]

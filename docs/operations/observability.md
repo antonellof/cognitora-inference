@@ -99,10 +99,12 @@ Span structure:
 ## Dashboards
 
 A starter Grafana dashboard ships at
-`deploy/kubernetes/helm/cognitora/dashboards/cognitora.json` (TODO).
-It includes panels for:
+[`deploy/kubernetes/helm/cognitora/dashboards/cognitora.json`](../../deploy/kubernetes/helm/cognitora/dashboards/cognitora.json).
+Set `metrics.dashboards.enabled = true` in the Helm values to mount it
+into a `grafana_dashboard=1` ConfigMap that the kube-prometheus-stack
+Grafana sidecar picks up automatically. Panels:
 
-- Latency: TTFT p50/p95/p99 per model
+- Latency: routing-decision p99, TTFT p50/p95/p99 per model
 - Throughput: requests/s and tokens/s per node
 - Cache: hit ratio over 5m + per-tier hit count
 - Power: watts per chassis vs tokens/s (energy efficiency)
@@ -110,9 +112,10 @@ It includes panels for:
 
 ## Alerting
 
-Suggested PrometheusRule lives at
-`deploy/kubernetes/helm/cognitora/templates/prometheusrules.yaml`
-(TODO). The starter set fires when:
+A `PrometheusRule` ships at
+[`deploy/kubernetes/helm/cognitora/templates/prometheus-rule.yaml`](../../deploy/kubernetes/helm/cognitora/templates/prometheus-rule.yaml).
+Enable with `metrics.prometheusRule.enabled = true` (requires the
+prometheus-operator CRDs). The included rules fire when:
 
 - TTFT p99 > `[router.admission].ttft_slo_ms` for 5 min
 - `cgn:cache_hit_ratio_5m` < 0.30 for 15 min on a multi-replica model

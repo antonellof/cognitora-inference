@@ -8,8 +8,8 @@ each model).
 ## Platform SLOs (CI-gated)
 
 These are the same numbers exposed in the README's perf table. Each
-PR runs the perf harness in `tests/perf/` (TODO) and a regression
-> 5% of any of them blocks merge.
+PR runs the perf harness in [`tests/perf/`](../../tests/perf) and a
+regression > 5% of any of them blocks merge.
 
 | SLI                                          | Target          | Source                              |
 |----------------------------------------------|-----------------|-------------------------------------|

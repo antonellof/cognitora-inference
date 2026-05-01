@@ -14,6 +14,7 @@
 
 mod controllers;
 mod reconcile;
+mod render;
 
 use cgn_core::Result;
 use clap::Parser;

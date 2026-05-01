@@ -1,0 +1,124 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Cognitora — router, agent, kvcached overview. Mounted by the Helm chart as a ConfigMap with label grafana_dashboard=1.",
+  "editable": false,
+  "graphTooltip": 0,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Router p99 routing decision (µs)",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(cgn_router_routing_decision_seconds_bucket[5m])) by (le)) * 1e6",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "µs",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "yellow", "value": 350 },
+              { "color": "red",    "value": 500 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "stat",
+      "title": "Cluster cache hit ratio",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(cgn_router_kv_cache_hits_total[5m])) / clamp_min(sum(rate(cgn_router_kv_cache_lookups_total[5m])), 1)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "yellow", "value": 0.4 },
+              { "color": "green",  "value": 0.55 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Router QPS by status",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(cgn_router_requests_total[1m])) by (status)",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Inflight by model",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(cgn_router_admission_inflight) by (model)",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Cluster watts",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(cgn_power_watts) by (node)",
+          "legendFormat": "{{node}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "KV tier sizes",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "cgn_kv_tier_used_bytes",
+          "legendFormat": "{{tier}} {{node}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["cognitora"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timezone": "",
+  "title": "Cognitora overview",
+  "uid": "cgn-overview",
+  "version": 1
+}

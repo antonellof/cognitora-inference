@@ -90,6 +90,15 @@ metrics:
   redfish:
     url: ""
     existingSecret: ""
+  # Mounts dashboards/cognitora.json into a sidecar-watched ConfigMap.
+  # Enable when running kube-prometheus-stack's Grafana with sidecar.
+  dashboards:
+    enabled: false
+  # Ships a PrometheusRule with recording + alerting rules. Requires
+  # the prometheus-operator CRDs.
+  prometheusRule:
+    enabled: false
+    labels: {}
 
 # ---- Operator (CRD reconciliation) ----------------------------------------
 operator:

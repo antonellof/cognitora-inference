@@ -20,6 +20,9 @@ members = [
     "rust/services/cgn-metrics",
     "rust/services/cgn-ctl",
     "rust/services/cgn-operator",
+
+    # Benches / e2e helpers
+    "tests/perf",
 ]
 
 [workspace.package]

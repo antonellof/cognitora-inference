@@ -1,0 +1,67 @@
+{{- if .Values.metrics.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "cognitora.fullname" . }}-rules
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cognitora.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+  - name: cognitora.recording
+    rules:
+    - record: cgn:router:p99_routing_decision_us
+      expr: |
+        histogram_quantile(0.99,
+          sum(rate(cgn_router_routing_decision_seconds_bucket[5m])) by (le)
+        ) * 1e6
+    - record: cgn:router:cache_hit_ratio
+      expr: |
+        sum(rate(cgn_router_kv_cache_hits_total[5m]))
+        /
+        clamp_min(sum(rate(cgn_router_kv_cache_lookups_total[5m])), 1)
+    - record: cgn:cluster:watts_total
+      expr: |
+        sum(cgn_power_watts)
+
+  - name: cognitora.alerts
+    rules:
+    - alert: CognitoraRouterDown
+      expr: up{job=~".*cgn-router.*"} == 0
+      for: 1m
+      labels:
+        severity: page
+      annotations:
+        summary: "cgn-router instance is down ({{ "{{" }} $labels.instance {{ "}}" }})"
+        runbook: "https://docs.cognitora.dev/operations/runbooks/router-down"
+
+    - alert: CognitoraRoutingDecisionSLO
+      expr: cgn:router:p99_routing_decision_us > 500
+      for: 10m
+      labels:
+        severity: warn
+      annotations:
+        summary: "Routing decision p99 > 500 µs for 10m"
+        runbook: "https://docs.cognitora.dev/operations/slo"
+
+    - alert: CognitoraCacheHitRatioLow
+      expr: cgn:router:cache_hit_ratio < 0.4
+      for: 30m
+      labels:
+        severity: warn
+      annotations:
+        summary: "Cluster cache hit ratio < 0.4 for 30m (target ≥ 0.55)"
+        runbook: "https://docs.cognitora.dev/operations/runbooks/cache-cold"
+
+    - alert: CognitoraAgentNotReady
+      expr: cgn_agent_ready == 0
+      for: 5m
+      labels:
+        severity: warn
+      annotations:
+        summary: "cgn-agent on {{ "{{" }} $labels.node {{ "}}" }} is not ready"
+        runbook: "https://docs.cognitora.dev/operations/runbooks/agent-stuck"
+{{- end }}

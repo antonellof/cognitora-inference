@@ -35,18 +35,18 @@ pub async fn embeddings(
     };
     let _ = decision; // address used inside the gRPC client below
 
-    // Build the proto request; the actual round-trip is intentionally TODO
-    // because the Agent service does not yet expose Embed. The router gRPC
-    // surface returns Unimplemented today, and we surface that to clients.
+    // Build the proto request. The Agent service does not yet expose
+    // Embed (the router gRPC surface returns Unimplemented today), so
+    // we synthesise a deterministic vector below and surface a real
+    // response so SDK clients that probe `/v1/embeddings` for capability
+    // detection get a 200. This is replaced with the actual gRPC
+    // round-trip when Agent.Embed lands.
     let _proto = PEmbedRequest {
         model:  req.model.clone(),
         inputs: inputs.clone(),
         tenant: req.user.unwrap_or_default(),
     };
 
-    // For now: synthesise a deterministic placeholder vector so SDK clients
-    // that probe `/v1/embeddings` for capability detection get a 200. This
-    // is replaced with a real call when Agent.Embed lands.
     let dim = 1024usize;
     let mut data = Vec::with_capacity(inputs.len());
     for (i, text) in inputs.iter().enumerate() {

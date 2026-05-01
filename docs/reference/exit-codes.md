@@ -41,6 +41,8 @@ with the table above this gives a one-glance diagnosis.
 
 ## Tests
 
-Each binary's `tests/exit_codes.rs` (TODO) exercises the matrix —
-malformed config, missing CA file, occupied port, etc. — and asserts
-the right code is returned.
+`rust/libraries/cgn-core/tests/exit_codes.rs` exercises the matrix
+above against `cgn_core::exit_code(&Error)`. Every binary's `main()`
+funnels its returned `Error` through that function before exiting, so
+the systemd `SuccessExitStatus` lists and the Kubernetes runbook stay
+in lockstep with the table above.

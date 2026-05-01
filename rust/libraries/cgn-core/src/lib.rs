@@ -13,7 +13,7 @@ pub mod error;
 pub mod hash;
 pub mod prefix;
 
-pub use error::{Error, Result};
+pub use error::{exit_code, Error, Result};
 
 /// Default UNIX domain socket directory used by the daemons.
 pub const DEFAULT_UDS_DIR: &str = "/run/cognitora";

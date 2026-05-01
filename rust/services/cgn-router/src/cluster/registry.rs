@@ -66,6 +66,11 @@ impl NodeRegistry {
     pub fn len(&self) -> usize { self.inner.len() }
     pub fn is_empty(&self) -> bool { self.inner.is_empty() }
 
+    /// Snapshot every registered node (no filtering).
+    pub fn snapshot(&self) -> Vec<Arc<NodeEntry>> {
+        self.inner.iter().map(|kv| kv.value().read().clone()).collect()
+    }
+
     /// Snapshot all live nodes filtered by role.
     pub fn nodes_for(&self, role: NodeRole, model: Option<&str>) -> Vec<Arc<NodeEntry>> {
         self.inner.iter()

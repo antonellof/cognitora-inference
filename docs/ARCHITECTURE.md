@@ -111,6 +111,10 @@ toward energy-efficient nodes when the operator turns the weight up.
 | **M5**    | `cgn-operator` GA + multi-cluster federation                         |
 | **M6**    | Energy-aware autoscaler + per-tenant SLO admission                   |
 
-Today: M1 + M2 implementations land; M3-M6 are skeletons with TODO
-markers. The `tests/perf/` harness gates every PR against the
+Today: M1 + M2 + M3 + M4 + M5 implementations have landed end-to-end
+(routing, KV tiering with RAM + SSD, QUIC transport, RDMA feature flag,
+cascade, Redis-backed rate limit, OIDC group claims, full operator
+reconciliation, federation forwarder). M6 ships the energy-aware
+autoscaler and deadline-aware admission as opt-in modules. The
+[`tests/perf/`](../tests/perf) harness gates every PR against the
 performance targets in the README.

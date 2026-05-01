@@ -78,6 +78,8 @@ pub struct RouterConfig {
     pub rate_limit: RateLimitConfig,
     pub cascade: CascadeConfig,
     pub disagg: DisaggConfig,
+    pub federation: FederationConfig,
+    pub autoscaler: AutoscalerConfig,
 }
 impl Default for RouterConfig {
     fn default() -> Self {
@@ -91,6 +93,8 @@ impl Default for RouterConfig {
             rate_limit:    RateLimitConfig::default(),
             cascade:       CascadeConfig::default(),
             disagg:        DisaggConfig::default(),
+            federation:    FederationConfig::default(),
+            autoscaler:    AutoscalerConfig::default(),
         }
     }
 }
@@ -177,6 +181,45 @@ pub struct DisaggConfig {
 impl Default for DisaggConfig {
     fn default() -> Self {
         Self { enabled: false, colocate_below_tokens: 256 }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FederationConfig {
+    /// Forward to peer Cognitora clusters when no local node serves a model.
+    pub enabled: bool,
+    /// Peer router gRPC endpoints (mTLS).
+    pub peers: Vec<String>,
+}
+impl Default for FederationConfig {
+    fn default() -> Self {
+        Self { enabled: false, peers: Vec::new() }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AutoscalerConfig {
+    /// Energy-aware autoscaler. Watches `cgn-metrics` and drains the
+    /// highest-watt nodes when the cluster is idle.
+    pub enabled: bool,
+    /// Idle threshold: drain a node whose 5m util is below this %.
+    pub idle_util_pct: f32,
+    /// Wattage above this threshold makes a node a drain candidate.
+    pub high_watt_threshold: f32,
+    /// Per-tenant deadline propagation (rejects requests whose
+    /// deadline cannot be met given the current queue).
+    pub deadline_admission: bool,
+}
+impl Default for AutoscalerConfig {
+    fn default() -> Self {
+        Self {
+            enabled:             false,
+            idle_util_pct:       15.0,
+            high_watt_threshold: 350.0,
+            deadline_admission:  false,
+        }
     }
 }
 

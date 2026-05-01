@@ -11,9 +11,12 @@
 #![forbid(unsafe_code)]
 
 mod admission;
+mod autoscaler;
 mod cascade;
 mod cluster;
+mod deadline;
 mod disagg;
+mod federation;
 mod gateway;
 mod routing;
 mod state;
@@ -48,6 +51,7 @@ async fn main() -> Result<()> {
 
     let state = Arc::new(SharedState::new(cfg.clone()).await?);
     state.bootstrap_cluster_watch().await?;
+    autoscaler::spawn(state.clone());
 
     let listen_http: SocketAddr = cfg.router.listen_http.parse()
         .map_err(|e| Error::Config(format!("router.listen_http: {e}")))?;

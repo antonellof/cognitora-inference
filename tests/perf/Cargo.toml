@@ -1,0 +1,26 @@
+[package]
+name = "cgn-perf"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+publish = false
+description = "Cognitora: criterion harness for the SLOs documented in docs/operations/slo.md"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+cgn-core  = { workspace = true }
+blake3    = { workspace = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+tokio     = { workspace = true }
+
+[[bench]]
+name = "routing"
+harness = false
+
+[[bench]]
+name = "prefix"
+harness = false

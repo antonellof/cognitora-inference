@@ -31,3 +31,4 @@ anyhow       = { workspace = true }
 thiserror    = { workspace = true }
 tracing      = { workspace = true }
 chrono       = { workspace = true }
+etcd-client  = { workspace = true }
