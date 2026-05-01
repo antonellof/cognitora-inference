@@ -23,22 +23,24 @@ use kube::{
 };
 use tracing::{error, info, warn};
 
-use crate::reconcile::Ctx;
 use super::inference_cluster::Error;
+use crate::reconcile::Ctx;
 
 const FIELD_MANAGER: &str = "cgn-operator";
 
 pub async fn run(client: Client, namespace: Option<String>) -> Result<()> {
     let api: Api<ModelPool> = match &namespace {
         Some(ns) => Api::namespaced(client.clone(), ns),
-        None     => Api::all(client.clone()),
+        None => Api::all(client.clone()),
     };
     info!("ModelPool controller running");
     let ctx = Arc::new(Ctx { client });
     Controller::new(api, Config::default())
         .run(reconcile, error_policy, ctx)
         .for_each(|res| async move {
-            if let Err(e) = res { error!(error=?e, "model pool reconcile error"); }
+            if let Err(e) = res {
+                error!(error=?e, "model pool reconcile error");
+            }
         })
         .await;
     Ok(())
@@ -75,16 +77,23 @@ async fn reconcile(obj: Arc<ModelPool>, ctx: Arc<Ctx>) -> std::result::Result<Ac
         },
     });
 
-    let cm_api: Api<k8s_openapi::api::core::v1::ConfigMap> = Api::namespaced(ctx.client.clone(), &ns);
+    let cm_api: Api<k8s_openapi::api::core::v1::ConfigMap> =
+        Api::namespaced(ctx.client.clone(), &ns);
     let pp = PatchParams::apply(FIELD_MANAGER).force();
     if let Err(e) = cm_api.patch(&cm_name, &pp, &Patch::Apply(&body)).await {
         warn!(error=?e, "configmap apply failed");
     }
 
-    let _ = patch_status(&ctx.client, &ns, &name, ModelPoolStatus {
-        phase:           "Synced".into(),
-        loaded_replicas: obj.spec.prefill_replicas + obj.spec.decode_replicas,
-    }).await;
+    let _ = patch_status(
+        &ctx.client,
+        &ns,
+        &name,
+        ModelPoolStatus {
+            phase: "Synced".into(),
+            loaded_replicas: obj.spec.prefill_replicas + obj.spec.decode_replicas,
+        },
+    )
+    .await;
 
     Ok(Action::requeue(Duration::from_secs(60)))
 }

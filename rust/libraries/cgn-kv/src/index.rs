@@ -30,15 +30,14 @@ impl Index {
         opts.set_max_open_files(1024);
         opts.increase_parallelism(num_cpus::get() as i32);
 
-        let db = DB::open(&opts, dir)
-            .map_err(|e| Error::Internal(format!("rocksdb open: {e}")))?;
+        let db = DB::open(&opts, dir).map_err(|e| Error::Internal(format!("rocksdb open: {e}")))?;
         Ok(Self { db: Arc::new(db) })
     }
 
     pub fn put(&self, addr: &BlockAddress, meta: &BlockMeta) -> Result<()> {
         let key = key_of(addr);
-        let val = bincode::serialize(meta)
-            .map_err(|e| Error::Internal(format!("bincode meta: {e}")))?;
+        let val =
+            bincode::serialize(meta).map_err(|e| Error::Internal(format!("bincode meta: {e}")))?;
         self.db.put(key, val).map_err(rdb)
     }
 
@@ -46,10 +45,11 @@ impl Index {
         let key = key_of(addr);
         match self.db.get(key).map_err(rdb)? {
             None => Ok(None),
-            Some(bytes) => Ok(Some(
-                bincode::deserialize(&bytes)
-                    .map_err(|e| Error::Internal(format!("bincode meta de: {e}")))?,
-            )),
+            Some(bytes) => {
+                Ok(Some(bincode::deserialize(&bytes).map_err(|e| {
+                    Error::Internal(format!("bincode meta de: {e}"))
+                })?))
+            }
         }
     }
 
@@ -101,7 +101,10 @@ mod tests {
     fn round_trip() {
         let d = TempDir::new().unwrap();
         let ix = Index::open(d.path()).unwrap();
-        let addr = BlockAddress { digest: [7u8; 32], layer: 4 };
+        let addr = BlockAddress {
+            digest: [7u8; 32],
+            layer: 4,
+        };
         let meta = BlockMeta {
             model: "llama3-8b".into(),
             layer: 4,

@@ -60,11 +60,11 @@ async fn main() -> cgn_core::Result<()> {
     cgn_telemetry::init("cgn-ctl");
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Install(args)    => install::run(args).await,
-        Cmd::Cluster { cmd }  => cluster::run(cmd).await,
-        Cmd::Model   { cmd }  => model::run(cmd).await,
-        Cmd::Pki     { cmd }  => pki::run(cmd).await,
-        Cmd::Key     { cmd }  => key::run(cmd).await,
-        Cmd::Bench(args)      => bench::run(args).await,
+        Cmd::Install(args) => install::run(args).await,
+        Cmd::Cluster { cmd } => cluster::run(cmd).await,
+        Cmd::Model { cmd } => model::run(cmd).await,
+        Cmd::Pki { cmd } => pki::run(cmd).await,
+        Cmd::Key { cmd } => key::run(cmd).await,
+        Cmd::Bench(args) => bench::run(args).await,
     }
 }

@@ -22,31 +22,38 @@ impl Nvml {
         INIT.get_or_init(|| {
             // Probe once to log a single warning if NVML isn't present.
             match nvml_wrapper::Nvml::init() {
-                Ok(_)  => Ok(()),
+                Ok(_) => Ok(()),
                 Err(e) => {
                     tracing::warn!(error=?e, "NVML not available; per-GPU power disabled");
                     Err(Error::Unavailable("nvml".into()))
                 }
             }
         });
-        Self { inner: Mutex::new(nvml_wrapper::Nvml::init().ok()) }
+        Self {
+            inner: Mutex::new(nvml_wrapper::Nvml::init().ok()),
+        }
     }
 }
 
-impl Default for Nvml { fn default() -> Self { Self::new() } }
+impl Default for Nvml {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 // `parking_lot::Mutex` requires explicit drop semantics for the trait
 // object; we keep the data inside an `Option`.
-use std::mem;
 
 #[async_trait]
 impl PowerReader for Nvml {
-    fn name(&self) -> &'static str { "nvml" }
+    fn name(&self) -> &'static str {
+        "nvml"
+    }
 
     async fn sample(&self) -> Result<Vec<PowerSample>> {
         let nvml_opt = {
             let mut g = self.inner.lock();
-            mem::replace(&mut *g, None)
+            (*g).take()
         };
 
         let nvml = match nvml_opt {
@@ -68,6 +75,10 @@ impl PowerReader for Nvml {
         *self.inner.lock() = Some(nvml);
 
         let now = chrono::Utc::now().timestamp();
-        Ok(vec![PowerSample { watts: total, component: "gpu", at_unix: now }])
+        Ok(vec![PowerSample {
+            watts: total,
+            component: "gpu",
+            at_unix: now,
+        }])
     }
 }

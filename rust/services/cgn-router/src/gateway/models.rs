@@ -18,19 +18,28 @@ pub async fn list(State(state): State<Arc<SharedState>>) -> impl IntoResponse {
 
     let mut names: BTreeSet<String> = state.cfg.models.keys().cloned().collect();
     // Augment with whatever live agents currently advertise.
-    for kv in state.nodes.nodes_for(cgn_proto::v1::NodeRole::Unspecified, None) {
+    for kv in state
+        .nodes
+        .nodes_for(cgn_proto::v1::NodeRole::Unspecified, None)
+    {
         if let Some(m) = &kv.model {
             names.insert(m.clone());
         }
     }
 
     let created = state.started.elapsed().as_secs() as i64;
-    let data = names.into_iter().map(|id| ModelEntry {
-        id,
-        object: "model",
-        created,
-        owned_by: "cognitora",
-    }).collect();
+    let data = names
+        .into_iter()
+        .map(|id| ModelEntry {
+            id,
+            object: "model",
+            created,
+            owned_by: "cognitora",
+        })
+        .collect();
 
-    Json(ModelsResponse { object: "list", data })
+    Json(ModelsResponse {
+        object: "list",
+        data,
+    })
 }

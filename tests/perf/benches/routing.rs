@@ -4,7 +4,7 @@
 //! `docs/operations/slo.md`). This bench drives just the hashing +
 //! prefix-index probe path because that's what dominates the budget.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
 fn bench_hash_token(c: &mut Criterion) {
     c.bench_function("hash_token", |b| {

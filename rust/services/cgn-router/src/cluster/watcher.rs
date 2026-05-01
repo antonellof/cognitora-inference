@@ -10,18 +10,21 @@ use super::NodeRegistry;
 use crate::state::RoutingPolicy;
 
 const NODES_PREFIX: &str = cgn_core::etcd_keys::NODES;
-const POLICY_KEY:   &str = cgn_core::etcd_keys::ROUTING;
+const POLICY_KEY: &str = cgn_core::etcd_keys::ROUTING;
 
 pub async fn run_etcd_watcher(
     endpoints: Vec<String>,
-    nodes:     Arc<NodeRegistry>,
-    policy:    Arc<ArcSwap<RoutingPolicy>>,
+    nodes: Arc<NodeRegistry>,
+    policy: Arc<ArcSwap<RoutingPolicy>>,
 ) -> Result<()> {
-    let mut client = Client::connect(&endpoints, None).await
+    let mut client = Client::connect(&endpoints, None)
+        .await
         .map_err(|e| Error::Etcd(format!("connect: {e}")))?;
 
     // Initial snapshot.
-    let snap = client.get(NODES_PREFIX, Some(GetOptions::new().with_prefix())).await
+    let snap = client
+        .get(NODES_PREFIX, Some(GetOptions::new().with_prefix()))
+        .await
         .map_err(|e| Error::Etcd(format!("get nodes: {e}")))?;
     for kv in snap.kvs() {
         if let Ok(entry) = serde_json::from_slice::<super::NodeEntry>(kv.value()) {
@@ -44,7 +47,7 @@ pub async fn run_etcd_watcher(
     let _ = watcher.request_progress().await;
 
     let policy_clone = policy.clone();
-    let nodes_clone  = nodes.clone();
+    let nodes_clone = nodes.clone();
     tokio::spawn(async move {
         let mut p_client = match Client::connect(&endpoints, None).await {
             Ok(c) => c,

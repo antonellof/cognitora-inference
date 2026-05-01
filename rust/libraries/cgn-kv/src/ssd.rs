@@ -21,12 +21,16 @@ pub struct SsdTier {
 impl SsdTier {
     pub fn open(root: impl Into<PathBuf>, capacity_bytes: u64) -> Result<Self> {
         let root = root.into();
-        std::fs::create_dir_all(&root)
-            .map_err(|e| Error::Internal(format!("ssd dir: {e}")))?;
-        Ok(Self { root, capacity_bytes })
+        std::fs::create_dir_all(&root).map_err(|e| Error::Internal(format!("ssd dir: {e}")))?;
+        Ok(Self {
+            root,
+            capacity_bytes,
+        })
     }
 
-    pub fn capacity(&self) -> u64 { self.capacity_bytes }
+    pub fn capacity(&self) -> u64 {
+        self.capacity_bytes
+    }
 
     pub fn path_for(&self, addr: &BlockAddress) -> PathBuf {
         let hex = super::hash_short(&addr.digest);
@@ -45,14 +49,17 @@ impl SsdTier {
     pub async fn write(&self, addr: &BlockAddress, bytes: &[u8]) -> Result<()> {
         let path = self.path_for(addr);
         if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent).await
+            tokio::fs::create_dir_all(parent)
+                .await
                 .map_err(|e| Error::Internal(format!("ssd mkdir: {e}")))?;
         }
         // Atomic write: temp file + rename.
         let tmp = path.with_extension("kvb.tmp");
-        tokio::fs::write(&tmp, bytes).await
+        tokio::fs::write(&tmp, bytes)
+            .await
             .map_err(|e| Error::Internal(format!("ssd write tmp: {e}")))?;
-        tokio::fs::rename(&tmp, &path).await
+        tokio::fs::rename(&tmp, &path)
+            .await
             .map_err(|e| Error::Internal(format!("ssd rename: {e}")))?;
         Ok(())
     }
@@ -70,13 +77,17 @@ impl SsdTier {
     /// effort, walks immediate children only).
     pub fn used_bytes(&self) -> u64 {
         std::fs::read_dir(&self.root)
-            .map(|it| it.flatten()
-                .filter_map(|d| d.metadata().ok().map(|m| m.len()))
-                .sum())
+            .map(|it| {
+                it.flatten()
+                    .filter_map(|d| d.metadata().ok().map(|m| m.len()))
+                    .sum()
+            })
             .unwrap_or(0)
     }
 
-    pub fn root(&self) -> &Path { &self.root }
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
 }
 
 #[cfg(test)]
@@ -88,7 +99,10 @@ mod tests {
     async fn round_trip() {
         let dir = tempdir().unwrap();
         let ssd = SsdTier::open(dir.path(), 1 << 30).unwrap();
-        let addr = BlockAddress { digest: [9u8; 32], layer: 3 };
+        let addr = BlockAddress {
+            digest: [9u8; 32],
+            layer: 3,
+        };
         ssd.write(&addr, b"hello world").await.unwrap();
         let r = ssd.read(&addr).await.unwrap();
         assert_eq!(r.as_deref(), Some(&b"hello world"[..]));

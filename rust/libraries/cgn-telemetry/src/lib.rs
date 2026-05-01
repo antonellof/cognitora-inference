@@ -65,7 +65,7 @@ pub fn admin_router() -> Router {
     Router::new()
         .route("/metrics", get(metrics_handler))
         .route("/healthz", get(|| async { "ok" }))
-        .route("/readyz",  get(|| async { "ok" }))
+        .route("/readyz", get(|| async { "ok" }))
 }
 
 async fn metrics_handler() -> axum::response::Response {
@@ -86,8 +86,7 @@ async fn metrics_handler() -> axum::response::Response {
 #[macro_export]
 macro_rules! counter {
     ($name:expr, $help:expr) => {{
-        let c = $crate::prometheus::IntCounter::new($name, $help)
-            .expect("counter create");
+        let c = $crate::prometheus::IntCounter::new($name, $help).expect("counter create");
         $crate::registry().register(Box::new(c.clone())).ok();
         c
     }};
@@ -97,8 +96,7 @@ macro_rules! counter {
 #[macro_export]
 macro_rules! gauge {
     ($name:expr, $help:expr) => {{
-        let g = $crate::prometheus::IntGauge::new($name, $help)
-            .expect("gauge create");
+        let g = $crate::prometheus::IntGauge::new($name, $help).expect("gauge create");
         $crate::registry().register(Box::new(g.clone())).ok();
         g
     }};
@@ -109,13 +107,11 @@ macro_rules! gauge {
 #[macro_export]
 macro_rules! latency_histogram {
     ($name:expr, $help:expr) => {{
-        let opts = $crate::prometheus::HistogramOpts::new($name, $help)
-            .buckets(vec![
-                0.00005, 0.0001, 0.0005, 0.001, 0.003, 0.005,
-                0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0,
-            ]);
-        let h = $crate::prometheus::Histogram::with_opts(opts)
-            .expect("histogram create");
+        let opts = $crate::prometheus::HistogramOpts::new($name, $help).buckets(vec![
+            0.00005, 0.0001, 0.0005, 0.001, 0.003, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0,
+            2.0,
+        ]);
+        let h = $crate::prometheus::Histogram::with_opts(opts).expect("histogram create");
         $crate::registry().register(Box::new(h.clone())).ok();
         h
     }};

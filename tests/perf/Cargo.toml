@@ -24,3 +24,6 @@ harness = false
 [[bench]]
 name = "prefix"
 harness = false
+
+[lints]
+workspace = true

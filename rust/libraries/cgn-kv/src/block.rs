@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct BlockAddress {
     pub digest: [u8; 32],
-    pub layer:  u32,
+    pub layer: u32,
 }
 
 /// Metadata returned by the index alongside a block.

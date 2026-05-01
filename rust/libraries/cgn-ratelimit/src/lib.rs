@@ -40,17 +40,17 @@ type Limiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 
 #[derive(Clone)]
 pub struct RateLimit {
-    rps:   NonZeroU32,
+    rps: NonZeroU32,
     burst: NonZeroU32,
-    map:   Arc<DashMap<String, Arc<Limiter>>>,
+    map: Arc<DashMap<String, Arc<Limiter>>>,
 }
 
 impl RateLimit {
     pub fn new(rps: u32, burst: u32) -> Self {
         Self {
-            rps:   NonZeroU32::new(rps.max(1)).unwrap(),
+            rps: NonZeroU32::new(rps.max(1)).unwrap(),
             burst: NonZeroU32::new(burst.max(1)).unwrap(),
-            map:   Arc::new(DashMap::new()),
+            map: Arc::new(DashMap::new()),
         }
     }
 
@@ -60,11 +60,17 @@ impl RateLimit {
         }
         let quota = Quota::per_second(self.rps).allow_burst(self.burst);
         let new = Arc::new(RateLimiter::direct(quota));
-        self.map.entry(key.to_string()).or_insert_with(|| new.clone()).clone()
+        self.map
+            .entry(key.to_string())
+            .or_insert_with(|| new.clone())
+            .clone()
     }
 
     /// Check + decrement. Returns Ok if the request is admitted.
-    pub fn check(&self, key: &str) -> Result<(), governor::NotUntil<governor::clock::QuantaInstant>> {
+    pub fn check(
+        &self,
+        key: &str,
+    ) -> Result<(), governor::NotUntil<governor::clock::QuantaInstant>> {
         let l = self.limiter_for(key);
         l.check()
     }
@@ -90,12 +96,16 @@ pub async fn ratelimit_middleware(
 }
 
 fn principal_or_ip(req: &Request<Body>) -> String {
-    if let Some(sub) = req.headers().get("x-cgn-subject")
+    if let Some(sub) = req
+        .headers()
+        .get("x-cgn-subject")
         .and_then(|v| v.to_str().ok())
     {
         return format!("sub:{sub}");
     }
-    if let Some(xff) = req.headers().get("x-forwarded-for")
+    if let Some(xff) = req
+        .headers()
+        .get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.split(',').next())
     {

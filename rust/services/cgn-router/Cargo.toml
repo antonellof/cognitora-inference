@@ -58,3 +58,6 @@ reqwest        = { workspace = true }
 tempfile       = { workspace = true }
 proptest       = { workspace = true }
 criterion      = { workspace = true }
+
+[lints]
+workspace = true

@@ -39,7 +39,7 @@ impl StopSpec {
     pub fn into_vec(self) -> Vec<String> {
         match self {
             StopSpec::Single(s) => vec![s],
-            StopSpec::Multi(v)  => v,
+            StopSpec::Multi(v) => v,
         }
     }
 }
@@ -72,9 +72,9 @@ pub struct ChatChoice {
 
 #[derive(Debug, Serialize, Default)]
 pub struct Usage {
-    pub prompt_tokens:     u32,
+    pub prompt_tokens: u32,
     pub completion_tokens: u32,
-    pub total_tokens:      u32,
+    pub total_tokens: u32,
 }
 
 // Streaming SSE chunk shape.
@@ -98,7 +98,7 @@ pub struct ChatChunkChoice {
 #[derive(Debug, Serialize, Default)]
 pub struct ChatDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub role:    Option<String>,
+    pub role: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
 }
@@ -128,8 +128,8 @@ impl EmbedInput {
     pub fn into_vec(self) -> Vec<String> {
         match self {
             EmbedInput::Single(s) => vec![s],
-            EmbedInput::Multi(v)  => v,
-            EmbedInput::Empty     => vec![],
+            EmbedInput::Multi(v) => v,
+            EmbedInput::Empty => vec![],
         }
     }
 }

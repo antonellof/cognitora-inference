@@ -57,12 +57,15 @@ pub struct RamTier {
 
 struct RamSlot {
     bytes: bytes::Bytes,
-    last:  std::sync::atomic::AtomicU64,
+    last: std::sync::atomic::AtomicU64,
 }
 
 impl RamTier {
     pub fn new(capacity_bytes: u64) -> Self {
-        Self { inner: dashmap::DashMap::new(), capacity: capacity_bytes }
+        Self {
+            inner: dashmap::DashMap::new(),
+            capacity: capacity_bytes,
+        }
     }
 
     fn now() -> u64 {
@@ -77,16 +80,21 @@ impl RamTier {
     /// re-hashing the prefix.
     pub fn get_bytes(&self, addr: &BlockAddress) -> Option<bytes::Bytes> {
         let slot = self.inner.get(addr)?;
-        slot.last.store(Self::now(), std::sync::atomic::Ordering::Relaxed);
+        slot.last
+            .store(Self::now(), std::sync::atomic::Ordering::Relaxed);
         Some(slot.bytes.clone())
     }
 
     /// Approximate count of resident blocks.
-    pub fn block_count(&self) -> usize { self.inner.len() }
+    pub fn block_count(&self) -> usize {
+        self.inner.len()
+    }
 }
 
 impl Tier for RamTier {
-    fn kind(&self) -> TierKind { TierKind::Ram }
+    fn kind(&self) -> TierKind {
+        TierKind::Ram
+    }
 
     fn contains(&self, addr: &BlockAddress) -> bool {
         self.inner.contains_key(addr)
@@ -94,7 +102,8 @@ impl Tier for RamTier {
 
     fn get(&self, addr: &BlockAddress) -> Option<BlockHandle> {
         let slot = self.inner.get(addr)?;
-        slot.last.store(Self::now(), std::sync::atomic::Ordering::Relaxed);
+        slot.last
+            .store(Self::now(), std::sync::atomic::Ordering::Relaxed);
         Some(BlockHandle {
             addr: *addr,
             meta: super::BlockMeta {
@@ -109,10 +118,13 @@ impl Tier for RamTier {
     }
 
     fn put(&self, addr: BlockAddress, bytes: bytes::Bytes) -> bool {
-        let prev = self.inner.insert(addr, RamSlot {
-            bytes,
-            last: std::sync::atomic::AtomicU64::new(Self::now()),
-        });
+        let prev = self.inner.insert(
+            addr,
+            RamSlot {
+                bytes,
+                last: std::sync::atomic::AtomicU64::new(Self::now()),
+            },
+        );
         prev.is_some()
     }
 
@@ -121,8 +133,13 @@ impl Tier for RamTier {
     }
 
     fn used_bytes(&self) -> u64 {
-        self.inner.iter().map(|e| e.value().bytes.len() as u64).sum()
+        self.inner
+            .iter()
+            .map(|e| e.value().bytes.len() as u64)
+            .sum()
     }
 
-    fn capacity_bytes(&self) -> u64 { self.capacity }
+    fn capacity_bytes(&self) -> u64 {
+        self.capacity
+    }
 }

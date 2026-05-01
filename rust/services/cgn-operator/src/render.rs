@@ -13,7 +13,12 @@ pub fn router_objects(ic: &InferenceCluster, ns: &str, name: &str, image: &str) 
     let labels = labels(ic, name, "router");
     let resources = resource_block(&ic.spec.router.resources);
 
-    let svc_type = ic.spec.router.service_type.as_deref().unwrap_or("ClusterIP");
+    let svc_type = ic
+        .spec
+        .router
+        .service_type
+        .as_deref()
+        .unwrap_or("ClusterIP");
 
     let deployment = json!({
         "apiVersion": "apps/v1",
@@ -82,7 +87,8 @@ pub fn router_objects(ic: &InferenceCluster, ns: &str, name: &str, image: &str) 
 pub fn agent_objects(ic: &InferenceCluster, ns: &str, name: &str, image: &str) -> Vec<Value> {
     let labels = labels(ic, name, "agent");
     let mut node_selector = ic.spec.agent.node_selector.clone();
-    node_selector.entry("nvidia.com/gpu.present".into())
+    node_selector
+        .entry("nvidia.com/gpu.present".into())
         .or_insert("true".into());
 
     let resources = resource_block(&ic.spec.agent.resources);
@@ -138,7 +144,9 @@ pub fn kvcached_objects(ic: &InferenceCluster, ns: &str, name: &str, image: &str
             "name": "ssd",
             "persistentVolumeClaim": { "claimName": format!("{name}-kv-ssd"), "storageClassName": c },
         }),
-        None => json!({ "name": "ssd", "emptyDir": { "sizeLimit": format!("{}Gi", ic.spec.kvcached.ssd_gib) } }),
+        None => {
+            json!({ "name": "ssd", "emptyDir": { "sizeLimit": format!("{}Gi", ic.spec.kvcached.ssd_gib) } })
+        }
     };
 
     let deployment = json!({
@@ -188,7 +196,9 @@ pub fn kvcached_objects(ic: &InferenceCluster, ns: &str, name: &str, image: &str
 
 /// Build the metrics Deployment when `spec.metrics.enabled = true`.
 pub fn metrics_objects(ic: &InferenceCluster, ns: &str, name: &str, image: &str) -> Vec<Value> {
-    if !ic.spec.metrics.enabled { return Vec::new(); }
+    if !ic.spec.metrics.enabled {
+        return Vec::new();
+    }
     let labels = labels(ic, name, "metrics");
 
     let deployment = json!({
@@ -233,8 +243,16 @@ fn labels(_ic: &InferenceCluster, name: &str, comp: &str) -> serde_json::Map<Str
 fn resource_block(r: &cgn_k8s::crds::Resources) -> Value {
     let mut requests = serde_json::Map::new();
     let mut limits = serde_json::Map::new();
-    if let Some(c) = &r.cpu    { requests.insert("cpu".into(), json!(c)); limits.insert("cpu".into(), json!(c)); }
-    if let Some(m) = &r.memory { requests.insert("memory".into(), json!(m)); limits.insert("memory".into(), json!(m)); }
-    if let Some(g) = r.gpu     { limits.insert("nvidia.com/gpu".into(), json!(g)); }
+    if let Some(c) = &r.cpu {
+        requests.insert("cpu".into(), json!(c));
+        limits.insert("cpu".into(), json!(c));
+    }
+    if let Some(m) = &r.memory {
+        requests.insert("memory".into(), json!(m));
+        limits.insert("memory".into(), json!(m));
+    }
+    if let Some(g) = r.gpu {
+        limits.insert("nvidia.com/gpu".into(), json!(g));
+    }
     json!({ "requests": requests, "limits": limits })
 }

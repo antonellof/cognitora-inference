@@ -42,7 +42,7 @@ pub async fn embeddings(
     // detection get a 200. This is replaced with the actual gRPC
     // round-trip when Agent.Embed lands.
     let _proto = PEmbedRequest {
-        model:  req.model.clone(),
+        model: req.model.clone(),
         inputs: inputs.clone(),
         tenant: req.user.unwrap_or_default(),
     };
@@ -75,7 +75,9 @@ fn deterministic_vector(text: &str, dim: usize) -> Vec<f32> {
         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
     ]);
     for _ in 0..dim {
-        acc = acc.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        acc = acc
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let v = ((acc >> 32) as u32 as f32) / (u32::MAX as f32) * 2.0 - 1.0;
         out.push(v);
     }
@@ -83,11 +85,13 @@ fn deterministic_vector(text: &str, dim: usize) -> Vec<f32> {
 }
 
 fn approximate_token_ids(s: &str) -> Vec<u32> {
-    s.split_whitespace().map(|w| {
-        let b = blake3::hash(w.as_bytes());
-        let bb = b.as_bytes();
-        u32::from_le_bytes([bb[0], bb[1], bb[2], bb[3]])
-    }).collect()
+    s.split_whitespace()
+        .map(|w| {
+            let b = blake3::hash(w.as_bytes());
+            let bb = b.as_bytes();
+            u32::from_le_bytes([bb[0], bb[1], bb[2], bb[3]])
+        })
+        .collect()
 }
 
 fn error(msg: &str) -> Response {

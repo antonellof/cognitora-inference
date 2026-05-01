@@ -18,10 +18,10 @@ use crate::state::RoutingPolicy;
 /// Per-node score with the four sub-components surfaced for tracing.
 #[derive(Debug, Clone, Copy)]
 pub struct Score {
-    pub total:    f32,
-    pub kv:       f32,
-    pub load:     f32,
-    pub power:    f32,
+    pub total: f32,
+    pub kv: f32,
+    pub load: f32,
+    pub power: f32,
     pub capacity: f32,
 }
 
@@ -31,7 +31,7 @@ pub struct Score {
 /// * `node`  — the candidate node's last-known telemetry.
 /// * `kv_overlap` — fraction of request chunks this node holds (`[0,1]`).
 /// * `peer_max_power` — highest power draw seen across all candidates,
-///                      used to normalise this node's power into `[0,1]`.
+///   used to normalise this node's power into `[0,1]`.
 pub fn score_node(
     policy: &RoutingPolicy,
     node: &NodeEntry,
@@ -54,13 +54,18 @@ pub fn score_node(
         0.0
     };
 
-    let total =
-          policy.kv       * kv_overlap
-        + policy.load     * load
-        + policy.power    * power
+    let total = policy.kv * kv_overlap
+        + policy.load * load
+        + policy.power * power
         + policy.capacity * capacity;
 
-    Score { total, kv: kv_overlap, load, power, capacity }
+    Score {
+        total,
+        kv: kv_overlap,
+        load,
+        power,
+        capacity,
+    }
 }
 
 #[cfg(test)]
@@ -68,7 +73,12 @@ mod tests {
     use super::*;
 
     fn pol() -> RoutingPolicy {
-        RoutingPolicy { kv: 0.55, load: 0.25, power: 0.10, capacity: 0.10 }
+        RoutingPolicy {
+            kv: 0.55,
+            load: 0.25,
+            power: 0.10,
+            capacity: 0.10,
+        }
     }
 
     fn node(q: u32, free: u32, total: u32, watts: f32) -> NodeEntry {

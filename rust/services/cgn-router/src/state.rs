@@ -13,19 +13,19 @@ use serde::{Deserialize, Serialize};
 use crate::cluster::NodeRegistry;
 
 pub struct SharedState {
-    pub cfg:      Config,
-    pub nodes:    Arc<NodeRegistry>,
-    pub prefix:   Arc<PrefixIndex>,
-    pub started:  std::time::Instant,
+    pub cfg: Config,
+    pub nodes: Arc<NodeRegistry>,
+    pub prefix: Arc<PrefixIndex>,
+    pub started: std::time::Instant,
     /// Hot-swappable routing policy (etcd-driven).
-    pub policy:   Arc<ArcSwap<RoutingPolicy>>,
+    pub policy: Arc<ArcSwap<RoutingPolicy>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoutingPolicy {
-    pub kv:       f32,
-    pub load:     f32,
-    pub power:    f32,
+    pub kv: f32,
+    pub load: f32,
+    pub power: f32,
     pub capacity: f32,
 }
 
@@ -33,17 +33,17 @@ impl SharedState {
     pub async fn new(cfg: Config) -> Result<Self> {
         let prefix = PrefixIndex::new(Duration::from_secs(60));
         let policy = RoutingPolicy {
-            kv:       cfg.router.score_weights.kv,
-            load:     cfg.router.score_weights.load,
-            power:    cfg.router.score_weights.power,
+            kv: cfg.router.score_weights.kv,
+            load: cfg.router.score_weights.load,
+            power: cfg.router.score_weights.power,
             capacity: cfg.router.score_weights.capacity,
         };
         Ok(Self {
             cfg,
-            nodes:   Arc::new(NodeRegistry::new()),
-            prefix:  Arc::new(prefix),
+            nodes: Arc::new(NodeRegistry::new()),
+            prefix: Arc::new(prefix),
             started: std::time::Instant::now(),
-            policy:  Arc::new(ArcSwap::from_pointee(policy)),
+            policy: Arc::new(ArcSwap::from_pointee(policy)),
         })
     }
 

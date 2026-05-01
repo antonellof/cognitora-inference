@@ -32,3 +32,6 @@ arc-swap     = { workspace = true }
 anyhow       = { workspace = true }
 thiserror    = { workspace = true }
 chrono       = { workspace = true }
+
+[lints]
+workspace = true

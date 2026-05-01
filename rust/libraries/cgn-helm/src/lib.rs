@@ -43,14 +43,14 @@ pub async fn version() -> Result<String> {
 /// Install or upgrade a chart (`helm upgrade --install`).
 #[derive(Debug, Clone)]
 pub struct Install {
-    pub release:    String,
-    pub chart:      PathBuf, // local chart dir or oci:// URL
-    pub namespace:  String,
+    pub release: String,
+    pub chart: PathBuf, // local chart dir or oci:// URL
+    pub namespace: String,
     pub create_namespace: bool,
-    pub values:     Vec<PathBuf>,
-    pub set:        Vec<(String, String)>,
-    pub wait:       bool,
-    pub timeout:    Option<String>,
+    pub values: Vec<PathBuf>,
+    pub set: Vec<(String, String)>,
+    pub wait: bool,
+    pub timeout: Option<String>,
 }
 
 impl Install {
@@ -58,13 +58,21 @@ impl Install {
         let bin = locate_helm()?;
         let mut cmd = Command::new(bin);
         cmd.args([
-            "upgrade", "--install",
+            "upgrade",
+            "--install",
             &self.release,
-            self.chart.to_str().ok_or_else(|| Error::InvalidArgument("chart path utf-8".into()))?,
-            "--namespace", &self.namespace,
+            self.chart
+                .to_str()
+                .ok_or_else(|| Error::InvalidArgument("chart path utf-8".into()))?,
+            "--namespace",
+            &self.namespace,
         ]);
-        if self.create_namespace { cmd.arg("--create-namespace"); }
-        if self.wait { cmd.arg("--wait"); }
+        if self.create_namespace {
+            cmd.arg("--create-namespace");
+        }
+        if self.wait {
+            cmd.arg("--wait");
+        }
         if let Some(t) = &self.timeout {
             cmd.args(["--timeout", t]);
         }
@@ -99,7 +107,11 @@ pub async fn template(chart: &Path, values: &[(String, String)]) -> Result<Strin
 }
 
 async fn run(mut cmd: Command, what: &str) -> Result<String> {
-    let out = cmd.stderr(Stdio::piped()).stdout(Stdio::piped()).output().await
+    let out = cmd
+        .stderr(Stdio::piped())
+        .stdout(Stdio::piped())
+        .output()
+        .await
         .map_err(|e| Error::Internal(format!("{what}: spawn: {e}")))?;
     if !out.status.success() {
         return Err(Error::Internal(format!(
@@ -114,14 +126,13 @@ async fn run(mut cmd: Command, what: &str) -> Result<String> {
 /// Convenience: render `Vec<u8>` of YAML for a chart from a serialisable
 /// `values` struct. Useful in tests and `cgn-ctl install --dry-run`.
 pub async fn template_with_values<V: Serialize>(chart: &Path, values: &V) -> Result<String> {
-    let yaml = serde_yaml::to_string(values)
-        .map_err(|e| Error::Internal(format!("yaml: {e}")))?;
-    let tmp = tempfile::NamedTempFile::new()
-        .map_err(|e| Error::Io(e))?;
+    let yaml = serde_yaml::to_string(values).map_err(|e| Error::Internal(format!("yaml: {e}")))?;
+    let tmp = tempfile::NamedTempFile::new().map_err(Error::Io)?;
     std::fs::write(tmp.path(), yaml).map_err(Error::Io)?;
     let bin = locate_helm()?;
     let mut cmd = Command::new(bin);
     cmd.args(["template", "cognitora", chart.to_str().unwrap_or(".")])
-       .arg("-f").arg(tmp.path());
+        .arg("-f")
+        .arg(tmp.path());
     run(cmd, "helm template").await
 }

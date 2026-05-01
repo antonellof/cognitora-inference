@@ -25,7 +25,9 @@ pub struct Admission {
 }
 
 impl Admission {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     fn slot(&self, model: &str, role: i32) -> Arc<AtomicU32> {
         self.counters
@@ -74,11 +76,18 @@ mod tests {
         SharedState {
             cfg,
             nodes: Arc::new(crate::cluster::NodeRegistry::new()),
-            prefix: Arc::new(cgn_core::prefix::PrefixIndex::new(std::time::Duration::from_secs(60))),
+            prefix: Arc::new(cgn_core::prefix::PrefixIndex::new(
+                std::time::Duration::from_secs(60),
+            )),
             started: std::time::Instant::now(),
-            policy: Arc::new(arc_swap::ArcSwap::from_pointee(crate::state::RoutingPolicy {
-                kv: 0.55, load: 0.25, power: 0.10, capacity: 0.10,
-            })),
+            policy: Arc::new(arc_swap::ArcSwap::from_pointee(
+                crate::state::RoutingPolicy {
+                    kv: 0.55,
+                    load: 0.25,
+                    power: 0.10,
+                    capacity: 0.10,
+                },
+            )),
         }
     }
 

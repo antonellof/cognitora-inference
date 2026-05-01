@@ -34,6 +34,19 @@ repository = "https://github.com/cognitora/cognitora"
 homepage = "https://cognitora.dev"
 authors = ["Cognitora Authors"]
 
+# Workspace-wide lint policy. Cognitora's `Error` enum is intentionally
+# wide (it spans config, IO, gRPC, etcd, …); the `result_large_err` and
+# `large_enum_variant` lints would force boxing in every public Result,
+# which trades a tiny perf win for a worse API. `dead_code` is allowed
+# because forward-looking modules (M3-M6 surfaces) ship before their
+# first internal caller.
+[workspace.lints.clippy]
+result_large_err   = "allow"
+large_enum_variant = "allow"
+
+[workspace.lints.rust]
+dead_code = "allow"
+
 [workspace.dependencies]
 # Internal crates (referenced by relative path from each member crate).
 cgn-proto      = { path = "rust/libraries/cgn-proto" }

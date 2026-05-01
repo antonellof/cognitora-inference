@@ -49,21 +49,23 @@ pub async fn loop_emit(supervisor: Arc<Supervisor>) -> Result<()> {
 
 /// Acquire a TTL lease, write the node entry against it, and keep it
 /// alive until the connection breaks.
-async fn emit_with_lease(
-    supervisor: &Supervisor,
-    endpoints: &[String],
-) -> Result<()> {
+async fn emit_with_lease(supervisor: &Supervisor, endpoints: &[String]) -> Result<()> {
     use cgn_core::Error;
-    let mut client = etcd_client::Client::connect(endpoints, None).await
+    let mut client = etcd_client::Client::connect(endpoints, None)
+        .await
         .map_err(|e| Error::Etcd(format!("connect: {e}")))?;
 
     // Lease lives 3× heartbeat. KeepAlive ticks every heartbeat.
     let lease_ttl = (HEARTBEAT_INTERVAL.as_secs() as i64) * 3;
-    let lease = client.lease_grant(lease_ttl, None).await
+    let lease = client
+        .lease_grant(lease_ttl, None)
+        .await
         .map_err(|e| Error::Etcd(format!("lease_grant: {e}")))?;
     let lease_id = lease.id();
 
-    let (mut keeper, mut stream) = client.lease_keep_alive(lease_id).await
+    let (mut keeper, mut stream) = client
+        .lease_keep_alive(lease_id)
+        .await
         .map_err(|e| Error::Etcd(format!("lease_keep_alive: {e}")))?;
     info!(%lease_id, ttl = lease_ttl, "etcd lease acquired");
 
@@ -77,7 +79,9 @@ async fn emit_with_lease(
         }
 
         // Renew the lease.
-        keeper.keep_alive().await
+        keeper
+            .keep_alive()
+            .await
             .map_err(|e| Error::Etcd(format!("lease keep_alive: {e}")))?;
         // Drain any pending response so the server-side stream stays healthy.
         match tokio::time::timeout(Duration::from_millis(100), stream.message()).await {
@@ -93,29 +97,38 @@ async fn emit_with_lease(
 
 #[derive(Debug, Default, Clone)]
 pub struct GpuSnapshot {
-    pub util_pct:    f32,
-    pub mem_used_pct:f32,
-    pub temp_c:      f32,
+    pub util_pct: f32,
+    pub mem_used_pct: f32,
+    pub temp_c: f32,
     pub power_watts: f32,
 }
 
 fn read_nvml_blocking() -> Option<GpuSnapshot> {
     let nvml = nvml_wrapper::Nvml::init().ok()?;
     let count = nvml.device_count().ok()?;
-    if count == 0 { return None; }
+    if count == 0 {
+        return None;
+    }
     let mut out = GpuSnapshot::default();
     for i in 0..count {
-        let Ok(dev) = nvml.device_by_index(i) else { continue; };
-        if let Ok(u) = dev.utilization_rates() { out.util_pct = u.gpu as f32; }
+        let Ok(dev) = nvml.device_by_index(i) else {
+            continue;
+        };
+        if let Ok(u) = dev.utilization_rates() {
+            out.util_pct = u.gpu as f32;
+        }
         if let Ok(mem) = dev.memory_info() {
             if mem.total > 0 {
                 out.mem_used_pct = (mem.used as f64 / mem.total as f64) as f32 * 100.0;
             }
         }
-        if let Ok(t) = dev.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu) {
+        if let Ok(t) = dev.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu)
+        {
             out.temp_c = t as f32;
         }
-        if let Ok(p) = dev.power_usage() { out.power_watts += p as f32 / 1000.0; }
+        if let Ok(p) = dev.power_usage() {
+            out.power_watts += p as f32 / 1000.0;
+        }
     }
     Some(out)
 }
@@ -143,9 +156,15 @@ async fn publish_one(
         "ready": ready,
         "version": env!("CARGO_PKG_VERSION"),
     });
-    let key = format!("{}{}", cgn_core::etcd_keys::NODES, supervisor.cfg.agent.node_id);
+    let key = format!(
+        "{}{}",
+        cgn_core::etcd_keys::NODES,
+        supervisor.cfg.agent.node_id
+    );
     let opts = etcd_client::PutOptions::new().with_lease(lease_id);
-    client.put(key, value.to_string(), Some(opts)).await
+    client
+        .put(key, value.to_string(), Some(opts))
+        .await
         .map_err(|e| Error::Etcd(format!("put: {e}")))?;
     Ok(())
 }
@@ -153,8 +172,8 @@ async fn publish_one(
 fn role_to_int(r: &cgn_core::config::NodeRoleCfg) -> i32 {
     use cgn_core::config::NodeRoleCfg::*;
     match r {
-        Decode  => cgn_proto::v1::NodeRole::Decode  as i32,
+        Decode => cgn_proto::v1::NodeRole::Decode as i32,
         Prefill => cgn_proto::v1::NodeRole::Prefill as i32,
-        Both    => cgn_proto::v1::NodeRole::Both    as i32,
+        Both => cgn_proto::v1::NodeRole::Both as i32,
     }
 }

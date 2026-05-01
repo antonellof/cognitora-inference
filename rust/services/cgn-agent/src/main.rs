@@ -22,7 +22,11 @@ use clap::Parser;
 use tracing::info;
 
 #[derive(Parser, Debug)]
-#[command(name = "cgn-agent", version, about = "Cognitora per-node engine supervisor")]
+#[command(
+    name = "cgn-agent",
+    version,
+    about = "Cognitora per-node engine supervisor"
+)]
 struct Cli {
     #[arg(short, long)]
     config: Option<PathBuf>,
@@ -39,7 +43,10 @@ async fn main() -> Result<()> {
     let supervisor = supervisor::Supervisor::new(cfg.clone()).await?;
     let supervisor = std::sync::Arc::new(supervisor);
 
-    let listen: std::net::SocketAddr = cfg.agent.listen.parse()
+    let listen: std::net::SocketAddr = cfg
+        .agent
+        .listen
+        .parse()
         .map_err(|e| Error::Config(format!("agent.listen: {e}")))?;
 
     tokio::select! {

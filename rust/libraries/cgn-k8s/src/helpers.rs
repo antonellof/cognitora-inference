@@ -22,7 +22,9 @@ where
         + std::fmt::Debug,
 {
     let api: Api<T> = Api::namespaced(client, ns);
-    let mut items = api.list(&ListParams::default()).await
+    let mut items = api
+        .list(&ListParams::default())
+        .await
         .map_err(|e| cgn_core::Error::Unavailable(format!("kube list: {e}")))?
         .items;
     items.sort_by(|a, b| a.meta().name.cmp(&b.meta().name));

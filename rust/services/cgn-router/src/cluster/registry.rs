@@ -11,15 +11,15 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeEntry {
-    pub node_id:        String,
-    pub address:        String,         // grpc endpoint, e.g. "https://10.0.1.7:7070"
-    pub role:           i32,             // matches NodeRole proto enum
-    pub gpu_index:      Option<u32>,
-    pub model:          Option<String>,
-    pub queue_depth:    u32,
-    pub free_blocks:    u32,
-    pub total_blocks:   u32,
-    pub power_watts:    f32,
+    pub node_id: String,
+    pub address: String, // grpc endpoint, e.g. "https://10.0.1.7:7070"
+    pub role: i32,       // matches NodeRole proto enum
+    pub gpu_index: Option<u32>,
+    pub model: Option<String>,
+    pub queue_depth: u32,
+    pub free_blocks: u32,
+    pub total_blocks: u32,
+    pub power_watts: f32,
     #[serde(skip, default = "Instant::now")]
     pub last_heartbeat: Instant,
 }
@@ -41,7 +41,9 @@ pub struct NodeRegistry {
 }
 
 impl NodeRegistry {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn upsert(&self, entry: NodeEntry) {
         let id = entry.node_id.clone();
@@ -63,24 +65,36 @@ impl NodeRegistry {
         self.inner.remove(node_id);
     }
 
-    pub fn len(&self) -> usize { self.inner.len() }
-    pub fn is_empty(&self) -> bool { self.inner.is_empty() }
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
 
     /// Snapshot every registered node (no filtering).
     pub fn snapshot(&self) -> Vec<Arc<NodeEntry>> {
-        self.inner.iter().map(|kv| kv.value().read().clone()).collect()
+        self.inner
+            .iter()
+            .map(|kv| kv.value().read().clone())
+            .collect()
     }
 
     /// Snapshot all live nodes filtered by role.
     pub fn nodes_for(&self, role: NodeRole, model: Option<&str>) -> Vec<Arc<NodeEntry>> {
-        self.inner.iter()
+        self.inner
+            .iter()
             .filter_map(|kv| {
                 let n = kv.value().read().clone();
                 let role_match = matches!(role, NodeRole::Unspecified)
                     || n.role_enum() == role
                     || n.role_enum() == NodeRole::Both;
-                let model_match = model.map_or(true, |m| n.model.as_deref() == Some(m));
-                if role_match && model_match { Some(n) } else { None }
+                let model_match = model.is_none_or(|m| n.model.as_deref() == Some(m));
+                if role_match && model_match {
+                    Some(n)
+                } else {
+                    None
+                }
             })
             .collect()
     }

@@ -44,26 +44,33 @@ pub async fn run(args: Args) -> Result<()> {
     let started = Instant::now();
     match args.what {
         What::Health => health(&args).await?,
-        What::Chat   => chat(&args).await?,
-        What::Embed  => info!("embed bench: not yet implemented"),
+        What::Chat => chat(&args).await?,
+        What::Embed => info!("embed bench: not yet implemented"),
     }
-    info!(elapsed_ms = started.elapsed().as_millis() as u64, "bench done");
+    info!(
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "bench done"
+    );
     Ok(())
 }
 
 async fn health(args: &Args) -> Result<()> {
     let url = format!("{}/healthz", args.endpoint.trim_end_matches('/'));
-    let resp = reqwest::get(&url).await
+    let resp = reqwest::get(&url)
+        .await
         .map_err(|e| cgn_core::Error::Unavailable(format!("get {url}: {e}")))?;
     info!(status = resp.status().as_u16(), "/healthz");
     Ok(())
 }
 
 async fn chat(args: &Args) -> Result<()> {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+    use std::sync::Arc;
 
-    let url = format!("{}/v1/chat/completions", args.endpoint.trim_end_matches('/'));
+    let url = format!(
+        "{}/v1/chat/completions",
+        args.endpoint.trim_end_matches('/')
+    );
     let body = serde_json::json!({
         "model": args.model,
         "messages": [{"role": "user", "content": "Hello!"}],
@@ -77,8 +84,8 @@ async fn chat(args: &Args) -> Result<()> {
             .build()
             .map_err(|e| cgn_core::Error::Internal(format!("reqwest: {e}")))?,
     );
-    let ok    = Arc::new(AtomicU32::new(0));
-    let err   = Arc::new(AtomicU32::new(0));
+    let ok = Arc::new(AtomicU32::new(0));
+    let err = Arc::new(AtomicU32::new(0));
     let total_ms = Arc::new(AtomicU64::new(0));
 
     let mut handles = Vec::with_capacity(args.concurrency as usize);
@@ -112,13 +119,17 @@ async fn chat(args: &Args) -> Result<()> {
         }));
     }
 
-    for h in handles { let _ = h.await; }
+    for h in handles {
+        let _ = h.await;
+    }
 
     let ok_n = ok.load(Ordering::Relaxed);
     let err_n = err.load(Ordering::Relaxed);
     let avg_ms = if ok_n > 0 {
         total_ms.load(Ordering::Relaxed) / ok_n as u64
-    } else { 0 };
+    } else {
+        0
+    };
     info!(ok = ok_n, err = err_n, avg_ms, "chat bench complete");
     Ok(())
 }

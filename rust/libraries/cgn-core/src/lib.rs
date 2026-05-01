@@ -23,30 +23,30 @@ pub const DEFAULT_CONFIG_PATH: &str = "/etc/cognitora/cognitora.toml";
 
 /// Cluster state key prefixes (etcd) used by router/agent/operator.
 pub mod etcd_keys {
-    pub const NODES: &str         = "/cognitora/nodes/";
-    pub const MODELS: &str        = "/cognitora/models/";
-    pub const ROUTING: &str       = "/cognitora/routing/policy";
+    pub const NODES: &str = "/cognitora/nodes/";
+    pub const MODELS: &str = "/cognitora/models/";
+    pub const ROUTING: &str = "/cognitora/routing/policy";
     pub const ROUTER_LEADER: &str = "/cognitora/router/leader";
 }
 
 /// Default ports.
 pub mod ports {
     /// `cgn-router` OpenAI-compatible HTTP/SSE.
-    pub const ROUTER_HTTP:  u16 = 8080;
+    pub const ROUTER_HTTP: u16 = 8080;
     /// `cgn-router` admin gRPC (metrics, control RPCs).
-    pub const ROUTER_GRPC:  u16 = 9090;
+    pub const ROUTER_GRPC: u16 = 9090;
     /// `cgn-router` admin HTTP (Prometheus scrape).
     pub const ROUTER_ADMIN: u16 = 9091;
     /// `cgn-agent` gRPC (router → agent).
-    pub const AGENT_GRPC:   u16 = 7070;
+    pub const AGENT_GRPC: u16 = 7070;
     /// `cgn-kvcached` gRPC (cross-host KV ops).
-    pub const KV_GRPC:      u16 = 7071;
+    pub const KV_GRPC: u16 = 7071;
     /// `cgn-kvcached` QUIC transfer port.
-    pub const KV_QUIC:      u16 = 7072;
+    pub const KV_QUIC: u16 = 7072;
     /// `cgn-metrics` HTTP scrape.
     pub const METRICS_HTTP: u16 = 9092;
     /// vLLM HTTP (private to the agent).
-    pub const VLLM_HTTP:    u16 = 8000;
+    pub const VLLM_HTTP: u16 = 8000;
 }
 
 /// Build / version metadata.

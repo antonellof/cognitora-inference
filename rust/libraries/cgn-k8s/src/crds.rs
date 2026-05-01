@@ -20,10 +20,10 @@ use serde::{Deserialize, Serialize};
     printcolumn = r#"{"name":"Ready","type":"string","jsonPath":".status.phase"}"#
 )]
 pub struct InferenceClusterSpec {
-    pub router:    RouterSpec,
-    pub agent:     AgentSpec,
-    pub kvcached:  KvCachedSpec,
-    pub metrics:   MetricsSpec,
+    pub router: RouterSpec,
+    pub agent: AgentSpec,
+    pub kvcached: KvCachedSpec,
+    pub metrics: MetricsSpec,
     #[serde(default)]
     pub image_tag: Option<String>,
 }

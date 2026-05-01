@@ -19,9 +19,9 @@ use super::score::{score_node, Score};
 /// Outcome of `pick`.
 #[derive(Debug, Clone)]
 pub struct RoutingDecision {
-    pub node:     Arc<NodeEntry>,
-    pub score:    Score,
-    pub overlap:  f32,
+    pub node: Arc<NodeEntry>,
+    pub score: Score,
+    pub overlap: f32,
     pub n_candidates: usize,
 }
 
@@ -29,7 +29,7 @@ pub struct RoutingDecision {
 pub async fn pick(
     state: &SharedState,
     model: &str,
-    role:  NodeRole,
+    role: NodeRole,
     token_ids: &[u32],
 ) -> Result<RoutingDecision> {
     let candidates = state.nodes.nodes_for(role, Some(model));
@@ -51,7 +51,8 @@ pub async fn pick(
     };
 
     // Step 3: pre-compute peer_max_power for normalisation.
-    let peer_max_power = candidates.iter()
+    let peer_max_power = candidates
+        .iter()
         .map(|n| n.power_watts)
         .fold(0.0_f32, f32::max);
 
@@ -81,7 +82,12 @@ pub async fn pick(
         "routing decision"
     );
 
-    Ok(RoutingDecision { node, score, overlap, n_candidates })
+    Ok(RoutingDecision {
+        node,
+        score,
+        overlap,
+        n_candidates,
+    })
 }
 
 /// Pair pick: prefill + decode for disaggregation. Returns two distinct
@@ -91,7 +97,7 @@ pub async fn pick_pair(
     state: &SharedState,
     model: &str,
     prefill_role: NodeRole,
-    decode_role:  NodeRole,
+    decode_role: NodeRole,
     token_ids: &[u32],
 ) -> Result<(RoutingDecision, RoutingDecision)> {
     let prefill = pick(state, model, prefill_role, token_ids).await?;
@@ -100,7 +106,8 @@ pub async fn pick_pair(
     // We avoid the same node id; if the only eligible decode node is the
     // prefill node (small cluster) we degrade to colocate.
     let candidates = state.nodes.nodes_for(decode_role, Some(model));
-    let distinct: Vec<_> = candidates.iter()
+    let distinct: Vec<_> = candidates
+        .iter()
         .filter(|n| n.node_id != prefill.node.node_id)
         .cloned()
         .collect();
@@ -111,7 +118,10 @@ pub async fn pick_pair(
     // benefit less from prefix overlap (the prefill already paid that
     // cost) so we pick the lowest-load / lowest-watt node.
     let policy = state.policy.load();
-    let peer_max_power = distinct.iter().map(|n| n.power_watts).fold(0.0_f32, f32::max);
+    let peer_max_power = distinct
+        .iter()
+        .map(|n| n.power_watts)
+        .fold(0.0_f32, f32::max);
     let mut best: Option<(Arc<NodeEntry>, Score)> = None;
     for n in &distinct {
         let s = score_node(&policy, n, 0.0, peer_max_power);
@@ -135,7 +145,12 @@ pub async fn pick_pair(
 /// Test-only convenience: build a decision from a single hand-crafted node.
 #[cfg(test)]
 pub fn decision_for_test(node: Arc<NodeEntry>, score: Score) -> RoutingDecision {
-    RoutingDecision { node, score, overlap: score.kv, n_candidates: 1 }
+    RoutingDecision {
+        node,
+        score,
+        overlap: score.kv,
+        n_candidates: 1,
+    }
 }
 
 #[cfg(test)]
@@ -152,7 +167,10 @@ mod tests {
             prefix: Arc::new(prefix),
             started: std::time::Instant::now(),
             policy: Arc::new(arc_swap::ArcSwap::from_pointee(RoutingPolicy {
-                kv: 0.55, load: 0.25, power: 0.10, capacity: 0.10,
+                kv: 0.55,
+                load: 0.25,
+                power: 0.10,
+                capacity: 0.10,
             })),
         }
     }
@@ -160,7 +178,7 @@ mod tests {
     #[tokio::test]
     async fn returns_unavailable_when_no_nodes() {
         let s = fake_state();
-        let r = pick(&s, "llama3", NodeRole::Both, &[1,2,3]).await;
+        let r = pick(&s, "llama3", NodeRole::Both, &[1, 2, 3]).await;
         assert!(matches!(r, Err(Error::Unavailable(_))));
     }
 }

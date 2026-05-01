@@ -16,8 +16,8 @@ use parking_lot::RwLock;
 /// Per-node entry stored under each prefix.
 #[derive(Debug, Clone)]
 pub struct NodeEntry {
-    pub node_id:    String,
-    pub last_seen:  Instant,
+    pub node_id: String,
+    pub last_seen: Instant,
 }
 
 /// Concurrent prefix → nodes index. The internal map is `DashMap` keyed by
@@ -33,7 +33,10 @@ pub struct PrefixIndex {
 
 impl PrefixIndex {
     pub fn new(ttl: Duration) -> Self {
-        Self { inner: DashMap::new(), ttl }
+        Self {
+            inner: DashMap::new(),
+            ttl,
+        }
     }
 
     /// Record that `node_id` currently holds `digest`.
@@ -44,7 +47,10 @@ impl PrefixIndex {
         if let Some(e) = v.iter_mut().find(|e| e.node_id == node_id) {
             e.last_seen = now;
         } else {
-            v.push(NodeEntry { node_id: node_id.to_string(), last_seen: now });
+            v.push(NodeEntry {
+                node_id: node_id.to_string(),
+                last_seen: now,
+            });
         }
     }
 
@@ -59,7 +65,9 @@ impl PrefixIndex {
 
     /// Look up the live nodes that currently hold `digest`.
     pub fn lookup(&self, digest: &[u8; 32]) -> Vec<String> {
-        let Some(entry) = self.inner.get(digest) else { return Vec::new() };
+        let Some(entry) = self.inner.get(digest) else {
+            return Vec::new();
+        };
         let now = Instant::now();
         let g = entry.read();
         g.iter()
@@ -88,15 +96,23 @@ impl PrefixIndex {
     }
 
     /// Total tracked digests.
-    pub fn len(&self) -> usize { self.inner.len() }
-    pub fn is_empty(&self) -> bool { self.inner.is_empty() }
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn d(byte: u8) -> [u8; 32] { let mut x = [0u8; 32]; x[0] = byte; x }
+    fn d(byte: u8) -> [u8; 32] {
+        let mut x = [0u8; 32];
+        x[0] = byte;
+        x
+    }
 
     #[test]
     fn insert_and_lookup() {

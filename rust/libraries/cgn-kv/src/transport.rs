@@ -11,8 +11,8 @@ use super::block::BlockAddress;
 /// Header of a single transfer frame.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Frame {
-    pub op:       Op,
-    pub addr:     BlockAddress,
+    pub op: Op,
+    pub addr: BlockAddress,
     pub body_len: u64,
 }
 

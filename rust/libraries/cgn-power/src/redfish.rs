@@ -11,10 +11,10 @@ use super::{PowerReader, PowerSample};
 
 /// Reader against `<base>/redfish/v1/Chassis/{id}/Power`.
 pub struct Redfish {
-    base:     String,
-    chassis:  String,
+    base: String,
+    chassis: String,
     auth_b64: String,
-    client:   reqwest::Client,
+    client: reqwest::Client,
 }
 
 impl Redfish {
@@ -39,7 +39,9 @@ impl Redfish {
 
 #[async_trait]
 impl PowerReader for Redfish {
-    fn name(&self) -> &'static str { "redfish" }
+    fn name(&self) -> &'static str {
+        "redfish"
+    }
 
     async fn sample(&self) -> Result<Vec<PowerSample>> {
         #[derive(Deserialize)]
@@ -54,22 +56,36 @@ impl PowerReader for Redfish {
         }
 
         let url = format!("{}/redfish/v1/Chassis/{}/Power", self.base, self.chassis);
-        let resp = self.client.get(&url)
+        let resp = self
+            .client
+            .get(&url)
             .header(reqwest::header::AUTHORIZATION, &self.auth_b64)
             .header(reqwest::header::ACCEPT, "application/json")
-            .send().await
+            .send()
+            .await
             .map_err(|e| Error::Unavailable(format!("redfish get: {e}")))?;
         if !resp.status().is_success() {
-            return Err(Error::Unavailable(format!("redfish status: {}", resp.status())));
+            return Err(Error::Unavailable(format!(
+                "redfish status: {}",
+                resp.status()
+            )));
         }
-        let doc: PowerDoc = resp.json().await
+        let doc: PowerDoc = resp
+            .json()
+            .await
             .map_err(|e| Error::InvalidArgument(format!("redfish json: {e}")))?;
 
-        let watts: f64 = doc.power_control.iter()
+        let watts: f64 = doc
+            .power_control
+            .iter()
             .filter_map(|p| p.power_consumed_watts)
             .sum();
 
         let now = chrono::Utc::now().timestamp();
-        Ok(vec![PowerSample { watts, component: "chassis", at_unix: now }])
+        Ok(vec![PowerSample {
+            watts,
+            component: "chassis",
+            at_unix: now,
+        }])
     }
 }

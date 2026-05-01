@@ -17,12 +17,15 @@ struct Store(HashMap<[u8; 32], Vec<String>>);
 #[derive(Clone)]
 pub struct ApiKeyStore {
     inner: Arc<ArcSwap<Store>>,
-    path:  Option<PathBuf>,
+    path: Option<PathBuf>,
 }
 
 impl ApiKeyStore {
     pub fn empty() -> Self {
-        Self { inner: Arc::new(ArcSwap::from_pointee(Store::default())), path: None }
+        Self {
+            inner: Arc::new(ArcSwap::from_pointee(Store::default())),
+            path: None,
+        }
     }
 
     /// Load `path`. Format: one record per line.
@@ -34,13 +37,15 @@ impl ApiKeyStore {
         let store = parse(&txt)?;
         Ok(Self {
             inner: Arc::new(ArcSwap::from_pointee(store)),
-            path:  Some(path.to_path_buf()),
+            path: Some(path.to_path_buf()),
         })
     }
 
     /// Re-read `self.path` from disk (no-op if no file was provided).
     pub fn reload(&self) -> Result<()> {
-        let Some(path) = &self.path else { return Ok(()); };
+        let Some(path) = &self.path else {
+            return Ok(());
+        };
         let txt = std::fs::read_to_string(path)
             .map_err(|e| Error::Config(format!("api keys file: {e}")))?;
         let store = parse(&txt)?;
@@ -55,28 +60,47 @@ impl ApiKeyStore {
         let scopes = snap.0.get(&digest)?;
         Some(Principal {
             subject: format!("apikey:{}", &hex_short(&digest)),
-            scopes:  scopes.clone(),
-            kind:    PrincipalKind::ApiKey,
+            scopes: scopes.clone(),
+            kind: PrincipalKind::ApiKey,
         })
     }
 
-    pub fn len(&self) -> usize { self.inner.load().0.len() }
-    pub fn is_empty(&self) -> bool { self.len() == 0 }
+    pub fn len(&self) -> usize {
+        self.inner.load().0.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 fn parse(txt: &str) -> Result<Store> {
     let mut out = HashMap::new();
     for (lineno, raw) in txt.lines().enumerate() {
         let line = raw.split('#').next().unwrap_or("").trim();
-        if line.is_empty() { continue; }
+        if line.is_empty() {
+            continue;
+        }
         let mut it = line.split_whitespace();
-        let token = it.next().ok_or_else(|| Error::Config(format!("api keys line {}: empty", lineno + 1)))?;
-        let scopes = it.next().map(|s| s.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect::<Vec<_>>()).unwrap_or_default();
+        let token = it
+            .next()
+            .ok_or_else(|| Error::Config(format!("api keys line {}: empty", lineno + 1)))?;
+        let scopes = it
+            .next()
+            .map(|s| {
+                s.split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let digest = if token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit()) {
             let mut d = [0u8; 32];
             for (i, chunk) in token.as_bytes().chunks(2).enumerate() {
-                d[i] = u8::from_str_radix(std::str::from_utf8(chunk).unwrap(), 16)
-                    .map_err(|e| Error::Config(format!("api keys line {}: hex: {e}", lineno + 1)))?;
+                d[i] =
+                    u8::from_str_radix(std::str::from_utf8(chunk).unwrap(), 16).map_err(|e| {
+                        Error::Config(format!("api keys line {}: hex: {e}", lineno + 1))
+                    })?;
             }
             d
         } else {
@@ -116,7 +140,10 @@ mod tests {
             cgn-secret-1 chat,embed
             0000000000000000000000000000000000000000000000000000000000000000 admin
         ";
-        let s = ApiKeyStore { inner: Arc::new(ArcSwap::from_pointee(parse(txt).unwrap())), path: None };
+        let s = ApiKeyStore {
+            inner: Arc::new(ArcSwap::from_pointee(parse(txt).unwrap())),
+            path: None,
+        };
         assert_eq!(s.len(), 2);
         let p = s.check("cgn-secret-1").unwrap();
         assert!(p.has_scope("chat"));

@@ -27,7 +27,7 @@ const FIELD_MANAGER: &str = "cgn-operator";
 pub async fn run(client: Client, namespace: Option<String>) -> Result<()> {
     let api: Api<InferenceCluster> = match &namespace {
         Some(ns) => Api::namespaced(client.clone(), ns),
-        None     => Api::all(client.clone()),
+        None => Api::all(client.clone()),
     };
     info!("InferenceCluster controller running");
     let ctx = Arc::new(Ctx { client });
@@ -36,32 +36,48 @@ pub async fn run(client: Client, namespace: Option<String>) -> Result<()> {
         .for_each(|res| async move {
             match res {
                 Ok((obj, _)) => info!(object = ?obj, "reconciled"),
-                Err(e)       => error!(error=?e, "reconcile error"),
+                Err(e) => error!(error=?e, "reconcile error"),
             }
         })
         .await;
     Ok(())
 }
 
-async fn reconcile(obj: Arc<InferenceCluster>, ctx: Arc<Ctx>) -> std::result::Result<Action, Error> {
+async fn reconcile(
+    obj: Arc<InferenceCluster>,
+    ctx: Arc<Ctx>,
+) -> std::result::Result<Action, Error> {
     let name = obj.name_any();
     let ns = obj.namespace().unwrap_or_else(|| "default".into());
     let image = format!(
         "ghcr.io/antonellof/cognitora-inference/{{}}:{}",
-        obj.spec.image_tag.clone().unwrap_or_else(|| "latest".into())
+        obj.spec
+            .image_tag
+            .clone()
+            .unwrap_or_else(|| "latest".into())
     );
-    let router_image  = image.replace("{}", "cgn-router");
-    let agent_image   = image.replace("{}", "cgn-agent");
-    let kv_image      = image.replace("{}", "cgn-kvcached");
+    let router_image = image.replace("{}", "cgn-router");
+    let agent_image = image.replace("{}", "cgn-agent");
+    let kv_image = image.replace("{}", "cgn-kvcached");
     let metrics_image = image.replace("{}", "cgn-metrics");
 
     info!(%name, %ns, "reconciling InferenceCluster");
 
     let mut all = Vec::new();
-    all.extend(crate::render::router_objects(&obj, &ns, &name, &router_image));
+    all.extend(crate::render::router_objects(
+        &obj,
+        &ns,
+        &name,
+        &router_image,
+    ));
     all.extend(crate::render::agent_objects(&obj, &ns, &name, &agent_image));
     all.extend(crate::render::kvcached_objects(&obj, &ns, &name, &kv_image));
-    all.extend(crate::render::metrics_objects(&obj, &ns, &name, &metrics_image));
+    all.extend(crate::render::metrics_objects(
+        &obj,
+        &ns,
+        &name,
+        &metrics_image,
+    ));
 
     let mut applied = 0u32;
     let mut errored = 0u32;
@@ -75,29 +91,45 @@ async fn reconcile(obj: Arc<InferenceCluster>, ctx: Arc<Ctx>) -> std::result::Re
         }
     }
 
-    let phase = if errored > 0 { "Degraded" } else { "Progressing" };
-    let _ = patch_status(&ctx.client, &ns, &name, InferenceClusterStatus {
-        phase:           phase.into(),
-        message:         Some(format!("{applied}/{} applied", all.len())),
-        ready_replicas:  obj.spec.router.replicas,
-    }).await;
+    let phase = if errored > 0 {
+        "Degraded"
+    } else {
+        "Progressing"
+    };
+    let _ = patch_status(
+        &ctx.client,
+        &ns,
+        &name,
+        InferenceClusterStatus {
+            phase: phase.into(),
+            message: Some(format!("{applied}/{} applied", all.len())),
+            ready_replicas: obj.spec.router.replicas,
+        },
+    )
+    .await;
 
     Ok(Action::requeue(Duration::from_secs(60)))
 }
 
-async fn apply_object(client: &Client, ns: &str, obj: &Value) -> std::result::Result<(), kube::Error> {
+async fn apply_object(
+    client: &Client,
+    ns: &str,
+    obj: &Value,
+) -> std::result::Result<(), kube::Error> {
     let kind = obj["kind"].as_str().unwrap_or("");
     let api_version = obj["apiVersion"].as_str().unwrap_or("v1");
     let name = obj["metadata"]["name"].as_str().unwrap_or("");
     let (group, version) = match api_version.split_once('/') {
         Some((g, v)) => (g.to_string(), v.to_string()),
-        None         => (String::new(), api_version.to_string()),
+        None => (String::new(), api_version.to_string()),
     };
     let plural = match kind {
-        "Deployment" | "DaemonSet" | "StatefulSet" | "ReplicaSet" => format!("{}s", kind.to_lowercase()),
-        "Service"      => "services".into(),
-        "ConfigMap"    => "configmaps".into(),
-        "Secret"       => "secrets".into(),
+        "Deployment" | "DaemonSet" | "StatefulSet" | "ReplicaSet" => {
+            format!("{}s", kind.to_lowercase())
+        }
+        "Service" => "services".into(),
+        "ConfigMap" => "configmaps".into(),
+        "Secret" => "secrets".into(),
         "ServiceAccount" => "serviceaccounts".into(),
         other => format!("{}s", other.to_lowercase()),
     };

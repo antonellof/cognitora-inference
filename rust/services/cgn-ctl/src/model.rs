@@ -24,11 +24,22 @@ pub enum Cmd {
 
 pub async fn run(cmd: Cmd) -> Result<()> {
     match cmd {
-        Cmd::Load { name, tp, prefill_replicas, decode_replicas } => {
+        Cmd::Load {
+            name,
+            tp,
+            prefill_replicas,
+            decode_replicas,
+        } => {
             info!(%name, tp, prefill_replicas, decode_replicas, "model load");
             Ok(())
         }
-        Cmd::Unload { name } => { info!(%name, "model unload"); Ok(()) }
-        Cmd::Ls => { info!("model list"); Ok(()) }
+        Cmd::Unload { name } => {
+            info!(%name, "model unload");
+            Ok(())
+        }
+        Cmd::Ls => {
+            info!("model list");
+            Ok(())
+        }
     }
 }

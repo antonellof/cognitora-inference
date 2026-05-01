@@ -14,7 +14,7 @@ pub mod cognitora {
 }
 
 /// Convenience aliases used throughout the workspace.
-pub use cognitora::v1 as v1;
+pub use cognitora::v1;
 
 /// File descriptor set hash used for buf reflection / debug.
 pub const PROTO_PACKAGE: &str = "cognitora.v1";

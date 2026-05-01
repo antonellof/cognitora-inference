@@ -29,17 +29,23 @@ pub async fn serve(supervisor: Arc<Supervisor>, addr: SocketAddr) -> Result<()> 
             supervisor.cfg.security.cert_file.as_ref(),
             supervisor.cfg.security.key_file.as_ref(),
         ) else {
-            return Err(Error::Config("require_mtls=true but cert/key/ca not set".into()));
+            return Err(Error::Config(
+                "require_mtls=true but cert/key/ca not set".into(),
+            ));
         };
         let tls = cgn_tls::server_tls(ca, cert, key)?;
-        builder = builder.tls_config(tls)
+        builder = builder
+            .tls_config(tls)
             .map_err(|e| Error::Tls(format!("server tls: {e}")))?;
     }
 
-    let svc = AgentSvc { supervisor: supervisor.clone() };
+    let svc = AgentSvc {
+        supervisor: supervisor.clone(),
+    };
     builder
         .add_service(AgentServer::new(svc))
-        .serve(addr).await
+        .serve(addr)
+        .await
         .map_err(|e| Error::Internal(format!("agent grpc serve: {e}")))
 }
 
@@ -58,32 +64,38 @@ impl Agent for AgentSvc {
         req: Request<Streaming<AgentGenerateRequest>>,
     ) -> Result<Response<Self::GenerateStream>, Status> {
         let mut inbound = req.into_inner();
-        let first = inbound.next().await
-            .ok_or_else(|| Status::invalid_argument("empty agent stream"))?
-            .map_err(|e| Status::from(e))?;
+        let first = inbound
+            .next()
+            .await
+            .ok_or_else(|| Status::invalid_argument("empty agent stream"))??;
 
         let (tx, rx) = mpsc::channel::<Result<Token, Status>>(64);
         let engine = self.supervisor.engine.clone();
         tokio::spawn(async move {
-            let prompt = first.messages.iter()
+            let prompt = first
+                .messages
+                .iter()
                 .map(|m| format!("<{}>\n{}", m.role, m.content))
-                .collect::<Vec<_>>().join("\n");
+                .collect::<Vec<_>>()
+                .join("\n");
             let p = first.params.unwrap_or_default();
             let req = GenerateReq {
-                id:      first.id,
-                model:   first.model,
+                id: first.id,
+                model: first.model,
                 prompt,
                 max_tokens: if p.max_tokens == 0 { 256 } else { p.max_tokens },
                 temperature: p.temperature,
-                top_p:       p.top_p,
-                stop:        p.stop,
-                stream:      true,
+                top_p: p.top_p,
+                stop: p.stop,
+                stream: true,
             };
             let (e_tx, mut e_rx) = mpsc::channel::<Token>(64);
             let gen = engine.generate(req, e_tx);
             let pump = async {
                 while let Some(t) = e_rx.recv().await {
-                    if tx.send(Ok(t)).await.is_err() { break; }
+                    if tx.send(Ok(t)).await.is_err() {
+                        break;
+                    }
                 }
             };
             let (_, gen_res) = tokio::join!(pump, gen);
@@ -97,19 +109,33 @@ impl Agent for AgentSvc {
 
     async fn load_model(&self, req: Request<ModelSpec>) -> Result<Response<PStatus>, Status> {
         let s = req.into_inner();
-        let name = s.r#ref.as_ref().map(|r| r.name.as_str()).unwrap_or("").to_string();
+        let name = s
+            .r#ref
+            .as_ref()
+            .map(|r| r.name.as_str())
+            .unwrap_or("")
+            .to_string();
         info!(model=%name, "load_model");
         // Real impl would orchestrate engine reload; for now we acknowledge.
-        Ok(Response::new(PStatus { code: 0, message: "ok".into() }))
+        Ok(Response::new(PStatus {
+            code: 0,
+            message: "ok".into(),
+        }))
     }
 
     async fn unload_model(&self, _req: Request<ModelRef>) -> Result<Response<PStatus>, Status> {
-        Ok(Response::new(PStatus { code: 0, message: "ok".into() }))
+        Ok(Response::new(PStatus {
+            code: 0,
+            message: "ok".into(),
+        }))
     }
 
     async fn kv_handoff(&self, _req: Request<KvHandoffSpec>) -> Result<Response<PStatus>, Status> {
         // Future: bridge to cgn-kvcached over UDS to push/pull blocks.
-        Ok(Response::new(PStatus { code: 0, message: "ok".into() }))
+        Ok(Response::new(PStatus {
+            code: 0,
+            message: "ok".into(),
+        }))
     }
 
     async fn health(&self, _req: Request<()>) -> Result<Response<NodeHealth>, Status> {
@@ -133,6 +159,9 @@ impl Agent for AgentSvc {
 
     async fn drain(&self, _req: Request<()>) -> Result<Response<PStatus>, Status> {
         self.supervisor.shutdown().await;
-        Ok(Response::new(PStatus { code: 0, message: "drained".into() }))
+        Ok(Response::new(PStatus {
+            code: 0,
+            message: "drained".into(),
+        }))
     }
 }

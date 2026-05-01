@@ -11,7 +11,7 @@ pub enum Cmd {
     /// Cordon a node (router stops sending new traffic).
     Cordon { node_id: String },
     /// Drain inflight requests from a node.
-    Drain  { node_id: String },
+    Drain { node_id: String },
 }
 
 pub async fn run(cmd: Cmd) -> Result<()> {

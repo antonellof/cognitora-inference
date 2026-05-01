@@ -6,7 +6,6 @@
 use async_trait::async_trait;
 use cgn_core::Result;
 use cgn_proto::v1::Token;
-use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 /// What an engine needs to expose to `cgn-agent`.
@@ -28,21 +27,21 @@ pub trait Engine: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct ModelSpec {
     pub name: String,
-    pub tp:   u32,
+    pub tp: u32,
     pub max_model_len: Option<u32>,
     pub extra_args: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct GenerateReq {
-    pub id:      String,
-    pub model:   String,
-    pub prompt:  String,
+    pub id: String,
+    pub model: String,
+    pub prompt: String,
     pub max_tokens: u32,
     pub temperature: f32,
     pub top_p: f32,
-    pub stop:    Vec<String>,
-    pub stream:  bool,
+    pub stop: Vec<String>,
+    pub stream: bool,
 }
 
 pub mod vllm;

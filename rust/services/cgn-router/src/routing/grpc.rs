@@ -14,9 +14,8 @@
 use std::sync::Arc;
 
 use cgn_proto::v1::{
-    agent_client::AgentClient,
-    router_server::Router,
-    AgentGenerateRequest, EmbedRequest, EmbedResponse, GenerateRequest, NodeRole, Token,
+    agent_client::AgentClient, router_server::Router, AgentGenerateRequest, EmbedRequest,
+    EmbedResponse, GenerateRequest, NodeRole, Token,
 };
 use futures::{Stream, StreamExt};
 use tokio::sync::mpsc;
@@ -30,7 +29,9 @@ pub struct RouterGrpc {
 }
 
 impl RouterGrpc {
-    pub fn new(state: Arc<SharedState>) -> Self { Self { state } }
+    pub fn new(state: Arc<SharedState>) -> Self {
+        Self { state }
+    }
 }
 
 type GenerateStream = std::pin::Pin<Box<dyn Stream<Item = Result<Token, Status>> + Send + 'static>>;
@@ -66,10 +67,7 @@ impl Router for RouterGrpc {
         Ok(Response::new(stream))
     }
 
-    async fn embed(
-        &self,
-        req: Request<EmbedRequest>,
-    ) -> Result<Response<EmbedResponse>, Status> {
+    async fn embed(&self, req: Request<EmbedRequest>) -> Result<Response<EmbedResponse>, Status> {
         let body = req.into_inner();
         let token_ids = approximate_token_ids(&body.inputs.join(" "));
         let decision = super::pick(&self.state, &body.model, NodeRole::Both, &token_ids)
@@ -86,10 +84,10 @@ impl Router for RouterGrpc {
 /// back through `tx`. Returns Err on irrecoverable errors.
 async fn forward(
     state: Arc<SharedState>,
-    req:   GenerateRequest,
-    tx:    mpsc::Sender<Result<Token, Status>>,
+    req: GenerateRequest,
+    tx: mpsc::Sender<Result<Token, Status>>,
 ) -> cgn_core::Result<()> {
-    use cgn_core::{Error, Result};
+    use cgn_core::Error;
 
     // Approximate prefix tokens; a future revision uses the model's real
     // tokenizer — see `gateway::tokenize_for_routing`.
@@ -112,19 +110,20 @@ async fn forward(
         "forwarding to agent"
     );
 
-    let mut client = connect_agent(&decision.node.address).await
+    let mut client = connect_agent(&decision.node.address)
+        .await
         .map_err(|s| Error::Unavailable(format!("agent: {s}")))?;
 
     let agent_req = AgentGenerateRequest {
-        id:           uuid::Uuid::new_v4().to_string(),
-        model:        req.model,
-        messages:     req.messages,
-        params:       req.params,
+        id: uuid::Uuid::new_v4().to_string(),
+        model: req.model,
+        messages: req.messages,
+        params: req.params,
         prefill_only: false,
-        decode_only:  false,
-        blocks:       vec![],
-        traceparent:  req.traceparent,
-        tracestate:   req.tracestate,
+        decode_only: false,
+        blocks: vec![],
+        traceparent: req.traceparent,
+        tracestate: req.tracestate,
     };
 
     let req_stream = futures::stream::iter(vec![agent_req]);
@@ -179,7 +178,12 @@ fn approximate_token_ids(s: &str) -> Vec<u32> {
             let mut h = blake3::Hasher::new();
             h.update(w.as_bytes());
             let bytes = h.finalize();
-            u32::from_le_bytes([bytes.as_bytes()[0], bytes.as_bytes()[1], bytes.as_bytes()[2], bytes.as_bytes()[3]])
+            u32::from_le_bytes([
+                bytes.as_bytes()[0],
+                bytes.as_bytes()[1],
+                bytes.as_bytes()[2],
+                bytes.as_bytes()[3],
+            ])
         })
         .collect()
 }

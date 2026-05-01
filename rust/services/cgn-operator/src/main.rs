@@ -22,7 +22,11 @@ use kube::Client;
 use tracing::info;
 
 #[derive(Parser, Debug)]
-#[command(name = "cgn-operator", version, about = "Cognitora Kubernetes operator")]
+#[command(
+    name = "cgn-operator",
+    version,
+    about = "Cognitora Kubernetes operator"
+)]
 struct Cli {
     /// Namespace to watch. Defaults to all namespaces (cluster-scoped).
     #[arg(short, long)]

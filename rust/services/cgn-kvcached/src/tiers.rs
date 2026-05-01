@@ -16,8 +16,8 @@ use cgn_kv::{
 };
 
 pub struct Store {
-    pub ram:   Arc<RamTier>,
-    pub ssd:   Arc<SsdTier>,
+    pub ram: Arc<RamTier>,
+    pub ssd: Arc<SsdTier>,
     pub index: IndexImpl,
 }
 
@@ -33,7 +33,9 @@ impl Store {
     /// Probe RAM, SSD, then the persistent index. Returns a handle when
     /// present in any tier.
     pub fn lookup(&self, addr: &BlockAddress) -> Option<BlockHandle> {
-        if let Some(h) = self.ram.get(addr) { return Some(h); }
+        if let Some(h) = self.ram.get(addr) {
+            return Some(h);
+        }
         if let Ok(Some(meta)) = self.index.get(addr) {
             return Some(BlockHandle { addr: *addr, meta });
         }
@@ -43,19 +45,24 @@ impl Store {
     /// Async lookup that may hit SSD. Returns the bytes (and promotes
     /// them into RAM as a side effect) when the block is found cold.
     pub async fn lookup_with_promote(&self, addr: &BlockAddress) -> Option<bytes::Bytes> {
-        if let Some(b) = self.ram.get_bytes(addr) { return Some(b); }
+        if let Some(b) = self.ram.get_bytes(addr) {
+            return Some(b);
+        }
         if let Ok(Some(b)) = self.ssd.read(addr).await {
             // Promote: bring back into RAM, update tier hint.
             let bytes = b.clone();
             self.ram.put(*addr, bytes);
-            let _ = self.index.put(addr, &BlockMeta {
-                model: String::new(),
-                layer: addr.layer,
-                bytes: b.len() as u64,
-                created_unix: chrono::Utc::now().timestamp() as u64,
-                last_seen_unix: chrono::Utc::now().timestamp() as u64,
-                tier: TierKind::Ram,
-            });
+            let _ = self.index.put(
+                addr,
+                &BlockMeta {
+                    model: String::new(),
+                    layer: addr.layer,
+                    bytes: b.len() as u64,
+                    created_unix: chrono::Utc::now().timestamp() as u64,
+                    last_seen_unix: chrono::Utc::now().timestamp() as u64,
+                    tier: TierKind::Ram,
+                },
+            );
             return Some(b);
         }
         None
@@ -64,30 +71,38 @@ impl Store {
     pub fn put_ram(&self, addr: BlockAddress, bytes: bytes::Bytes, model: &str) -> Result<()> {
         let len = bytes.len() as u64;
         self.ram.put(addr, bytes);
-        self.index.put(&addr, &BlockMeta {
-            model: model.to_string(),
-            layer: addr.layer,
-            bytes: len,
-            created_unix: chrono::Utc::now().timestamp() as u64,
-            last_seen_unix: chrono::Utc::now().timestamp() as u64,
-            tier: TierKind::Ram,
-        })?;
+        self.index.put(
+            &addr,
+            &BlockMeta {
+                model: model.to_string(),
+                layer: addr.layer,
+                bytes: len,
+                created_unix: chrono::Utc::now().timestamp() as u64,
+                last_seen_unix: chrono::Utc::now().timestamp() as u64,
+                tier: TierKind::Ram,
+            },
+        )?;
         Ok(())
     }
 
     /// Spill a block from RAM to SSD. Used by the eviction policy.
     pub async fn spill_to_ssd(&self, addr: BlockAddress, model: &str) -> Result<()> {
-        let Some(bytes) = self.ram.get_bytes(&addr) else { return Ok(()); };
+        let Some(bytes) = self.ram.get_bytes(&addr) else {
+            return Ok(());
+        };
         self.ssd.write(&addr, &bytes).await?;
         self.ram.evict(&addr);
-        self.index.put(&addr, &BlockMeta {
-            model: model.to_string(),
-            layer: addr.layer,
-            bytes: bytes.len() as u64,
-            created_unix: chrono::Utc::now().timestamp() as u64,
-            last_seen_unix: chrono::Utc::now().timestamp() as u64,
-            tier: TierKind::Ssd,
-        })?;
+        self.index.put(
+            &addr,
+            &BlockMeta {
+                model: model.to_string(),
+                layer: addr.layer,
+                bytes: bytes.len() as u64,
+                created_unix: chrono::Utc::now().timestamp() as u64,
+                last_seen_unix: chrono::Utc::now().timestamp() as u64,
+                tier: TierKind::Ssd,
+            },
+        )?;
         Ok(())
     }
 
@@ -101,7 +116,9 @@ impl Store {
         self.ssd.path_for(addr)
     }
 
-    pub fn ssd_root(&self) -> &Path { self.ssd.root() }
+    pub fn ssd_root(&self) -> &Path {
+        self.ssd.root()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -113,10 +130,18 @@ pub struct IndexImpl(cgn_kv::Index);
 
 #[cfg(feature = "persistent-index")]
 impl IndexImpl {
-    pub fn open(dir: &Path) -> Result<Self> { Ok(Self(cgn_kv::Index::open(dir)?)) }
-    pub fn put(&self, a: &BlockAddress, m: &BlockMeta) -> Result<()> { self.0.put(a, m) }
-    pub fn get(&self, a: &BlockAddress) -> Result<Option<BlockMeta>> { self.0.get(a) }
-    pub fn delete(&self, a: &BlockAddress) -> Result<()> { self.0.delete(a) }
+    pub fn open(dir: &Path) -> Result<Self> {
+        Ok(Self(cgn_kv::Index::open(dir)?))
+    }
+    pub fn put(&self, a: &BlockAddress, m: &BlockMeta) -> Result<()> {
+        self.0.put(a, m)
+    }
+    pub fn get(&self, a: &BlockAddress) -> Result<Option<BlockMeta>> {
+        self.0.get(a)
+    }
+    pub fn delete(&self, a: &BlockAddress) -> Result<()> {
+        self.0.delete(a)
+    }
 }
 
 #[cfg(not(feature = "persistent-index"))]
@@ -127,7 +152,9 @@ pub struct IndexImpl {
 #[cfg(not(feature = "persistent-index"))]
 impl IndexImpl {
     pub fn open(_dir: &Path) -> Result<Self> {
-        Ok(Self { map: dashmap::DashMap::new() })
+        Ok(Self {
+            map: dashmap::DashMap::new(),
+        })
     }
     pub fn put(&self, a: &BlockAddress, m: &BlockMeta) -> Result<()> {
         self.map.insert(*a, m.clone());

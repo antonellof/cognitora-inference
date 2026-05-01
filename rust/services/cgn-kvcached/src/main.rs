@@ -35,9 +35,15 @@ async fn main() -> Result<()> {
     info!("kvcached starting");
 
     let store = Arc::new(tiers::Store::open(&cfg.kv).await?);
-    let listen: std::net::SocketAddr = cfg.kv.listen.parse()
+    let listen: std::net::SocketAddr = cfg
+        .kv
+        .listen
+        .parse()
         .map_err(|e| Error::Config(format!("kv.listen: {e}")))?;
-    let quic_listen: std::net::SocketAddr = cfg.kv.quic_listen.parse()
+    let quic_listen: std::net::SocketAddr = cfg
+        .kv
+        .quic_listen
+        .parse()
         .map_err(|e| Error::Config(format!("kv.quic_listen: {e}")))?;
 
     tokio::select! {

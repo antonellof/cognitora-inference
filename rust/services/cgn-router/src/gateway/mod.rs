@@ -34,10 +34,15 @@ use crate::state::SharedState;
 pub async fn serve(state: Arc<SharedState>, addr: SocketAddr) -> Result<()> {
     let app = router(state.clone()).layer(TraceLayer::new_for_http());
     tracing::info!(%addr, "openai surface listening");
-    let listener = tokio::net::TcpListener::bind(addr).await
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
         .map_err(Error::Io)?;
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await
-        .map_err(|e| Error::Internal(format!("gateway serve: {e}")))
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .map_err(|e| Error::Internal(format!("gateway serve: {e}")))
 }
 
 fn router(state: Arc<SharedState>) -> Router {
@@ -46,9 +51,9 @@ fn router(state: Arc<SharedState>) -> Router {
 
     let mut api = Router::new()
         .route("/v1/chat/completions", post(chat::completions))
-        .route("/v1/completions",      post(chat::completions))
-        .route("/v1/embeddings",       post(embed::embeddings))
-        .route("/v1/models",           get(models::list))
+        .route("/v1/completions", post(chat::completions))
+        .route("/v1/embeddings", post(embed::embeddings))
+        .route("/v1/models", get(models::list))
         .with_state(state.clone());
 
     if auth_active {
@@ -61,7 +66,7 @@ fn router(state: Arc<SharedState>) -> Router {
     Router::new()
         .merge(api)
         .route("/healthz", get(|| async { "ok" }))
-        .route("/readyz",  get(|| async { "ok" }))
+        .route("/readyz", get(|| async { "ok" }))
 }
 
 fn build_auth_state(state: &SharedState) -> cgn_auth::middleware::AuthState {

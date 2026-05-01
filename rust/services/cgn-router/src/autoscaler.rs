@@ -49,15 +49,19 @@ pub fn spawn(state: Arc<SharedState>) {
 async fn tick(state: &SharedState) -> Result<()> {
     let cfg = &state.cfg.router.autoscaler;
     let nodes = state.nodes.snapshot();
-    if nodes.is_empty() { return Ok(()); }
+    if nodes.is_empty() {
+        return Ok(());
+    }
 
-    let avg_load = nodes.iter()
+    let avg_load = nodes
+        .iter()
         .map(|n| {
             let q = n.queue_depth as f32;
             let cap = n.total_blocks.max(1) as f32;
             (q / cap).min(1.0)
         })
-        .sum::<f32>() / nodes.len() as f32;
+        .sum::<f32>()
+        / nodes.len() as f32;
     let cluster_idle = avg_load * 100.0 < cfg.idle_util_pct;
 
     let endpoints = state.cfg.cluster.etcd_endpoints.clone();
@@ -66,15 +70,19 @@ async fn tick(state: &SharedState) -> Result<()> {
         return Ok(());
     }
     let mut client = match etcd_client::Client::connect(&endpoints, None).await {
-        Ok(c)  => c,
+        Ok(c) => c,
         Err(e) => return Err(cgn_core::Error::Etcd(format!("connect: {e}"))),
     };
 
     for n in &nodes {
         let drain = cluster_idle && n.power_watts > cfg.high_watt_threshold;
         let reason = if drain {
-            format!("idle (avg {:.1}%); watts {:.0} > threshold {:.0}",
-                avg_load * 100.0, n.power_watts, cfg.high_watt_threshold)
+            format!(
+                "idle (avg {:.1}%); watts {:.0} > threshold {:.0}",
+                avg_load * 100.0,
+                n.power_watts,
+                cfg.high_watt_threshold
+            )
         } else {
             "active".into()
         };
@@ -91,6 +99,10 @@ async fn tick(state: &SharedState) -> Result<()> {
         }
     }
 
-    info!(nodes = nodes.len(), avg_load_pct = avg_load * 100.0, "autoscaler tick");
+    info!(
+        nodes = nodes.len(),
+        avg_load_pct = avg_load * 100.0,
+        "autoscaler tick"
+    );
     Ok(())
 }

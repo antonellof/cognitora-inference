@@ -36,51 +36,71 @@ milestone is gated on.
 against a real vLLM instance and probes `/v1/models`, streaming chat,
 and a buffered chat round-trip.
 
-### M2 — Multi-node KV-aware routing (alpha → beta) — ✅ skeleton
+### M2 — Multi-node KV-aware routing (alpha → beta) — ✅
 
-* etcd-backed `NodeRegistry` with TTL-based liveness.
+* etcd-backed `NodeRegistry` with TTL-based liveness via `lease_grant`
+  + `lease_keep_alive` in `cgn-agent`'s health emitter.
 * `arc_swap`-based hot reload of `RoutingPolicy` from etcd.
-* RAM tier promotion across nodes via gRPC `Push/Pull`.
-* Helm chart, CRDs, operator skeleton.
+* RAM tier promotion across nodes via gRPC `Push/Pull`, backed by the
+  QUIC frame codec in `cgn-kvcached::transport`.
+* Helm chart, CRDs, operator reconciler.
 
 **Exit gate**: 4-node cluster demo (`tests/e2e/multi_node_kv.sh`)
 shows ≥ 0.55 cache hit ratio on a representative trace.
 
-### M3 — Cross-node KV transport — 🚧
+### M3 — Cross-node KV transport — ✅
 
-* QUIC `Frame` codec finished (header → block → ack).
-* RDMA transport behind a feature flag (`--features rdma` on Linux).
-* SSD tier with `io_uring` direct I/O.
-* Prefill/decode disaggregation hooked into the gateway.
+* QUIC `Frame` codec end-to-end (header → block → ack) in
+  `cgn-kvcached::transport`.
+* RDMA transport gated behind `--features rdma` (Linux + ibverbs).
+* SSD tier as file-per-block with atomic temp-file rename
+  (`cgn_kv::SsdTier`); `io_uring` direct I/O is a future Linux-only
+  optimisation tracked under M3 follow-ups.
+* Prefill/decode disaggregation wired into `gateway::chat`: the router
+  picks a `(prefill, decode)` pair via `routing::pick_pair`, runs the
+  prefill phase against the prefill node, then proxies the decode
+  phase with the resulting block list.
 
 **Exit gate**: < 12 ms p99 1 MiB block fetch on a 10 GbE LAN.
 
-### M4 — Cascade + multi-tenancy — 🚧
+### M4 — Cascade + multi-tenancy — ✅
 
-* `cascade::Cascade` wired into `chat::completions`; logprob-based
-  escalation through the configured chain.
-* Token-bucket rate limit promoted from in-process to Redis-backed for
-  multi-tenant clusters.
-* OIDC SSO end-to-end (group claim → tenant scope).
+* `cascade::Cascade::run` orchestrates SLM → Mid → LLM through
+  `chat::completions`; falls back to single-shot when no cascade is
+  configured.
+* `cgn-ratelimit` ships an in-process governor by default and a
+  `redis-backend` feature for multi-replica deployments (atomic Lua
+  token bucket, one round-trip per request).
+* OIDC verifier supports a group-claim → tenant-scope mapping
+  (`OidcVerifier::with_group_scope_map`); accepts both array and
+  space-separated string shapes for the groups claim.
 
-**Exit gate**: 3-tenant fairness benchmark with strict-SLA + best-effort
-classes; no SLA violations under contention.
+**Exit gate**: 3-tenant fairness benchmark with strict-SLA +
+best-effort classes; no SLA violations under contention.
 
-### M5 — Operator GA + federation — 📋
+### M5 — Operator GA + federation — ✅
 
-* `cgn-operator` reconciles `InferenceCluster`, `ModelPool`,
-  `RoutingPolicy` end-to-end (today: skeleton).
-* Multi-cluster federation: a router on one cluster can forward to
-  agents on another via mTLS gRPC.
+* `cgn-operator` reconciles `InferenceCluster` (renders Deployment +
+  DaemonSet + Service via server-side apply), `ModelPool` (writes a
+  `cognitora-models-<name>` ConfigMap), and `RoutingPolicy` (publishes
+  to `/cognitora/routing/policy` in etcd).
+* Federation forwarder in `cgn-router::federation` picks the first
+  reachable peer router and proxies the OpenAI request unchanged.
 
 **Exit gate**: `helm upgrade` produces zero downtime in the e2e suite.
 
-### M6 — Energy-aware autoscaler — 📋
+### M6 — Energy-aware autoscaler — ✅
 
-* Power signal from `cgn-metrics` feeds a closed-loop autoscaler that
-  drains the highest-watt node when idle and promotes lower-watt nodes
-  during burst.
-* Per-tenant SLO admission with deadline propagation.
+* `autoscaler::spawn` runs a 30 s control loop. When the cluster's
+  average load drops below `idle_util_pct` and a node's watts exceed
+  `high_watt_threshold`, the loop writes `{drain: true}` into etcd at
+  `/cognitora/autoscaler/<node_id>`; `cgn-operator` picks it up and
+  scales the node's replica down. When traffic returns the same loop
+  flips the hint back.
+* `deadline::check` enforces per-tenant SLO admission: every request
+  carries a deadline (explicit or derived from `[router.admission]
+  ttft_slo` × `max_tokens`); requests whose estimated TTFT exceeds the
+  deadline are rejected fast instead of starving behind a noisy queue.
 
 **Exit gate**: ≥ 1.4× energy efficiency vs round-robin baseline on the
 fixture trace.

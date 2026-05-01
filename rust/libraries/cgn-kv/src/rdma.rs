@@ -34,4 +34,6 @@ pub async fn peer_pull(_remote: &str, _addr: BlockAddress) -> cgn_core::Result<B
 
 /// Whether RDMA is usable on this host. Always `false` until the verbs
 /// path lands; the build of `cgn-kvcached` falls back to QUIC.
-pub fn available() -> bool { false }
+pub fn available() -> bool {
+    false
+}

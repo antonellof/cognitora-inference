@@ -18,14 +18,18 @@ use super::{api_key::ApiKeyStore, oidc::OidcVerifier, Principal};
 #[derive(Clone)]
 pub struct AuthState {
     pub api_keys: Option<ApiKeyStore>,
-    pub oidc:     Option<Arc<OidcVerifier>>,
+    pub oidc: Option<Arc<OidcVerifier>>,
     /// When true, requests without credentials are rejected with 401.
     pub required: bool,
 }
 
 impl AuthState {
     pub fn anonymous() -> Self {
-        Self { api_keys: None, oidc: None, required: false }
+        Self {
+            api_keys: None,
+            oidc: None,
+            required: false,
+        }
     }
 }
 

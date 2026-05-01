@@ -36,8 +36,8 @@ pub enum Cmd {
 pub async fn run(cmd: Cmd) -> Result<()> {
     match cmd {
         Cmd::Create { scopes, file } => create(scopes, file),
-        Cmd::Revoke { sha, file }    => revoke(&sha, file),
-        Cmd::Lock { file }           => lock(file),
+        Cmd::Revoke { sha, file } => revoke(&sha, file),
+        Cmd::Lock { file } => lock(file),
     }
 }
 
@@ -50,7 +50,9 @@ fn create(scopes: String, file: PathBuf) -> Result<()> {
     let line = format!("{sha} {scopes}\n");
     use std::io::Write;
     std::fs::OpenOptions::new()
-        .create(true).append(true).open(&file)
+        .create(true)
+        .append(true)
+        .open(&file)
         .map_err(cgn_core::Error::Io)?
         .write_all(line.as_bytes())
         .map_err(cgn_core::Error::Io)?;
@@ -62,10 +64,13 @@ fn create(scopes: String, file: PathBuf) -> Result<()> {
 fn revoke(sha: &str, file: PathBuf) -> Result<()> {
     let txt = std::fs::read_to_string(&file).map_err(cgn_core::Error::Io)?;
     let needle = sha.to_ascii_lowercase();
-    let kept: Vec<&str> = txt.lines().filter(|l| {
-        let first = l.split_whitespace().next().unwrap_or("");
-        !first.starts_with(&needle)
-    }).collect();
+    let kept: Vec<&str> = txt
+        .lines()
+        .filter(|l| {
+            let first = l.split_whitespace().next().unwrap_or("");
+            !first.starts_with(&needle)
+        })
+        .collect();
     std::fs::write(&file, kept.join("\n")).map_err(cgn_core::Error::Io)?;
     info!(sha = %sha, "revoked");
     Ok(())
@@ -76,7 +81,10 @@ fn lock(file: PathBuf) -> Result<()> {
     let mut out = String::new();
     for line in txt.lines() {
         let mut parts = line.split_whitespace();
-        let Some(token) = parts.next() else { out.push('\n'); continue; };
+        let Some(token) = parts.next() else {
+            out.push('\n');
+            continue;
+        };
         let scopes = parts.next().unwrap_or("");
         if token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit()) {
             out.push_str(line);

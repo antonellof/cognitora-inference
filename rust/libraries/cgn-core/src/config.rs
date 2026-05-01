@@ -19,14 +19,14 @@ use crate::error::Result;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    pub cluster:  ClusterConfig,
-    pub router:   RouterConfig,
-    pub agent:    AgentConfig,
-    pub kv:       KvConfig,
+    pub cluster: ClusterConfig,
+    pub router: RouterConfig,
+    pub agent: AgentConfig,
+    pub kv: KvConfig,
     pub security: SecurityConfig,
-    pub metrics:  MetricsConfig,
-    pub auth:     AuthConfig,
-    pub models:   HashMap<String, ModelConfig>,
+    pub metrics: MetricsConfig,
+    pub auth: AuthConfig,
+    pub models: HashMap<String, ModelConfig>,
 }
 
 // ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@ pub struct ClusterConfig {
     pub name: String,
     pub state_backend: StateBackend,
     pub etcd_endpoints: Vec<String>,
-    pub gossip_seeds:   Vec<String>,
+    pub gossip_seeds: Vec<String>,
 }
 impl Default for ClusterConfig {
     fn default() -> Self {
@@ -47,7 +47,7 @@ impl Default for ClusterConfig {
             name: "cognitora".into(),
             state_backend: StateBackend::Etcd,
             etcd_endpoints: vec![],
-            gossip_seeds:   vec![],
+            gossip_seeds: vec![],
         }
     }
 }
@@ -84,17 +84,17 @@ pub struct RouterConfig {
 impl Default for RouterConfig {
     fn default() -> Self {
         Self {
-            listen_http:  format!("0.0.0.0:{}", crate::ports::ROUTER_HTTP),
-            listen_grpc:  format!("0.0.0.0:{}", crate::ports::ROUTER_GRPC),
+            listen_http: format!("0.0.0.0:{}", crate::ports::ROUTER_HTTP),
+            listen_grpc: format!("0.0.0.0:{}", crate::ports::ROUTER_GRPC),
             listen_admin: format!("0.0.0.0:{}", crate::ports::ROUTER_ADMIN),
-            node_id:      default_node_id("router"),
+            node_id: default_node_id("router"),
             score_weights: ScoreWeights::default(),
-            admission:     AdmissionConfig::default(),
-            rate_limit:    RateLimitConfig::default(),
-            cascade:       CascadeConfig::default(),
-            disagg:        DisaggConfig::default(),
-            federation:    FederationConfig::default(),
-            autoscaler:    AutoscalerConfig::default(),
+            admission: AdmissionConfig::default(),
+            rate_limit: RateLimitConfig::default(),
+            cascade: CascadeConfig::default(),
+            disagg: DisaggConfig::default(),
+            federation: FederationConfig::default(),
+            autoscaler: AutoscalerConfig::default(),
         }
     }
 }
@@ -102,14 +102,19 @@ impl Default for RouterConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ScoreWeights {
-    pub kv:       f32,
-    pub load:     f32,
-    pub power:    f32,
+    pub kv: f32,
+    pub load: f32,
+    pub power: f32,
     pub capacity: f32,
 }
 impl Default for ScoreWeights {
     fn default() -> Self {
-        Self { kv: 0.55, load: 0.25, power: 0.10, capacity: 0.10 }
+        Self {
+            kv: 0.55,
+            load: 0.25,
+            power: 0.10,
+            capacity: 0.10,
+        }
     }
 }
 impl ScoreWeights {
@@ -152,7 +157,11 @@ pub struct RateLimitConfig {
 }
 impl Default for RateLimitConfig {
     fn default() -> Self {
-        Self { rps: 50, burst: 200, redis_url: None }
+        Self {
+            rps: 50,
+            burst: 200,
+            redis_url: None,
+        }
     }
 }
 
@@ -166,7 +175,10 @@ pub struct CascadeConfig {
 }
 impl Default for CascadeConfig {
     fn default() -> Self {
-        Self { enabled: false, confidence_threshold: -1.5 }
+        Self {
+            enabled: false,
+            confidence_threshold: -1.5,
+        }
     }
 }
 
@@ -180,22 +192,21 @@ pub struct DisaggConfig {
 }
 impl Default for DisaggConfig {
     fn default() -> Self {
-        Self { enabled: false, colocate_below_tokens: 256 }
+        Self {
+            enabled: false,
+            colocate_below_tokens: 256,
+        }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct FederationConfig {
     /// Forward to peer Cognitora clusters when no local node serves a model.
     pub enabled: bool,
     /// Peer router gRPC endpoints (mTLS).
     pub peers: Vec<String>,
-}
-impl Default for FederationConfig {
-    fn default() -> Self {
-        Self { enabled: false, peers: Vec::new() }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -215,10 +226,10 @@ pub struct AutoscalerConfig {
 impl Default for AutoscalerConfig {
     fn default() -> Self {
         Self {
-            enabled:             false,
-            idle_util_pct:       15.0,
+            enabled: false,
+            idle_util_pct: 15.0,
             high_watt_threshold: 350.0,
-            deadline_admission:  false,
+            deadline_admission: false,
         }
     }
 }
@@ -241,20 +252,23 @@ pub struct AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            listen:    format!("0.0.0.0:{}", crate::ports::AGENT_GRPC),
-            vllm_url:  format!("http://127.0.0.1:{}", crate::ports::VLLM_HTTP),
-            vllm_cmd:  default_vllm_cmd(),
-            role:      NodeRoleCfg::Both,
-            node_id:   default_node_id("agent"),
-            kv_uds:    PathBuf::from("/run/cognitora/kv.sock"),
+            listen: format!("0.0.0.0:{}", crate::ports::AGENT_GRPC),
+            vllm_url: format!("http://127.0.0.1:{}", crate::ports::VLLM_HTTP),
+            vllm_cmd: default_vllm_cmd(),
+            role: NodeRoleCfg::Both,
+            node_id: default_node_id("agent"),
+            kv_uds: PathBuf::from("/run/cognitora/kv.sock"),
             gpu_index: None,
         }
     }
 }
 fn default_vllm_cmd() -> Vec<String> {
     vec![
-        "vllm".into(), "serve".into(), "{model}".into(),
-        "--tensor-parallel-size".into(), "{tp}".into(),
+        "vllm".into(),
+        "serve".into(),
+        "{model}".into(),
+        "--tensor-parallel-size".into(),
+        "{tp}".into(),
         "--enable-chunked-prefill".into(),
     ]
 }
@@ -287,13 +301,13 @@ pub struct KvConfig {
 impl Default for KvConfig {
     fn default() -> Self {
         Self {
-            listen:      format!("0.0.0.0:{}", crate::ports::KV_GRPC),
-            uds:         PathBuf::from("/run/cognitora/kv.sock"),
-            ram_gib:     32,
-            ssd_dir:     PathBuf::from("/var/lib/cognitora/kv"),
-            ssd_gib:     1024,
-            index_dir:   PathBuf::from("/var/lib/cognitora/index"),
-            transport:   KvTransport::Quic,
+            listen: format!("0.0.0.0:{}", crate::ports::KV_GRPC),
+            uds: PathBuf::from("/run/cognitora/kv.sock"),
+            ram_gib: 32,
+            ssd_dir: PathBuf::from("/var/lib/cognitora/kv"),
+            ssd_gib: 1024,
+            index_dir: PathBuf::from("/var/lib/cognitora/index"),
+            transport: KvTransport::Quic,
             quic_listen: format!("0.0.0.0:{}", crate::ports::KV_QUIC),
             block_size_tokens: 16,
         }
@@ -314,9 +328,9 @@ pub enum KvTransport {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SecurityConfig {
-    pub ca_file:   Option<PathBuf>,
+    pub ca_file: Option<PathBuf>,
     pub cert_file: Option<PathBuf>,
-    pub key_file:  Option<PathBuf>,
+    pub key_file: Option<PathBuf>,
     pub require_mtls: bool,
 }
 
@@ -410,7 +424,9 @@ impl Config {
 
     /// Resolve the config path according to the documented lookup order.
     pub fn locate(arg: Option<&Path>) -> PathBuf {
-        if let Some(p) = arg { return p.to_path_buf(); }
+        if let Some(p) = arg {
+            return p.to_path_buf();
+        }
         if let Ok(env) = std::env::var("CGN_CONFIG") {
             return PathBuf::from(env);
         }
@@ -424,16 +440,25 @@ impl Config {
 }
 
 fn default_node_id(role: &str) -> String {
-    format!("{}-{}-{}", hostname_or(role), role, &uuid::Uuid::new_v4().simple().to_string()[..8])
+    format!(
+        "{}-{}-{}",
+        hostname_or(role),
+        role,
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    )
 }
 
 fn hostname_or(default: &str) -> String {
     if let Ok(h) = std::env::var("HOSTNAME") {
-        if !h.is_empty() { return h; }
+        if !h.is_empty() {
+            return h;
+        }
     }
     if let Ok(s) = std::fs::read_to_string("/etc/hostname") {
         let trimmed = s.trim();
-        if !trimmed.is_empty() { return trimmed.to_string(); }
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
     }
     default.to_string()
 }
@@ -454,7 +479,9 @@ mod tests {
     fn parses_minimal_toml() {
         let dir = TempDir::new().unwrap();
         let p = dir.path().join("cognitora.toml");
-        std::fs::write(&p, r#"
+        std::fs::write(
+            &p,
+            r#"
 [cluster]
 name = "prod-eu"
 
@@ -463,7 +490,9 @@ kv = 0.6
 load = 0.2
 power = 0.1
 capacity = 0.1
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         let cfg = Config::load(&p).unwrap();
         assert_eq!(cfg.cluster.name, "prod-eu");
         assert!((cfg.router.score_weights.kv - 0.6).abs() < 1e-6);
@@ -473,13 +502,17 @@ capacity = 0.1
     fn weights_must_sum_to_one() {
         let dir = TempDir::new().unwrap();
         let p = dir.path().join("c.toml");
-        std::fs::write(&p, r#"
+        std::fs::write(
+            &p,
+            r#"
 [router.score_weights]
 kv = 0.9
 load = 0.2
 power = 0.1
 capacity = 0.1
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert!(Config::load(&p).is_err());
     }
 }

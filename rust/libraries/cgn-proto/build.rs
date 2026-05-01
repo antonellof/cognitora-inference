@@ -5,9 +5,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // -> rust -> workspace).
     let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace = crate_dir
-        .parent().unwrap()   // rust/libraries
-        .parent().unwrap()   // rust
-        .parent().unwrap();  // workspace root
+        .parent()
+        .unwrap() // rust/libraries
+        .parent()
+        .unwrap() // rust
+        .parent()
+        .unwrap(); // workspace root
     let proto_dir = workspace.join("proto");
 
     let files = [

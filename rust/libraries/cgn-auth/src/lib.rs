@@ -17,8 +17,8 @@
 #![forbid(unsafe_code)]
 
 pub mod api_key;
-pub mod oidc;
 pub mod middleware;
+pub mod oidc;
 
 use serde::{Deserialize, Serialize};
 
@@ -26,8 +26,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Principal {
     pub subject: String,
-    pub scopes:  Vec<String>,
-    pub kind:    PrincipalKind,
+    pub scopes: Vec<String>,
+    pub kind: PrincipalKind,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -40,7 +40,11 @@ pub enum PrincipalKind {
 
 impl Principal {
     pub fn anonymous() -> Self {
-        Self { subject: "anonymous".into(), scopes: vec![], kind: PrincipalKind::Anonymous }
+        Self {
+            subject: "anonymous".into(),
+            scopes: vec![],
+            kind: PrincipalKind::Anonymous,
+        }
     }
 
     /// Has any of the given scopes (or a global `*`).

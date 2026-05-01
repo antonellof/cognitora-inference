@@ -17,17 +17,17 @@ use super::{Principal, PrincipalKind};
 
 #[derive(Clone)]
 pub struct OidcVerifier {
-    issuer:        String,
-    audience:      Option<String>,
+    issuer: String,
+    audience: Option<String>,
     /// Optional mapping from a JWT group claim to a tenant scope (the
     /// resulting scope set on the principal). When `None`, the
     /// principal carries the raw `scope` claim instead.
     group_to_scope: Option<Vec<(String, String)>>,
     /// Name of the JWT claim that carries group memberships. Defaults
     /// to `"groups"` (which is what most IdPs emit).
-    groups_claim:  String,
-    jwks:          Arc<ArcSwap<JwksCache>>,
-    refresh:       Arc<Mutex<Instant>>,
+    groups_claim: String,
+    jwks: Arc<ArcSwap<JwksCache>>,
+    refresh: Arc<Mutex<Instant>>,
 }
 
 #[derive(Default)]
@@ -69,12 +69,12 @@ impl OidcVerifier {
     /// successful verification.
     pub fn new(issuer: impl Into<String>, audience: Option<String>) -> Self {
         Self {
-            issuer:   issuer.into(),
+            issuer: issuer.into(),
             audience,
             group_to_scope: None,
-            groups_claim:   "groups".into(),
-            jwks:     Arc::new(ArcSwap::from_pointee(JwksCache::default())),
-            refresh:  Arc::new(Mutex::new(Instant::now() - Duration::from_secs(86400))),
+            groups_claim: "groups".into(),
+            jwks: Arc::new(ArcSwap::from_pointee(JwksCache::default())),
+            refresh: Arc::new(Mutex::new(Instant::now() - Duration::from_secs(86400))),
         }
     }
 
@@ -98,25 +98,34 @@ impl OidcVerifier {
 
     pub async fn verify(&self, token: &str) -> Result<Principal> {
         // Refresh JWKS once an hour (or if cache is empty).
-        if self.jwks.load().keys.is_empty() || self.refresh.lock().elapsed() > Duration::from_secs(3600) {
+        if self.jwks.load().keys.is_empty()
+            || self.refresh.lock().elapsed() > Duration::from_secs(3600)
+        {
             self.refresh_jwks().await?;
         }
 
         let header = decode_header(token)
             .map_err(|e| Error::InvalidArgument(format!("oidc header: {e}")))?;
-        let kid = header.kid.ok_or_else(|| Error::InvalidArgument("oidc: no kid".into()))?;
+        let kid = header
+            .kid
+            .ok_or_else(|| Error::InvalidArgument("oidc: no kid".into()))?;
 
         let snap = self.jwks.load();
-        let entry = snap.keys.iter()
+        let entry = snap
+            .keys
+            .iter()
             .find(|k| k.kid == kid)
             .ok_or_else(|| Error::InvalidArgument(format!("oidc: kid {kid} not in jwks")))?;
 
         let mut v = Validation::new(entry.alg);
         v.set_issuer(&[&self.issuer]);
-        if let Some(aud) = &self.audience { v.set_audience(&[aud]); }
+        if let Some(aud) = &self.audience {
+            v.set_audience(&[aud]);
+        }
         let token_data = decode::<Claims>(token, &entry.key, &v)
             .map_err(|e| Error::InvalidArgument(format!("oidc verify: {e}")))?;
-        let mut scopes: Vec<String> = token_data.claims
+        let mut scopes: Vec<String> = token_data
+            .claims
             .scope
             .map(|s| s.split_whitespace().map(String::from).collect())
             .unwrap_or_default();
@@ -141,21 +150,36 @@ impl OidcVerifier {
     }
 
     async fn refresh_jwks(&self) -> Result<()> {
-        let disc_url = format!("{}/.well-known/openid-configuration", self.issuer.trim_end_matches('/'));
+        let disc_url = format!(
+            "{}/.well-known/openid-configuration",
+            self.issuer.trim_end_matches('/')
+        );
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
             .build()
             .map_err(|e| Error::Internal(format!("reqwest: {e}")))?;
-        let disc: OidcDiscovery = client.get(&disc_url).send().await
+        let disc: OidcDiscovery = client
+            .get(&disc_url)
+            .send()
+            .await
             .map_err(|e| Error::Unavailable(format!("oidc discovery: {e}")))?
-            .json().await
+            .json()
+            .await
             .map_err(|e| Error::InvalidArgument(format!("oidc discovery body: {e}")))?;
-        let jwks: Jwks = client.get(&disc.jwks_uri).send().await
+        let jwks: Jwks = client
+            .get(&disc.jwks_uri)
+            .send()
+            .await
             .map_err(|e| Error::Unavailable(format!("oidc jwks: {e}")))?
-            .json().await
+            .json()
+            .await
             .map_err(|e| Error::InvalidArgument(format!("oidc jwks body: {e}")))?;
 
-        let entries = jwks.keys.into_iter().filter_map(|k| build_entry(&k)).collect();
+        let entries = jwks
+            .keys
+            .into_iter()
+            .filter_map(|k| build_entry(&k))
+            .collect();
         self.jwks.store(Arc::new(JwksCache { keys: entries }));
         *self.refresh.lock() = Instant::now();
         Ok(())
@@ -164,7 +188,7 @@ impl OidcVerifier {
 
 #[derive(Deserialize)]
 struct Claims {
-    sub:   String,
+    sub: String,
     scope: Option<String>,
     /// Catch-all bag for non-standard claims (groups, custom roles, …).
     #[serde(flatten)]
@@ -175,9 +199,12 @@ struct Claims {
 /// either a JSON array (`["a","b"]`) or a space-separated string —
 /// both shapes occur in the wild.
 fn extract_groups(extra: &serde_json::Map<String, serde_json::Value>, claim: &str) -> Vec<String> {
-    let Some(v) = extra.get(claim) else { return Vec::new(); };
+    let Some(v) = extra.get(claim) else {
+        return Vec::new();
+    };
     match v {
-        serde_json::Value::Array(arr) => arr.iter()
+        serde_json::Value::Array(arr) => arr
+            .iter()
             .filter_map(|x| x.as_str().map(String::from))
             .collect(),
         serde_json::Value::String(s) => s.split_whitespace().map(String::from).collect(),
@@ -207,5 +234,9 @@ fn build_entry(k: &Jwk) -> Option<JwkEntry> {
         }
         _ => return None,
     };
-    Some(JwkEntry { kid: k.kid.clone(), alg, key })
+    Some(JwkEntry {
+        kid: k.kid.clone(),
+        alg,
+        key,
+    })
 }

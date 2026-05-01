@@ -16,7 +16,7 @@
 #![cfg(feature = "redis-backend")]
 
 use cgn_core::{Error, Result};
-use redis::{aio::ConnectionManager, AsyncCommands, Client};
+use redis::{aio::ConnectionManager, Client};
 
 /// Lua: returns 1 if the request is admitted, 0 otherwise. Atomic.
 const SCRIPT: &str = r#"
@@ -54,25 +54,26 @@ return admitted
 
 #[derive(Clone)]
 pub struct RedisLimiter {
-    conn:    ConnectionManager,
-    burst:   u32,
-    rps:     u32,
-    ttl_ms:  i64,
-    script:  redis::Script,
+    conn: ConnectionManager,
+    burst: u32,
+    rps: u32,
+    ttl_ms: i64,
+    script: redis::Script,
 }
 
 impl RedisLimiter {
     /// Connect to `url` and return a limiter with the same shape as the
     /// in-process one.
     pub async fn connect(url: &str, rps: u32, burst: u32) -> Result<Self> {
-        let client = Client::open(url)
-            .map_err(|e| Error::Config(format!("redis url: {e}")))?;
-        let conn = client.get_connection_manager().await
+        let client = Client::open(url).map_err(|e| Error::Config(format!("redis url: {e}")))?;
+        let conn = client
+            .get_connection_manager()
+            .await
             .map_err(|e| Error::Unavailable(format!("redis connect: {e}")))?;
         Ok(Self {
             conn,
-            burst:  burst.max(1),
-            rps:    rps.max(1),
+            burst: burst.max(1),
+            rps: rps.max(1),
             // 5× the burst-fill time keeps idle keys in cache without
             // bloating the keyspace.
             ttl_ms: ((burst.max(1) as i64 * 5_000) / rps.max(1) as i64).max(1_000),
@@ -85,13 +86,15 @@ impl RedisLimiter {
         let now_ms = chrono::Utc::now().timestamp_millis();
         let full_key = format!("cgn:rl:{key}");
         let mut conn = self.conn.clone();
-        let admitted: i64 = self.script
+        let admitted: i64 = self
+            .script
             .key(full_key)
             .arg(self.burst as i64)
             .arg(self.rps as i64)
             .arg(now_ms)
             .arg(self.ttl_ms)
-            .invoke_async(&mut conn).await
+            .invoke_async(&mut conn)
+            .await
             .map_err(|e| Error::Unavailable(format!("redis script: {e}")))?;
         Ok(admitted == 1)
     }
@@ -99,7 +102,9 @@ impl RedisLimiter {
     /// Connection liveness probe.
     pub async fn ping(&self) -> Result<()> {
         let mut conn = self.conn.clone();
-        let _: String = redis::cmd("PING").query_async(&mut conn).await
+        let _: String = redis::cmd("PING")
+            .query_async(&mut conn)
+            .await
             .map_err(|e| Error::Unavailable(format!("redis ping: {e}")))?;
         Ok(())
     }

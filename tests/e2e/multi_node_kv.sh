@@ -71,14 +71,11 @@ for _ in {1..30}; do
 done
 
 echo "==> Replaying fixture"
-HITS=0
-LOOKUPS=0
 while IFS= read -r line; do
   RESP=$(curl -s -o /dev/null -w '%{http_code}' \
     -H 'content-type: application/json' \
     -d "$line" \
     http://127.0.0.1:8080/v1/chat/completions || true)
-  LOOKUPS=$((LOOKUPS+1))
   if [[ "$RESP" == "503" ]]; then
     # 503 means the fake agents aren't reachable, which is the
     # expected outcome of this M2 smoke today; the routing decision

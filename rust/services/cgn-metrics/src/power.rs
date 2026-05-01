@@ -29,12 +29,20 @@ pub async fn run(cfg: Config) -> Result<()> {
         tick.tick().await;
         if let Some(rf) = &redfish {
             match rf.sample().await {
-                Ok(samples) => for s in samples { chassis_w.set(s.watts as i64); },
+                Ok(samples) => {
+                    for s in samples {
+                        chassis_w.set(s.watts as i64);
+                    }
+                }
                 Err(e) => warn!(error=?e, "redfish sample"),
             }
         }
         match nvml.sample().await {
-            Ok(samples) => for s in samples { gpu_w.set(s.watts as i64); },
+            Ok(samples) => {
+                for s in samples {
+                    gpu_w.set(s.watts as i64);
+                }
+            }
             Err(e) => warn!(error=?e, "nvml sample"),
         }
     }

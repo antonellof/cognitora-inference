@@ -73,8 +73,7 @@ pub fn generate_dev_pki(common_name: &str, subject_alt_names: Vec<String>) -> Re
         KeyUsagePurpose::CrlSign,
         KeyUsagePurpose::DigitalSignature,
     ];
-    let ca_key = rcgen::KeyPair::generate()
-        .map_err(|e| Error::Tls(format!("ca keypair: {e}")))?;
+    let ca_key = rcgen::KeyPair::generate().map_err(|e| Error::Tls(format!("ca keypair: {e}")))?;
     let ca_cert = ca_params
         .self_signed(&ca_key)
         .map_err(|e| Error::Tls(format!("ca self-sign: {e}")))?;
@@ -84,17 +83,17 @@ pub fn generate_dev_pki(common_name: &str, subject_alt_names: Vec<String>) -> Re
     leaf_params
         .distinguished_name
         .push(rcgen::DnType::CommonName, common_name);
-    let leaf_key = rcgen::KeyPair::generate()
-        .map_err(|e| Error::Tls(format!("leaf keypair: {e}")))?;
+    let leaf_key =
+        rcgen::KeyPair::generate().map_err(|e| Error::Tls(format!("leaf keypair: {e}")))?;
     let leaf_cert = leaf_params
         .signed_by(&leaf_key, &ca_cert, &ca_key)
         .map_err(|e| Error::Tls(format!("leaf sign: {e}")))?;
 
     Ok(DevPki {
         ca_cert_pem: ca_cert.pem(),
-        ca_key_pem:  ca_key.serialize_pem(),
+        ca_key_pem: ca_key.serialize_pem(),
         leaf_cert_pem: leaf_cert.pem(),
-        leaf_key_pem:  leaf_key.serialize_pem(),
+        leaf_key_pem: leaf_key.serialize_pem(),
     })
 }
 

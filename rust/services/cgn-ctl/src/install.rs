@@ -58,7 +58,10 @@ async fn single_node(args: Args) -> Result<()> {
     if which::which("nvidia-smi").is_err() {
         tracing::warn!("nvidia-smi not found; falling back to CPU mode");
     }
-    info!(target = "single-node", "would render docker-compose and `docker compose up -d`");
+    info!(
+        target = "single-node",
+        "would render docker-compose and `docker compose up -d`"
+    );
     let _ = args; // placeholder until the renderer lands
     Ok(())
 }
@@ -68,16 +71,18 @@ async fn kubernetes(args: Args) -> Result<()> {
     let v = cgn_helm::version().await?;
     info!(helm = %v, "helm available");
 
-    let chart = args.chart.unwrap_or_else(|| PathBuf::from("deploy/kubernetes/helm/cognitora"));
+    let chart = args
+        .chart
+        .unwrap_or_else(|| PathBuf::from("deploy/kubernetes/helm/cognitora"));
     let install = cgn_helm::Install {
-        release:   "cognitora".into(),
+        release: "cognitora".into(),
         chart,
         namespace: args.namespace,
         create_namespace: true,
-        values:    vec![],
-        set:       vec![],
-        wait:      true,
-        timeout:   Some("10m".into()),
+        values: vec![],
+        set: vec![],
+        wait: true,
+        timeout: Some("10m".into()),
     };
     let out = install.run().await?;
     println!("{out}");

@@ -7,7 +7,8 @@
 KV-aware routing · Prefill/decode disaggregation · GPU/RAM/SSD KV tiering · Multi-model cascade (SLM → Mid → LLM) · Energy-aware scheduling · One-line installer for bare metal, Kubernetes, AWS, GCP, Azure, Hetzner.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-alpha-orange.svg)](#)
+[![Status](https://img.shields.io/badge/status-beta-yellow.svg)](#)
+[![Milestones](https://img.shields.io/badge/M1--M6-shipped-brightgreen.svg)](plan.md)
 [![Domain](https://img.shields.io/badge/cognitora.dev-online-brightgreen.svg)](https://cognitora.dev)
 
 </div>

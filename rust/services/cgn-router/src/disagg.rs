@@ -25,22 +25,18 @@ pub enum Plan {
     /// Two-stage with KV handoff.
     Split {
         prefill_role: NodeRole,
-        decode_role:  NodeRole,
+        decode_role: NodeRole,
     },
 }
 
 /// Decide whether to disaggregate based on prompt length and config.
-pub fn plan(
-    enabled: bool,
-    colocate_below_tokens: u32,
-    prompt_tokens: u32,
-) -> Plan {
+pub fn plan(enabled: bool, colocate_below_tokens: u32, prompt_tokens: u32) -> Plan {
     if !enabled || prompt_tokens < colocate_below_tokens {
         return Plan::Colocate;
     }
     Plan::Split {
         prefill_role: NodeRole::Prefill,
-        decode_role:  NodeRole::Decode,
+        decode_role: NodeRole::Decode,
     }
 }
 

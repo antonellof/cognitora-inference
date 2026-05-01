@@ -14,8 +14,8 @@
 
 #![forbid(unsafe_code)]
 
-mod scraper;
 mod power;
+mod scraper;
 
 use std::path::PathBuf;
 
@@ -37,14 +37,18 @@ async fn main() -> Result<()> {
     let cfg = Config::load(Config::locate(cli.config.as_deref()))?;
     info!("metrics starting");
 
-    let listen: std::net::SocketAddr = cfg.metrics.listen.parse()
+    let listen: std::net::SocketAddr = cfg
+        .metrics
+        .listen
+        .parse()
         .map_err(|e| Error::Config(format!("metrics.listen: {e}")))?;
 
     let app = cgn_telemetry::admin_router();
     let scrape = scraper::run(cfg.clone());
     let power_loop = power::run(cfg.clone());
 
-    let listener = tokio::net::TcpListener::bind(listen).await
+    let listener = tokio::net::TcpListener::bind(listen)
+        .await
         .map_err(Error::Io)?;
     info!(%listen, "metrics listening");
 

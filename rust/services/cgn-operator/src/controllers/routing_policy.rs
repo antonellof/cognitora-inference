@@ -22,22 +22,24 @@ use kube::{
 };
 use tracing::{error, info, warn};
 
-use crate::reconcile::Ctx;
 use super::inference_cluster::Error;
+use crate::reconcile::Ctx;
 
 const POLICY_KEY: &str = "/cognitora/routing/policy";
 
 pub async fn run(client: Client, namespace: Option<String>) -> Result<()> {
     let api: Api<RoutingPolicy> = match &namespace {
         Some(ns) => Api::namespaced(client.clone(), ns),
-        None     => Api::all(client.clone()),
+        None => Api::all(client.clone()),
     };
     info!("RoutingPolicy controller running");
     let ctx = Arc::new(Ctx { client });
     Controller::new(api, Config::default())
         .run(reconcile, error_policy, ctx)
         .for_each(|res| async move {
-            if let Err(e) = res { error!(error=?e, "routing policy reconcile error"); }
+            if let Err(e) = res {
+                error!(error=?e, "routing policy reconcile error");
+            }
         })
         .await;
     Ok(())

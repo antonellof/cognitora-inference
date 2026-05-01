@@ -33,7 +33,11 @@ use tracing::{error, info};
 use crate::state::SharedState;
 
 #[derive(Parser, Debug)]
-#[command(name = "cgn-router", version, about = "Cognitora router (gateway + KV-aware orchestrator)")]
+#[command(
+    name = "cgn-router",
+    version,
+    about = "Cognitora router (gateway + KV-aware orchestrator)"
+)]
 struct Cli {
     /// Path to cognitora.toml. Falls back to $CGN_CONFIG / /etc/cognitora/cognitora.toml.
     #[arg(short, long)]
@@ -53,14 +57,20 @@ async fn main() -> Result<()> {
     state.bootstrap_cluster_watch().await?;
     autoscaler::spawn(state.clone());
 
-    let listen_http: SocketAddr = cfg.router.listen_http.parse()
+    let listen_http: SocketAddr = cfg
+        .router
+        .listen_http
+        .parse()
         .map_err(|e| Error::Config(format!("router.listen_http: {e}")))?;
-    let listen_admin: SocketAddr = cfg.router.listen_admin.parse()
+    let listen_admin: SocketAddr = cfg
+        .router
+        .listen_admin
+        .parse()
         .map_err(|e| Error::Config(format!("router.listen_admin: {e}")))?;
 
-    let http  = tokio::spawn(gateway::serve(state.clone(), listen_http));
+    let http = tokio::spawn(gateway::serve(state.clone(), listen_http));
     let admin = tokio::spawn(serve_admin(listen_admin));
-    let grpc  = tokio::spawn(serve_grpc(state.clone()));
+    let grpc = tokio::spawn(serve_grpc(state.clone()));
 
     tokio::select! {
         r = http  => log_exit("http",  r),
@@ -75,10 +85,12 @@ async fn main() -> Result<()> {
 
 async fn serve_admin(addr: SocketAddr) -> Result<()> {
     let app = cgn_telemetry::admin_router();
-    let listener = tokio::net::TcpListener::bind(addr).await
-        .map_err(|e| Error::Io(e))?;
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(Error::Io)?;
     info!(%addr, "admin listening");
-    axum::serve(listener, app).await
+    axum::serve(listener, app)
+        .await
         .map_err(|e| Error::Internal(format!("admin serve: {e}")))
 }
 
@@ -86,7 +98,11 @@ async fn serve_grpc(state: Arc<SharedState>) -> Result<()> {
     use cgn_proto::v1::router_server::RouterServer;
     use tonic::transport::Server;
 
-    let addr: SocketAddr = state.cfg.router.listen_grpc.parse()
+    let addr: SocketAddr = state
+        .cfg
+        .router
+        .listen_grpc
+        .parse()
         .map_err(|e| Error::Config(format!("router.listen_grpc: {e}")))?;
     info!(%addr, "grpc listening");
 
@@ -98,25 +114,29 @@ async fn serve_grpc(state: Arc<SharedState>) -> Result<()> {
             state.cfg.security.cert_file.as_ref(),
             state.cfg.security.key_file.as_ref(),
         ) else {
-            return Err(Error::Config("require_mtls=true but cert/key/ca not set".into()));
+            return Err(Error::Config(
+                "require_mtls=true but cert/key/ca not set".into(),
+            ));
         };
         let tls = cgn_tls::server_tls(ca, cert, key)?;
-        builder = builder.tls_config(tls)
+        builder = builder
+            .tls_config(tls)
             .map_err(|e| Error::Tls(format!("server tls: {e}")))?;
     }
 
     let svc = routing::grpc::RouterGrpc::new(state.clone());
     builder
         .add_service(RouterServer::new(svc))
-        .serve(addr).await
+        .serve(addr)
+        .await
         .map_err(|e| Error::Internal(format!("grpc serve: {e}")))
 }
 
 fn log_exit(name: &str, r: std::result::Result<Result<()>, tokio::task::JoinError>) {
     match r {
-        Ok(Ok(()))  => info!(%name,  "task exited cleanly"),
-        Ok(Err(e))  => error!(%name, error = ?e, "task error"),
-        Err(e)      => error!(%name, error = ?e, "task panicked"),
+        Ok(Ok(())) => info!(%name,  "task exited cleanly"),
+        Ok(Err(e)) => error!(%name, error = ?e, "task error"),
+        Err(e) => error!(%name, error = ?e, "task panicked"),
     }
 }
 

@@ -18,10 +18,7 @@
 //! best cache overlap if known), and proxies the OpenAI request unchanged.
 
 use cgn_core::{Error, Result};
-use cgn_proto::v1::{
-    router_client::RouterClient,
-    GenerateRequest,
-};
+use cgn_proto::v1::{router_client::RouterClient, GenerateRequest};
 use tracing::{debug, warn};
 
 /// Dispatch a request to a federated peer. Returns the chosen peer's
@@ -47,7 +44,8 @@ pub async fn pick_peer(
         }
     }
     Err(Error::Unavailable(format!(
-        "all {} federation peers unreachable", peers.len()
+        "all {} federation peers unreachable",
+        peers.len()
     )))
 }
 
@@ -59,7 +57,8 @@ pub async fn forward(
     req: GenerateRequest,
 ) -> Result<tonic::Streaming<cgn_proto::v1::Token>> {
     let req_stream = futures::stream::iter(vec![req]);
-    peer.generate(tonic::Request::new(req_stream)).await
+    peer.generate(tonic::Request::new(req_stream))
+        .await
         .map(|r| r.into_inner())
         .map_err(|s| Error::Unavailable(format!("federation forward: {s}")))
 }

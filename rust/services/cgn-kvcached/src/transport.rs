@@ -86,9 +86,11 @@ async fn handle_connection(store: Arc<Store>, conn: Connection) -> Result<()> {
                     body_len: bytes.len() as u64,
                 };
                 write_frame(&mut send, &resp).await?;
-                send.write_all(&bytes).await
+                send.write_all(&bytes)
+                    .await
                     .map_err(|e| Error::Internal(format!("quic write body: {e}")))?;
-                send.finish().map_err(|e| Error::Internal(format!("quic finish: {e}")))?;
+                send.finish()
+                    .map_err(|e| Error::Internal(format!("quic finish: {e}")))?;
             }
             Op::Push => {
                 if frame.body_len > MAX_BLOCK_BYTES {
@@ -99,13 +101,19 @@ async fn handle_connection(store: Arc<Store>, conn: Connection) -> Result<()> {
                 }
                 let mut buf = BytesMut::with_capacity(frame.body_len as usize);
                 buf.resize(frame.body_len as usize, 0);
-                recv.read_exact(&mut buf).await
+                recv.read_exact(&mut buf)
+                    .await
                     .map_err(|e| Error::Internal(format!("quic read body: {e}")))?;
                 let bytes = buf.freeze();
                 store.put_ram(frame.addr, bytes, "")?;
-                let ack = Frame { op: Op::Ack, addr: frame.addr, body_len: 0 };
+                let ack = Frame {
+                    op: Op::Ack,
+                    addr: frame.addr,
+                    body_len: 0,
+                };
                 write_frame(&mut send, &ack).await?;
-                send.finish().map_err(|e| Error::Internal(format!("quic finish: {e}")))?;
+                send.finish()
+                    .map_err(|e| Error::Internal(format!("quic finish: {e}")))?;
             }
             Op::Ack => {
                 // Nothing to do; some peers send a no-op ping.
@@ -131,22 +139,31 @@ fn read_ram(store: &Store, addr: &BlockAddress) -> Option<Bytes> {
 pub async fn peer_pull(remote: SocketAddr, addr: BlockAddress) -> Result<Bytes> {
     let endpoint = build_client_endpoint()?;
     let conn = connect(&endpoint, remote).await?;
-    let (mut send, mut recv) = conn.open_bi().await
+    let (mut send, mut recv) = conn
+        .open_bi()
+        .await
         .map_err(|e| Error::Internal(format!("open_bi: {e}")))?;
-    let frame = Frame { op: Op::Pull, addr, body_len: 0 };
+    let frame = Frame {
+        op: Op::Pull,
+        addr,
+        body_len: 0,
+    };
     write_frame(&mut send, &frame).await?;
-    send.finish().map_err(|e| Error::Internal(format!("finish: {e}")))?;
+    send.finish()
+        .map_err(|e| Error::Internal(format!("finish: {e}")))?;
 
     let resp = read_frame(&mut recv).await?;
     if resp.body_len > MAX_BLOCK_BYTES {
         return Err(Error::InvalidArgument(format!(
-            "peer pulled too much: {} bytes", resp.body_len
+            "peer pulled too much: {} bytes",
+            resp.body_len
         )));
     }
     let mut buf = BytesMut::with_capacity(resp.body_len as usize);
     buf.resize(resp.body_len as usize, 0);
     if resp.body_len > 0 {
-        recv.read_exact(&mut buf).await
+        recv.read_exact(&mut buf)
+            .await
             .map_err(|e| Error::Internal(format!("read body: {e}")))?;
     }
     Ok(buf.freeze())
@@ -156,19 +173,28 @@ pub async fn peer_pull(remote: SocketAddr, addr: BlockAddress) -> Result<Bytes> 
 pub async fn peer_push(remote: SocketAddr, addr: BlockAddress, bytes: Bytes) -> Result<()> {
     let endpoint = build_client_endpoint()?;
     let conn = connect(&endpoint, remote).await?;
-    let (mut send, mut recv) = conn.open_bi().await
+    let (mut send, mut recv) = conn
+        .open_bi()
+        .await
         .map_err(|e| Error::Internal(format!("open_bi: {e}")))?;
-    let frame = Frame { op: Op::Push, addr, body_len: bytes.len() as u64 };
+    let frame = Frame {
+        op: Op::Push,
+        addr,
+        body_len: bytes.len() as u64,
+    };
     write_frame(&mut send, &frame).await?;
-    send.write_all(&bytes).await
+    send.write_all(&bytes)
+        .await
         .map_err(|e| Error::Internal(format!("write body: {e}")))?;
-    send.finish().map_err(|e| Error::Internal(format!("finish: {e}")))?;
+    send.finish()
+        .map_err(|e| Error::Internal(format!("finish: {e}")))?;
     let _ack = read_frame(&mut recv).await?;
     Ok(())
 }
 
 async fn connect(endpoint: &Endpoint, remote: SocketAddr) -> Result<Connection> {
-    let conn = endpoint.connect(remote, "cognitora")
+    let conn = endpoint
+        .connect(remote, "cognitora")
         .map_err(|e| Error::Internal(format!("quic connect: {e}")))?
         .await
         .map_err(|e| Error::Unavailable(format!("quic connect await: {e}")))?;
@@ -181,26 +207,32 @@ async fn connect(endpoint: &Endpoint, remote: SocketAddr) -> Result<Connection> 
 
 async fn read_frame(recv: &mut quinn::RecvStream) -> Result<Frame> {
     let mut hdr = [0u8; 4];
-    recv.read_exact(&mut hdr).await
+    recv.read_exact(&mut hdr)
+        .await
         .map_err(|e| Error::Internal(format!("read hdr: {e}")))?;
     let len = u32::from_be_bytes(hdr) as usize;
     if len > 16 * 1024 {
-        return Err(Error::InvalidArgument(format!("frame header too big: {len}")));
+        return Err(Error::InvalidArgument(format!(
+            "frame header too big: {len}"
+        )));
     }
     let mut payload = vec![0u8; len];
-    recv.read_exact(&mut payload).await
+    recv.read_exact(&mut payload)
+        .await
         .map_err(|e| Error::Internal(format!("read frame: {e}")))?;
     bincode::deserialize::<Frame>(&payload)
         .map_err(|e| Error::InvalidArgument(format!("decode frame: {e}")))
 }
 
 async fn write_frame(send: &mut quinn::SendStream, frame: &Frame) -> Result<()> {
-    let bytes = bincode::serialize(frame)
-        .map_err(|e| Error::Internal(format!("encode frame: {e}")))?;
+    let bytes =
+        bincode::serialize(frame).map_err(|e| Error::Internal(format!("encode frame: {e}")))?;
     let len = (bytes.len() as u32).to_be_bytes();
-    send.write_all(&len).await
+    send.write_all(&len)
+        .await
         .map_err(|e| Error::Internal(format!("write hdr: {e}")))?;
-    send.write_all(&bytes).await
+    send.write_all(&bytes)
+        .await
         .map_err(|e| Error::Internal(format!("write frame: {e}")))?;
     Ok(())
 }
@@ -212,12 +244,16 @@ async fn write_frame(send: &mut quinn::SendStream, frame: &Frame) -> Result<()> 
 fn build_server_config(addr: SocketAddr) -> Result<ServerConfig> {
     let pki = cgn_tls::generate_dev_pki(
         "cgn-kvcached",
-        vec!["localhost".into(), addr.ip().to_string(), "cognitora".into()],
+        vec![
+            "localhost".into(),
+            addr.ip().to_string(),
+            "cognitora".into(),
+        ],
     )?;
 
-    let cert_chain = vec![rustls_pki_types::CertificateDer::from(
-        pem_decode(&pki.leaf_cert_pem)?,
-    )];
+    let cert_chain = vec![rustls_pki_types::CertificateDer::from(pem_decode(
+        &pki.leaf_cert_pem,
+    )?)];
     let key = rustls_pki_types::PrivateKeyDer::try_from(pem_decode(&pki.leaf_key_pem)?)
         .map_err(|e| Error::Tls(format!("private key: {e}")))?;
 
@@ -235,8 +271,11 @@ fn build_server_config(addr: SocketAddr) -> Result<ServerConfig> {
     let transport = Arc::get_mut(&mut server_config.transport)
         .ok_or_else(|| Error::Internal("quic transport mutate".into()))?;
     transport.max_concurrent_uni_streams(0u32.into());
-    transport.max_idle_timeout(Some(Duration::from_secs(30).try_into()
-        .map_err(|e| Error::Internal(format!("idle timeout: {e}")))?));
+    transport.max_idle_timeout(Some(
+        Duration::from_secs(30)
+            .try_into()
+            .map_err(|e| Error::Internal(format!("idle timeout: {e}")))?,
+    ));
 
     Ok(server_config)
 }
@@ -254,8 +293,11 @@ fn build_client_endpoint() -> Result<Endpoint> {
             .map_err(|e| Error::Tls(format!("quic client tls: {e}")))?,
     ));
     let mut transport = quinn::TransportConfig::default();
-    transport.max_idle_timeout(Some(Duration::from_secs(10).try_into()
-        .map_err(|e| Error::Internal(format!("idle timeout: {e}")))?));
+    transport.max_idle_timeout(Some(
+        Duration::from_secs(10)
+            .try_into()
+            .map_err(|e| Error::Internal(format!("idle timeout: {e}")))?,
+    ));
     client_config.transport_config(Arc::new(transport));
 
     let mut endpoint = Endpoint::client("0.0.0.0:0".parse().unwrap())
@@ -268,7 +310,9 @@ fn build_client_endpoint() -> Result<Endpoint> {
 struct SkipServerVerification;
 
 impl SkipServerVerification {
-    fn new() -> Arc<Self> { Arc::new(Self) }
+    fn new() -> Arc<Self> {
+        Arc::new(Self)
+    }
 }
 
 impl rustls::client::danger::ServerCertVerifier for SkipServerVerification {
@@ -317,9 +361,9 @@ fn pem_decode(s: &str) -> Result<Vec<u8>> {
         .ok_or_else(|| Error::Tls("empty pem".into()))?;
     Ok(match pemfile {
         rustls_pemfile::Item::X509Certificate(d) => d.to_vec(),
-        rustls_pemfile::Item::Pkcs8Key(d)        => d.secret_pkcs8_der().to_vec(),
-        rustls_pemfile::Item::Pkcs1Key(d)        => d.secret_pkcs1_der().to_vec(),
-        rustls_pemfile::Item::Sec1Key(d)         => d.secret_sec1_der().to_vec(),
+        rustls_pemfile::Item::Pkcs8Key(d) => d.secret_pkcs8_der().to_vec(),
+        rustls_pemfile::Item::Pkcs1Key(d) => d.secret_pkcs1_der().to_vec(),
+        rustls_pemfile::Item::Sec1Key(d) => d.secret_sec1_der().to_vec(),
         _ => return Err(Error::Tls("unsupported pem item".into())),
     })
 }

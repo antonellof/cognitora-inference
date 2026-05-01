@@ -17,7 +17,7 @@ use super::{Engine, GenerateReq, ModelSpec};
 
 pub struct VllmEngine {
     client: reqwest::Client,
-    base:   String,
+    base: String,
 }
 
 impl VllmEngine {
@@ -27,13 +27,18 @@ impl VllmEngine {
             .pool_max_idle_per_host(8)
             .build()
             .map_err(|e| Error::Internal(format!("reqwest: {e}")))?;
-        Ok(Self { client, base: base_url.into().trim_end_matches('/').to_string() })
+        Ok(Self {
+            client,
+            base: base_url.into().trim_end_matches('/').to_string(),
+        })
     }
 }
 
 #[async_trait]
 impl Engine for VllmEngine {
-    fn name(&self) -> &'static str { "vllm" }
+    fn name(&self) -> &'static str {
+        "vllm"
+    }
 
     async fn load_model(&self, _spec: ModelSpec) -> Result<()> {
         // vLLM loads its model when spawned; the supervisor handles process
@@ -55,7 +60,12 @@ impl Engine for VllmEngine {
             "stream":      true,
         });
 
-        let resp = self.client.post(&url).json(&body).send().await
+        let resp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
             .map_err(|e| Error::Unavailable(format!("vllm post: {e}")))?;
 
         if !resp.status().is_success() {
@@ -75,14 +85,21 @@ impl Engine for VllmEngine {
             while let Some(idx) = find_subseq(&buf, b"\n\n") {
                 let frame = buf.drain(..idx + 2).collect::<Vec<u8>>();
                 let line = std::str::from_utf8(&frame).unwrap_or("").trim();
-                if !line.starts_with("data:") { continue; }
+                if !line.starts_with("data:") {
+                    continue;
+                }
                 let payload = line.trim_start_matches("data:").trim();
                 if payload == "[DONE]" {
-                    let _ = tx.send(Token {
-                        id: id.clone(), text: String::new(),
-                        token_id: 0, logprob: 0.0,
-                        finish: "stop".into(), prefix_hash: vec![],
-                    }).await;
+                    let _ = tx
+                        .send(Token {
+                            id: id.clone(),
+                            text: String::new(),
+                            token_id: 0,
+                            logprob: 0.0,
+                            finish: "stop".into(),
+                            prefix_hash: vec![],
+                        })
+                        .await;
                     return Ok(());
                 }
                 match serde_json::from_str::<VllmStreamFrame>(payload) {
@@ -128,6 +145,8 @@ struct VllmStreamFrame {
 
 #[derive(Deserialize)]
 struct VllmChoice {
-    #[serde(default)] text: Option<String>,
-    #[serde(default)] finish_reason: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    finish_reason: Option<String>,
 }

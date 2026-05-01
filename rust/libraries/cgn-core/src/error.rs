@@ -51,18 +51,18 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// from their `main()` so the matrix is enforced uniformly.
 pub fn exit_code(err: &Error) -> i32 {
     match err {
-        Error::Config(_)          => 3,
-        Error::Toml(_)            => 3,
+        Error::Config(_) => 3,
+        Error::Toml(_) => 3,
         Error::InvalidArgument(_) => 2,
-        Error::Tls(_)             => 5,
-        Error::Etcd(_)            => 4,
-        Error::Unavailable(_)     => 4,
-        Error::NotFound(_)        => 4,
+        Error::Tls(_) => 5,
+        Error::Etcd(_) => 4,
+        Error::Unavailable(_) => 4,
+        Error::NotFound(_) => 4,
         Error::Io(e) if e.kind() == std::io::ErrorKind::AddrInUse => 7,
-        Error::Io(_)              => 8,
-        Error::Transport(_)       => 4,
-        Error::Status(_)          => 4,
-        Error::Json(_)            => 3,
+        Error::Io(_) => 8,
+        Error::Transport(_) => 4,
+        Error::Status(_) => 4,
+        Error::Json(_) => 3,
         Error::Internal(_) | Error::Other(_) => 1,
     }
 }

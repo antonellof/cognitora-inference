@@ -40,3 +40,6 @@ nix            = { workspace = true }
 uuid           = { workspace = true }
 chrono         = { workspace = true }
 etcd-client    = { workspace = true }
+
+[lints]
+workspace = true

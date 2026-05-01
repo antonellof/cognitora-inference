@@ -16,8 +16,8 @@
 
 #![forbid(unsafe_code)]
 
-pub mod redfish;
 pub mod nvml;
+pub mod redfish;
 
 use async_trait::async_trait;
 use cgn_core::Result;
@@ -25,9 +25,9 @@ use cgn_core::Result;
 /// Single power reading at a moment in time.
 #[derive(Debug, Clone)]
 pub struct PowerSample {
-    pub watts:     f64,
+    pub watts: f64,
     pub component: &'static str, // "chassis" | "gpu" | "psu"
-    pub at_unix:   i64,
+    pub at_unix: i64,
 }
 
 /// Provider trait.

@@ -21,9 +21,9 @@ use tracing::{error, info, warn};
 use crate::engine::{vllm::VllmEngine, Engine};
 
 pub struct Supervisor {
-    pub cfg:    Config,
+    pub cfg: Config,
     pub engine: Arc<dyn Engine>,
-    child:      Mutex<Option<Child>>,
+    child: Mutex<Option<Child>>,
 }
 
 impl Supervisor {
@@ -45,9 +45,11 @@ impl Supervisor {
             warn!("no [models.*] declared; engine will not be spawned by agent");
             return Ok(());
         };
-        let mut argv: Vec<String> = self.cfg.agent.vllm_cmd.iter().cloned().collect();
+        let mut argv: Vec<String> = self.cfg.agent.vllm_cmd.to_vec();
         for a in argv.iter_mut() {
-            *a = a.replace("{model}", name).replace("{tp}", &m.tp.to_string());
+            *a = a
+                .replace("{model}", name)
+                .replace("{tp}", &m.tp.to_string());
         }
         if let Some(len) = m.max_model_len {
             argv.push("--max-model-len".into());
@@ -61,7 +63,9 @@ impl Supervisor {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        let child = cmd.spawn().map_err(|e| Error::Internal(format!("spawn engine: {e}")))?;
+        let child = cmd
+            .spawn()
+            .map_err(|e| Error::Internal(format!("spawn engine: {e}")))?;
         *self.child.lock() = Some(child);
 
         // Background: pipe child output to our tracing layer.
@@ -88,7 +92,9 @@ impl Supervisor {
         let start = std::time::Instant::now();
         let mut delay = Duration::from_millis(100);
         loop {
-            if self.engine.ready().await { return Ok(()); }
+            if self.engine.ready().await {
+                return Ok(());
+            }
             if start.elapsed() > max {
                 return Err(Error::Unavailable("engine never became ready".into()));
             }
@@ -107,4 +113,6 @@ impl Drop for Supervisor {
 }
 
 #[allow(dead_code)]
-fn ignored() { error!("placeholder so unused-import lints stay quiet"); }
+fn ignored() {
+    error!("placeholder so unused-import lints stay quiet");
+}

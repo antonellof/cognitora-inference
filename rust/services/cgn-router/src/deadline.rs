@@ -26,7 +26,10 @@ use crate::state::SharedState;
 pub enum AdmissionOutcome {
     Admit,
     /// Reject with a 429-style "deadline exceeded" response.
-    DeadlineExceeded { estimated_ms: u32, requested_ms: u32 },
+    DeadlineExceeded {
+        estimated_ms: u32,
+        requested_ms: u32,
+    },
     /// Reject with a 429-style "queue full".
     QueueFull,
 }
@@ -35,7 +38,7 @@ pub enum AdmissionOutcome {
 /// its deadline, otherwise the appropriate rejection reason.
 pub fn check(
     state: &SharedState,
-    req:   &GenerateRequest,
+    req: &GenerateRequest,
     candidate: &NodeEntry,
 ) -> AdmissionOutcome {
     let cfg = &state.cfg;
@@ -55,14 +58,19 @@ pub fn check(
     );
 
     if estimated_ms > requested_ms {
-        AdmissionOutcome::DeadlineExceeded { estimated_ms, requested_ms }
+        AdmissionOutcome::DeadlineExceeded {
+            estimated_ms,
+            requested_ms,
+        }
     } else {
         AdmissionOutcome::Admit
     }
 }
 
 fn effective_deadline_ms(cfg: &Config, req: &GenerateRequest) -> u32 {
-    if req.deadline_ms > 0 { return req.deadline_ms; }
+    if req.deadline_ms > 0 {
+        return req.deadline_ms;
+    }
     let ttft = cfg.router.admission.ttft_slo;
     let max_tokens = req.params.as_ref().map(|p| p.max_tokens).unwrap_or(256);
     // Conservative: assume 30 ms TPOT (per-output-token) when no
@@ -112,12 +120,20 @@ mod tests {
             nodes: std::sync::Arc::new(crate::cluster::NodeRegistry::new()),
             prefix: std::sync::Arc::new(prefix),
             started: std::time::Instant::now(),
-            policy: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(crate::state::RoutingPolicy {
-                kv: 0.55, load: 0.25, power: 0.10, capacity: 0.10,
-            })),
+            policy: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
+                crate::state::RoutingPolicy {
+                    kv: 0.55,
+                    load: 0.25,
+                    power: 0.10,
+                    capacity: 0.10,
+                },
+            )),
         };
         let req = GenerateRequest::default();
-        assert_eq!(check(&state, &req, &make_node(1000)), AdmissionOutcome::Admit);
+        assert_eq!(
+            check(&state, &req, &make_node(1000)),
+            AdmissionOutcome::Admit
+        );
     }
 
     #[test]
@@ -132,14 +148,24 @@ mod tests {
             nodes: std::sync::Arc::new(crate::cluster::NodeRegistry::new()),
             prefix: std::sync::Arc::new(prefix),
             started: std::time::Instant::now(),
-            policy: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(crate::state::RoutingPolicy {
-                kv: 0.55, load: 0.25, power: 0.10, capacity: 0.10,
-            })),
+            policy: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
+                crate::state::RoutingPolicy {
+                    kv: 0.55,
+                    load: 0.25,
+                    power: 0.10,
+                    capacity: 0.10,
+                },
+            )),
         };
-        let mut req = GenerateRequest::default();
-        req.deadline_ms = 200;
+        let req = GenerateRequest {
+            deadline_ms: 200,
+            ..Default::default()
+        };
         // queue_depth=10 → ttft ≈ 1000 ms ≫ deadline 200 ms.
         let n = make_node(10);
-        assert!(matches!(check(&state, &req, &n), AdmissionOutcome::DeadlineExceeded { .. }));
+        assert!(matches!(
+            check(&state, &req, &n),
+            AdmissionOutcome::DeadlineExceeded { .. }
+        ));
     }
 }
