@@ -207,6 +207,20 @@ jobs:
           } > RELEASE_NOTES.md
           cat RELEASE_NOTES.md
 
+      - name: Stage signatures (if any)
+        # Cosign signing is opt-in (vars.RELEASE_COSIGN_SIGN). When it's
+        # off there are no .sig files; we have to keep the upload list
+        # static, so list signatures separately and only include them if
+        # they actually exist.
+        id: sigs
+        shell: bash
+        run: |
+          if compgen -G 'dist/cognitora-*.tar.gz.sig' >/dev/null; then
+            echo "have_sigs=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "have_sigs=false" >>"$GITHUB_OUTPUT"
+          fi
+
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.name }}
@@ -216,8 +230,15 @@ jobs:
           files: |
             dist/cognitora-*.tar.gz
             dist/cognitora-*.tar.gz.sha256
-            dist/cognitora-*.tar.gz.sig
             dist/SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        if: steps.sigs.outputs.have_sigs == 'true'
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          files: |
+            dist/cognitora-*.tar.gz.sig
+          fail_on_unmatched_files: true
 
   # ---------------------------------------------------------------------------
   # Multi-arch container images for `cgn-router`, `cgn-agent`, `cgn-kvcached`.
