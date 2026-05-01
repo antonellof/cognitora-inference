@@ -33,8 +33,8 @@ for chunk in stream:
 | `GET`  | `/healthz`                 | implemented   | liveness probe (admin port)                       |
 | `GET`  | `/readyz`                  | implemented   | readiness probe (admin port)                      |
 
-Out of scope for v1 (tracked for v2): assistants/threads, tool calls,
-fine-tunes, audio, image, batch.
+Not yet implemented (tracked, no committed timeline): assistants /
+threads, tool calls, fine-tunes, audio, image, batch.
 
 ## Auth
 

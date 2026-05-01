@@ -22,7 +22,8 @@
 #   curl -fsSL .../install.sh | CGN_REPO=org/repo sh
 #
 # Test against a local artefact directory (the directory must contain
-# `cognitora-${CGN_VERSION}-${TARGET}.tar.gz` and matching `.sha256`):
+# `cognitora-${CGN_VERSION}-${PLATFORM}.tar.gz` and matching `.sha256`,
+# where `PLATFORM` is e.g. `linux-x86_64` or `linux-arm64`):
 #
 #   CGN_BASE_URL=file:///tmp/dist CGN_VERSION=v0.1.0 sh install.sh
 #
@@ -61,13 +62,16 @@ require mktemp
 
 OS="$(uname -s)"
 ARCH="$(uname -m)"
+# Friendly platform suffix used by release tarballs. Kept stable across
+# releases — the underlying Rust target triple may evolve, but the
+# install.sh contract should not.
 case "${OS}/${ARCH}" in
-  Linux/x86_64)        TARGET="x86_64-unknown-linux-gnu"  ;;
-  Linux/aarch64)       TARGET="aarch64-unknown-linux-gnu" ;;
-  Linux/arm64)         TARGET="aarch64-unknown-linux-gnu" ;;
+  Linux/x86_64)        PLATFORM="linux-x86_64" ;;
+  Linux/aarch64)       PLATFORM="linux-arm64"  ;;
+  Linux/arm64)         PLATFORM="linux-arm64"  ;;
   Darwin/*)
     fatal "macOS prebuilt binaries are not shipped. Build from source: \
-'cargo build --release --no-default-features -p cgn-router -p cgn-agent -p cgn-kvcached -p cgn-ctl'"
+'cargo build --release --no-default-features -p cgn-router -p cgn-agent -p cgn-kvcached -p cgn-metrics -p cgn-ctl -p cgn-operator'"
     ;;
   *) fatal "unsupported platform: ${OS}/${ARCH}" ;;
 esac
@@ -82,7 +86,7 @@ if [ -z "${CGN_VERSION}" ]; then
   fi
   [ -z "${CGN_VERSION}" ] && fatal "no published release found for ${CGN_REPO}"
 fi
-log "installing ${CGN_VERSION} for ${TARGET}"
+log "installing ${CGN_VERSION} for ${PLATFORM}"
 
 # ---- Resolve install prefix -----------------------------------------------
 
@@ -102,7 +106,7 @@ if [ -z "${CGN_BASE_URL}" ]; then
   CGN_BASE_URL="https://github.com/${CGN_REPO}/releases/download/${CGN_VERSION}"
 fi
 
-ARCHIVE="cognitora-${CGN_VERSION}-${TARGET}.tar.gz"
+ARCHIVE="cognitora-${CGN_VERSION}-${PLATFORM}.tar.gz"
 ARCHIVE_URL="${CGN_BASE_URL}/${ARCHIVE}"
 SUM_URL="${ARCHIVE_URL}.sha256"
 SIG_URL="${ARCHIVE_URL}.sig"
@@ -155,7 +159,7 @@ log "extracting"
 tar -xzf "${TMP}/${ARCHIVE}" -C "${TMP}"
 
 # The workflow's tarball top-level dir matches the archive base name.
-SRC_DIR="${TMP}/cognitora-${CGN_VERSION}-${TARGET}"
+SRC_DIR="${TMP}/cognitora-${CGN_VERSION}-${PLATFORM}"
 [ -d "$SRC_DIR" ] || SRC_DIR="$TMP"
 
 installed=""

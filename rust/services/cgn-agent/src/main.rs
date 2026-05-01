@@ -2,7 +2,8 @@
 //!
 //! Responsibilities:
 //!
-//! * Spawn and supervise the inference engine (vLLM today; pluggable trait).
+//! * Spawn and supervise the inference engine (vLLM, llama.cpp, or any
+//!   OpenAI-compatible server; see `engine::EngineKind`).
 //! * Translate `Agent.Generate` gRPC into engine HTTP calls.
 //! * Report `NodeHealth` (NVML + queue depth + engine readiness) back to
 //!   the router via etcd.

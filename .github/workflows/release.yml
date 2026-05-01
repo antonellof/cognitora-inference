@@ -27,14 +27,19 @@ jobs:
   # `cargo build` from source; we just don't ship prebuilt mac binaries.
   # ---------------------------------------------------------------------------
   build:
-    name: build (${{ matrix.target }})
+    name: build (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
         include:
+          # `target` is the Rust target triple (passed to `cargo --target`).
+          # `platform` is the user-friendly archive suffix that ships in
+          # the release filename and that install.sh resolves from uname(1).
           - target: x86_64-unknown-linux-gnu
+            platform: linux-x86_64
             runner: ubuntu-24.04
           - target: aarch64-unknown-linux-gnu
+            platform: linux-arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     steps:
@@ -50,7 +55,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: ${{ matrix.platform }}
 
       - name: Install build deps
         run: |
@@ -89,7 +94,7 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ steps.tag.outputs.name }}"
-          STAGING="cognitora-${TAG}-${{ matrix.target }}"
+          STAGING="cognitora-${TAG}-${{ matrix.platform }}"
           mkdir -p "dist/${STAGING}"
 
           BINS=(cgn-router cgn-agent cgn-kvcached cgn-metrics cgn-ctl cgn-operator)
@@ -107,10 +112,9 @@ jobs:
             exit 1
           fi
 
-          # Bundle license + a small README so the tarball is self-contained.
           cp LICENSE "dist/${STAGING}/" 2>/dev/null || true
           cat > "dist/${STAGING}/README.txt" <<EOF
-          Cognitora ${TAG} for ${{ matrix.target }}
+          Cognitora ${TAG} for ${{ matrix.platform }} (Rust target: ${{ matrix.target }})
 
           Binaries in this archive:
           $(ls "dist/${STAGING}" | grep -E '^cgn-' | sed 's/^/  - /')
@@ -142,14 +146,14 @@ jobs:
           COSIGN_EXPERIMENTAL: "1"
         shell: bash
         run: |
-          STAGING="cognitora-${{ steps.tag.outputs.name }}-${{ matrix.target }}"
+          STAGING="cognitora-${{ steps.tag.outputs.name }}-${{ matrix.platform }}"
           cosign sign-blob --yes \
             --output-signature "dist/${STAGING}.tar.gz.sig" \
             "dist/${STAGING}.tar.gz"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.target }}
+          name: dist-${{ matrix.platform }}
           path: dist/
           if-no-files-found: error
 

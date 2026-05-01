@@ -93,8 +93,10 @@ Span structure:
 - **Agent**: child span `agent.generate` propagated from the router
   via gRPC metadata.
 - **Engine**: child span `engine.forward` emitted by the engine
-  driver (vLLM today writes the OTLP span itself when launched with
-  `--otlp-endpoint=$OTEL_EXPORTER_OTLP_ENDPOINT`).
+  driver. vLLM writes the OTLP span itself when launched with
+  `--otlp-endpoint=$OTEL_EXPORTER_OTLP_ENDPOINT`; `llama_cpp` and
+  `openai_compat` engines fall back to a router-side span tagged
+  with the upstream HTTP latency.
 
 ## Dashboards
 
