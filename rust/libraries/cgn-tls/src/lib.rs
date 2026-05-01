@@ -65,6 +65,9 @@ pub fn generate_dev_pki(common_name: &str, subject_alt_names: Vec<String>) -> Re
     let mut ca_params = CertificateParams::new(vec!["cognitora-dev-ca".into()])
         .map_err(|e| Error::Tls(format!("ca params: {e}")))?;
     ca_params.is_ca = IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    ca_params
+        .distinguished_name
+        .push(rcgen::DnType::CommonName, "Cognitora Dev CA");
     ca_params.key_usages = vec![
         KeyUsagePurpose::KeyCertSign,
         KeyUsagePurpose::CrlSign,
