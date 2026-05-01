@@ -18,7 +18,7 @@ use bytes::Bytes;
 use crate::block::BlockAddress;
 
 /// Push a block over RDMA to `remote`. Stub: returns `Unsupported`
-/// at runtime until the verbs path lands in M3.
+/// at runtime until the ibverbs implementation lands.
 pub async fn peer_push(_remote: &str, _addr: BlockAddress, _bytes: Bytes) -> cgn_core::Result<()> {
     Err(cgn_core::Error::Internal(
         "rdma transport: ibverbs path not yet enabled in this build".into(),

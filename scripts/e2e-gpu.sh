@@ -8,12 +8,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-if [[ "${CGN_M3_READY:-0}" != "1" ]]; then
+if [[ "${CGN_E2E_GPU:-0}" != "1" ]]; then
   cat <<EOF >&2
 ==> scripts/e2e-gpu.sh is gated.
 
 The GPU end-to-end pipeline runs only on a self-hosted runner with a
-visible CUDA device. Set CGN_M3_READY=1 (and provide CUDA_VISIBLE_DEVICES,
+visible CUDA device. Set CGN_E2E_GPU=1 (and provide CUDA_VISIBLE_DEVICES,
 HF_TOKEN) to enable this gate. The pipeline:
 
   1. Builds cgn-{router,agent,kvcached,metrics} with --release.
@@ -22,7 +22,7 @@ HF_TOKEN) to enable this gate. The pipeline:
      surface.
   4. Asserts TTFT p99 < 1s and cgn:router:cache_hit_ratio >= 0.55.
 
-Skipping (CGN_M3_READY != 1).
+Skipping (CGN_E2E_GPU != 1).
 EOF
   exit 0
 fi

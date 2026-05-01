@@ -38,8 +38,9 @@ authors = ["Cognitora Authors"]
 # wide (it spans config, IO, gRPC, etcd, …); the `result_large_err` and
 # `large_enum_variant` lints would force boxing in every public Result,
 # which trades a tiny perf win for a worse API. `dead_code` is allowed
-# because forward-looking modules (M3-M6 surfaces) ship before their
-# first internal caller.
+# because some forward-looking helpers (autoscaler, federation,
+# deadline admission) expose APIs that aren't yet wired into every
+# call site.
 [workspace.lints.clippy]
 result_large_err   = "allow"
 large_enum_variant = "allow"

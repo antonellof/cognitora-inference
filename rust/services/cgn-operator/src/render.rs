@@ -135,7 +135,8 @@ pub fn agent_objects(ic: &InferenceCluster, ns: &str, name: &str, image: &str) -
 }
 
 /// Build the kvcached Deployment (one replica per GPU host today;
-/// future M3 work makes this a DaemonSet alongside the agent).
+/// a future revision may convert this to a DaemonSet alongside the
+/// agent).
 pub fn kvcached_objects(ic: &InferenceCluster, ns: &str, name: &str, image: &str) -> Vec<Value> {
     let labels = labels(ic, name, "kvcached");
     let ssd_class = ic.spec.kvcached.ssd_class.clone();

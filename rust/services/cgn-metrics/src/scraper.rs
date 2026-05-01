@@ -1,8 +1,9 @@
 //! Periodic Prometheus scraper that pulls neighbour `/metrics` endpoints
 //! and re-exposes them under our admin surface as a federation target.
 //!
-//! For now this is a placeholder loop; integrating a full federation
-//! pipeline (`reqwest` → `prometheus::TextEncoder` re-encoding) is M3 work.
+//! For now this is a placeholder loop; the full federation pipeline
+//! (`reqwest` → `prometheus::TextEncoder` re-encoding) is tracked as
+//! future work.
 
 use cgn_core::{config::Config, Result};
 use tracing::{debug, warn};

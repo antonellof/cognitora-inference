@@ -33,7 +33,8 @@ pub async fn pick_peer(
     }
     // Probe each peer's `/healthz` (out of band) and pick the first
     // healthy one. With dozens of peers we'd want a smarter scoring
-    // strategy — geography, latency, cache overlap — tracked under M5+.
+    // strategy — geography, latency, cache overlap — tracked as
+    // future work.
     for peer in peers {
         match RouterClient::connect(peer.clone()).await {
             Ok(client) => {

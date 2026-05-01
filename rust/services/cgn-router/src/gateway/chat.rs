@@ -70,9 +70,9 @@ pub async fn completions(
     }
 
     // Cascade kicks in only on the buffered path (we need a complete
-    // response before we can read its mean logprob and decide whether to
-    // escalate). Streaming requests bypass the cascade — that path is
-    // tracked under M4-followups.
+    // response before we can read its mean logprob and decide whether
+    // to escalate). Streaming requests bypass the cascade — incremental
+    // logprob gating on streaming responses is tracked as future work.
     let casc = Cascade::from_config(&state.cfg, &model, &[]);
     let result = match casc {
         Some(c) => buffered_with_cascade(state.clone(), proto_req, c).await,
@@ -423,8 +423,8 @@ async fn run_prefill(address: &str, req: &cgn_proto::v1::GenerateRequest) -> Opt
         .into_inner();
     // The prefill agent terminates the stream after publishing the KV
     // handoff metadata. We don't currently surface that metadata back —
-    // M3 will lift the handoff message into a side-channel so the
-    // router can drive the QUIC push between agents.
+    // a future revision will lift the handoff message into a
+    // side-channel so the router can drive the QUIC push between agents.
     let _ = stream.next().await;
     Some(vec![])
 }

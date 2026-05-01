@@ -9,9 +9,9 @@
 //!
 //! On admission we estimate the time-to-first-token (TTFT) from the
 //! best candidate node's queue depth × per-replica concurrency, and
-//! reject the request if the estimate exceeds its deadline. This is
-//! the "M6" exit-gate behaviour: requests that *cannot* meet their SLA
-//! are rejected fast rather than queued behind a noisy neighbour.
+//! reject the request if the estimate exceeds its deadline. Requests
+//! that *cannot* meet their SLA are rejected fast rather than queued
+//! behind a noisy neighbour.
 
 use std::time::Duration;
 
@@ -74,8 +74,8 @@ fn effective_deadline_ms(cfg: &Config, req: &GenerateRequest) -> u32 {
     let ttft = cfg.router.admission.ttft_slo;
     let max_tokens = req.params.as_ref().map(|p| p.max_tokens).unwrap_or(256);
     // Conservative: assume 30 ms TPOT (per-output-token) when no
-    // tenant-specific SLO is configured. M6 follow-up will plumb this
-    // through `[tenants.*]`.
+    // tenant-specific SLO is configured. Per-tenant overrides are
+    // plumbed through `[tenants.*]` in the config.
     let tpot_ms = 30u32;
     duration_to_ms(ttft) + max_tokens.saturating_mul(tpot_ms)
 }

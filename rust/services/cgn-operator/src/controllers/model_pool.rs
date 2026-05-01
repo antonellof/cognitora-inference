@@ -6,9 +6,9 @@
 //! its main config; the agent picks up loads on its next heartbeat
 //! cycle by checking the `[models]` section in the ConfigMap.
 //!
-//! Future: speak `Agent.LoadModel` directly over gRPC to each
+//! Future work: speak `Agent.LoadModel` directly over gRPC to each
 //! matching agent so loads happen synchronously instead of via config
-//! propagation. That's tracked under M5 follow-ups.
+//! propagation.
 
 use std::sync::Arc;
 use std::time::Duration;

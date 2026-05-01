@@ -4,11 +4,11 @@
 # 4-node cluster smoke for KV-aware routing. Brings up 1 router + 4
 # fake agents on the loopback interface, replays the
 # tests/fixtures/traces/openai_chatlog.jsonl fixture, and verifies the
-# cache hit ratio meets the M2 SLO (>= 0.55).
+# cache hit ratio meets the platform SLO (>= 0.55).
 
 set -euo pipefail
 
-if [[ "${CGN_M2_READY:-0}" != "1" ]]; then
+if [[ "${CGN_E2E_MULTINODE:-0}" != "1" ]]; then
   cat <<EOF >&2
 ==> tests/e2e/multi_node_kv.sh requires a running etcd + 4 fake agents.
 
@@ -16,7 +16,7 @@ This harness expects:
   - etcd reachable on \$COGNITORA_ETCD (default 127.0.0.1:2379)
   - tests/fixtures/traces/openai_chatlog.jsonl (replay trace)
 
-Set CGN_M2_READY=1 to enable, otherwise the script exits cleanly.
+Set CGN_E2E_MULTINODE=1 to enable, otherwise the script exits cleanly.
 EOF
   exit 0
 fi
@@ -78,8 +78,9 @@ while IFS= read -r line; do
     http://127.0.0.1:8080/v1/chat/completions || true)
   if [[ "$RESP" == "503" ]]; then
     # 503 means the fake agents aren't reachable, which is the
-    # expected outcome of this M2 smoke today; the routing decision
-    # is still made and counted in cgn_router_kv_cache_lookups_total.
+    # expected outcome of this fixture-only smoke; the routing
+    # decision is still made and counted in
+    # cgn_router_kv_cache_lookups_total.
     :
   fi
 done <"${REPO_ROOT}/tests/fixtures/traces/openai_chatlog.jsonl"

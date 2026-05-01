@@ -282,7 +282,8 @@ fn build_server_config(addr: SocketAddr) -> Result<ServerConfig> {
 
 fn build_client_endpoint() -> Result<Endpoint> {
     // Dev mode: trust any cert (matches the dev PKI on the server side).
-    // Production path uses the cluster CA — see the M3 milestone.
+    // Production deployments wire this through the cluster CA via
+    // `cgn-tls`; see `docs/architecture/security.md`.
     let mut crypto = rustls::ClientConfig::builder()
         .dangerous()
         .with_custom_certificate_verifier(SkipServerVerification::new())
