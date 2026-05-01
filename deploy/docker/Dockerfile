@@ -7,7 +7,7 @@ ENV CARGO_TERM_COLOR=always
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential pkg-config libssl-dev clang lld \
-    cmake protobuf-compiler ca-certificates git \
+    cmake protobuf-compiler libprotobuf-dev ca-certificates git \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
