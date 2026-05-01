@@ -23,6 +23,7 @@ spec:
         - name: cgn-operator
           image: {{ include "cognitora.image" . }}
           imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          command: ["/usr/local/bin/cgn-operator"]
           args:
             {{- if not .Values.operator.watchAllNamespaces }}
             - --namespace

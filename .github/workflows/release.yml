@@ -248,20 +248,18 @@ jobs:
           fail_on_unmatched_files: true
 
   # ---------------------------------------------------------------------------
-  # Multi-arch container images for `cgn-router`, `cgn-agent`, `cgn-kvcached`.
+  # Multi-arch container image. Single image with all six binaries in
+  # /usr/local/bin/. Pods choose which one to run via `command:`; the
+  # Helm chart already does this.
   # ---------------------------------------------------------------------------
   docker:
-    name: docker (${{ matrix.bin }})
+    name: docker
     runs-on: ubuntu-24.04
     needs: [build]
     permissions:
       contents: read
       packages: write
       id-token: write
-    strategy:
-      fail-fast: false
-      matrix:
-        bin: [cgn-router, cgn-agent, cgn-kvcached, cgn-metrics, cgn-ctl, cgn-operator]
     steps:
       - uses: actions/checkout@v4
 
@@ -284,15 +282,19 @@ jobs:
             echo "name=${GITHUB_REF_NAME}" >>"$GITHUB_OUTPUT"
           fi
 
+      - name: Lowercase repo owner
+        id: owner
+        shell: bash
+        run: echo "lc=${GITHUB_REPOSITORY_OWNER,,}" >>"$GITHUB_OUTPUT"
+
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: deploy/docker/Dockerfile
-          build-args: BIN=${{ matrix.bin }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.bin }}:${{ steps.tag.outputs.name }}
-            ghcr.io/${{ github.repository_owner }}/${{ matrix.bin }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ghcr.io/${{ steps.owner.outputs.lc }}/cognitora:${{ steps.tag.outputs.name }}
+            ghcr.io/${{ steps.owner.outputs.lc }}/cognitora:latest
+          cache-from: type=gha,scope=cognitora-docker
+          cache-to: type=gha,scope=cognitora-docker,mode=max

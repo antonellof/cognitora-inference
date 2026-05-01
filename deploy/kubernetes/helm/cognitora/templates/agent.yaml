@@ -25,6 +25,7 @@ spec:
         - name: cgn-agent
           image: {{ include "cognitora.image" . }}
           imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          command: ["/usr/local/bin/cgn-agent"]
           args:
             - --config
             - /etc/cognitora/cognitora.toml

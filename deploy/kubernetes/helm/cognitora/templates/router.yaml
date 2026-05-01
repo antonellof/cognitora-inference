@@ -22,6 +22,7 @@ spec:
         - name: cgn-router
           image: {{ include "cognitora.image" . }}
           imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          command: ["/usr/local/bin/cgn-router"]
           args:
             - --config
             - /etc/cognitora/cognitora.toml

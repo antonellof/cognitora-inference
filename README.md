@@ -103,10 +103,13 @@ helm install cognitora oci://ghcr.io/antonellof/charts/cognitora \
 
 Tagged builds are produced by [`.github/workflows/release.yml`](.github/workflows/release.yml)
 for every `v*.*.*` tag — two Linux targets (`x86_64-unknown-linux-gnu`,
-`aarch64-unknown-linux-gnu`), each archive shipped with a sha256 sum and an
-aggregated `SHA256SUMS` manifest. Multi-arch container images
-(`linux/amd64` + `linux/arm64`) are published to `ghcr.io` for
-`cgn-router`, `cgn-agent`, `cgn-kvcached`, and `cgn-ctl`.
+`aarch64-unknown-linux-gnu`), each archive ships all six binaries
+(`cgn-router`, `cgn-agent`, `cgn-kvcached`, `cgn-metrics`, `cgn-ctl`,
+`cgn-operator`) plus a sha256 sum and an aggregated `SHA256SUMS`
+manifest. A single multi-arch container image
+(`ghcr.io/antonellof/cognitora:vX`, `linux/amd64` + `linux/arm64`)
+holds all six binaries — pods pick one via `command:` (the Helm chart
+already does this).
 
 To dry-run the full publish flow locally:
 
