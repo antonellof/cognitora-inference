@@ -46,6 +46,12 @@ agent-tiny-vllm.toml     # vLLM engine (GPU)
 `scripts/run/up.sh` picks up any file matching `agent-*.toml`, so you swap
 topologies by symlinking or copying the files you want into a profile dir.
 
+> **macOS shortcut:** if you already have [Ollama](https://ollama.com)
+> installed, skip the engine setup below and use
+> [`examples/local-mac`](../local-mac) — it points two agents at Ollama
+> via `engine.kind = "openai_compat"` and runs the exact same router,
+> kvcached, and rate-limit middleware as the production CPU/GPU stacks.
+
 ## CPU host (laptop / generic VM)
 
 ```bash

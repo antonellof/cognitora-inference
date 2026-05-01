@@ -1,0 +1,38 @@
+[cluster]
+name           = "cognitora-mac"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[router]
+listen_http  = "127.0.0.1:8080"
+listen_grpc  = "127.0.0.1:9090"
+listen_admin = "127.0.0.1:9091"
+node_id      = "router-mac"
+
+[router.score_weights]
+kv       = 0.55
+load     = 0.25
+power    = 0.10
+capacity = 0.10
+
+# Tight on purpose — the demo fires 5 concurrent requests against this
+# bucket and expects ≥1 of them to come back as 429. Bump these for real
+# workloads.
+[router.rate_limit]
+rps   = 1
+burst = 2
+
+# The models declared here must use the *exact* names that Ollama serves
+# (visible via `ollama list`). The agent passes the model name straight
+# through to the engine.
+[models."phi3:mini"]
+tp = 1
+
+[models."llama3.2:latest"]
+tp = 1

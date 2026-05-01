@@ -48,11 +48,20 @@ stop_pid() {
   rm -f "$pidfile"
 }
 
-# Wait until a TCP port is *not* listening (port released).
+# Wait until a TCP port is *not* listening (port released). Works on both
+# Linux (ss) and macOS (lsof).
 wait_port_free() {
   local port=$1 to=${2:-30}
   for _ in $(seq 1 "$to"); do
-    ss -tln 2>/dev/null | grep -q ":${port} " || return 0
+    if command -v ss >/dev/null 2>&1; then
+      ss -tln 2>/dev/null | grep -q ":${port} " || return 0
+    elif command -v lsof >/dev/null 2>&1; then
+      lsof -ti tcp:"$port" >/dev/null 2>&1 || return 0
+    else
+      # No tooling available — give the kernel half a second and trust it.
+      sleep 0.5
+      return 0
+    fi
     sleep 0.3
   done
   return 1

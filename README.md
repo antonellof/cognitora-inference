@@ -55,28 +55,62 @@ All Rust. Built from one workspace.
 
 ## Quick start
 
-### One-liner (bare metal or any of AWS/GCP/Azure/Hetzner)
+### One-liner install (Linux + macOS, x86_64 + arm64)
+
+Pulls a signed, sha256-verified release tarball from GitHub and drops the
+binaries into `/usr/local/bin` (or `~/.cognitora/bin` if not writable):
 
 ```bash
-curl -fsSL https://get.cognitora.dev | sh -s -- --target single-node --model llama3-8b
+curl -fsSL https://raw.githubusercontent.com/antonellof/cognitora-inference/main/deploy/installer/install.sh | sh
 ```
 
-### From source (Linux, NVIDIA GPU)
+Pin a version, choose a custom prefix, or point at a fork:
 
 ```bash
-git clone https://github.com/cognitora/cognitora && cd cognitora
+curl -fsSL .../install.sh | CGN_VERSION=v0.1.0 sh
+curl -fsSL .../install.sh | CGN_PREFIX=$HOME/.local sh
+curl -fsSL .../install.sh | CGN_REPO=acme/cognitora-fork sh
+```
 
-cargo build --release --workspace
+Then bring up a real LLM in <30 s — see
+[`examples/local-mac`](examples/local-mac) (Ollama-backed, macOS) or
+[`examples/multi-llm`](examples/multi-llm) (vLLM/llama-cpp, Linux/GPU).
 
-./target/release/cgn-ctl install --target single-node --model llama3-8b
+### From source
+
+```bash
+git clone https://github.com/antonellof/cognitora-inference && cd cognitora-inference
+
+cargo build --release --no-default-features \
+  -p cgn-router -p cgn-agent -p cgn-kvcached -p cgn-ctl
+
+./target/release/cgn-ctl --version
 ```
 
 ### Kubernetes
 
 ```bash
-helm install cognitora oci://ghcr.io/cognitora/charts/cognitora \
+helm install cognitora oci://ghcr.io/antonellof/charts/cognitora \
     --set router.replicas=2 \
     --set models.llama3-70b.tp=4
+```
+
+### Releases
+
+Tagged builds are produced by [`.github/workflows/release.yml`](.github/workflows/release.yml)
+for every `v*.*.*` tag — four targets (`{x86_64,aarch64}-{linux-gnu,apple-darwin}`),
+each archive shipped with a sha256 sum and an aggregated `SHA256SUMS`
+manifest. Multi-arch container images are published to `ghcr.io` for
+`cgn-router`, `cgn-agent`, `cgn-kvcached`, and `cgn-ctl`.
+
+To dry-run the full publish flow locally:
+
+```bash
+bash scripts/release/pack.sh v0.0.0-dev
+( cd dist && python3 -m http.server 8765 ) &
+CGN_BASE_URL=http://127.0.0.1:8765 CGN_VERSION=v0.0.0-dev \
+  CGN_PREFIX=/tmp/cgn-test \
+  sh deploy/installer/install.sh
 ```
 
 ## Repository layout

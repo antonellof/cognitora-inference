@@ -1,0 +1,30 @@
+# Mac-local agent that proxies to a model already loaded in Ollama.
+# Ollama exposes an OpenAI-compatible API at http://127.0.0.1:11434/v1
+# so we just use engine.kind = "openai_compat" and let it manage the
+# model lifecycle.
+#
+# Prereq: `ollama pull phi3:mini`
+
+[cluster]
+name           = "cognitora-mac"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7080"
+role     = "both"
+node_id  = "agent-phi3"
+kv_uds   = "/tmp/cognitora-mac-kv.sock"
+
+[engine]
+kind = "openai_compat"
+url  = "http://127.0.0.1:11434"
+
+[models."phi3:mini"]
+tp = 1

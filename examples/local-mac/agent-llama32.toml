@@ -1,0 +1,27 @@
+# Mac-local agent serving Llama 3.2 via Ollama.
+#
+# Prereq: `ollama pull llama3.2`
+
+[cluster]
+name           = "cognitora-mac"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7081"
+role     = "both"
+node_id  = "agent-llama32"
+kv_uds   = "/tmp/cognitora-mac-kv.sock"
+
+[engine]
+kind = "openai_compat"
+url  = "http://127.0.0.1:11434"
+
+[models."llama3.2:latest"]
+tp = 1

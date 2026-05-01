@@ -14,11 +14,15 @@ set -euo pipefail
 ETCD_VERSION=${ETCD_VERSION:-v3.5.18}
 ETCD_DIR=${ETCD_DIR:-$HOME/.local/cognitora/etcd}
 
+OS=$(uname -s)
 ARCH=$(uname -m)
-case "$ARCH" in
-  x86_64)  PLATFORM=linux-amd64 ;;
-  aarch64|arm64) PLATFORM=linux-arm64 ;;
-  *) echo "unsupported arch $ARCH" >&2; exit 1 ;;
+case "$OS:$ARCH" in
+  Linux:x86_64)        PLATFORM=linux-amd64;  EXT=tar.gz ;;
+  Linux:aarch64)       PLATFORM=linux-arm64;  EXT=tar.gz ;;
+  Linux:arm64)         PLATFORM=linux-arm64;  EXT=tar.gz ;;
+  Darwin:x86_64)       PLATFORM=darwin-amd64; EXT=zip ;;
+  Darwin:arm64)        PLATFORM=darwin-arm64; EXT=zip ;;
+  *) echo "unsupported platform $OS/$ARCH" >&2; exit 1 ;;
 esac
 
 log() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -28,10 +32,17 @@ if [ -x "$ETCD_DIR/etcd-$ETCD_VERSION-$PLATFORM/etcd" ]; then
   log "etcd $ETCD_VERSION already installed at $ETCD_DIR"
 else
   log "downloading etcd $ETCD_VERSION ($PLATFORM)"
-  url=https://github.com/etcd-io/etcd/releases/download/$ETCD_VERSION/etcd-$ETCD_VERSION-$PLATFORM.tar.gz
-  curl -fsSL -o "$ETCD_DIR/etcd.tgz" "$url"
-  tar -xzf "$ETCD_DIR/etcd.tgz" -C "$ETCD_DIR"
-  rm -f "$ETCD_DIR/etcd.tgz"
+  url=https://github.com/etcd-io/etcd/releases/download/$ETCD_VERSION/etcd-$ETCD_VERSION-$PLATFORM.$EXT
+  if [ "$EXT" = "tar.gz" ]; then
+    curl -fsSL -o "$ETCD_DIR/etcd.tgz" "$url"
+    tar -xzf "$ETCD_DIR/etcd.tgz" -C "$ETCD_DIR"
+    rm -f "$ETCD_DIR/etcd.tgz"
+  else
+    command -v unzip >/dev/null 2>&1 || { echo "unzip not installed; install with 'brew install unzip' or 'apt-get install unzip'" >&2; exit 1; }
+    curl -fsSL -o "$ETCD_DIR/etcd.zip" "$url"
+    unzip -q -o "$ETCD_DIR/etcd.zip" -d "$ETCD_DIR"
+    rm -f "$ETCD_DIR/etcd.zip"
+  fi
 fi
 
 # Symlink for stable lookup

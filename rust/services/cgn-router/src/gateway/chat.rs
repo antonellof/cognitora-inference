@@ -25,6 +25,7 @@ use crate::cascade::{Cascade, StepOutcome};
 use crate::routing;
 use crate::state::SharedState;
 
+use super::metrics::{CHAT_COMPLETION_TOKENS, CHAT_LATENCY, CHAT_REQUESTS};
 use super::sse;
 use super::types::{
     ChatChoice, ChatChunk, ChatChunkChoice, ChatDelta, ChatMessage, ChatRequest, ChatResponse,
@@ -42,6 +43,8 @@ pub async fn completions(
     );
     let created = chrono::Utc::now().timestamp();
     let model = req.model.clone();
+    let started = std::time::Instant::now();
+    let stream_label = if stream_mode { "true" } else { "false" };
 
     // Build the proto request once.
     let proto_req = build_proto_request(&req);
@@ -51,8 +54,10 @@ pub async fn completions(
         let id_for_task = id.clone();
         let model_for_task = model.clone();
         let state_clone = state.clone();
+        let metric_model = model.clone();
+        let started_for_metric = started;
         tokio::spawn(async move {
-            if let Err(e) = stream_run(
+            let outcome = stream_run(
                 state_clone,
                 proto_req,
                 tx.clone(),
@@ -60,8 +65,15 @@ pub async fn completions(
                 model_for_task,
                 created,
             )
-            .await
-            {
+            .await;
+            let status = if outcome.is_ok() { "200" } else { "5xx" };
+            CHAT_REQUESTS
+                .with_label_values(&[&metric_model, status])
+                .inc();
+            CHAT_LATENCY
+                .with_label_values(&[&metric_model, "true"])
+                .observe(started_for_metric.elapsed().as_secs_f64());
+            if let Err(e) = outcome {
                 error!(error=?e, "stream_run error");
             }
         });
@@ -81,8 +93,19 @@ pub async fn completions(
             .map(|(text, n, finish)| (text, n, finish, model.clone())),
     };
 
+    let dt = started.elapsed().as_secs_f64();
+    CHAT_LATENCY
+        .with_label_values(&[&model, stream_label])
+        .observe(dt);
+
     match result {
         Ok((text, completion_tokens, finish, used_model)) => {
+            CHAT_REQUESTS
+                .with_label_values(&[&used_model, "200"])
+                .inc();
+            CHAT_COMPLETION_TOKENS
+                .with_label_values(&[&used_model])
+                .inc_by(completion_tokens as u64);
             let resp = ChatResponse {
                 id,
                 object: "chat.completion",
@@ -106,6 +129,7 @@ pub async fn completions(
             Json(resp).into_response()
         }
         Err(e) => {
+            CHAT_REQUESTS.with_label_values(&[&model, "5xx"]).inc();
             warn!(error=?e, "completion failed");
             error_json(&e)
         }

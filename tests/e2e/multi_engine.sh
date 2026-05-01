@@ -43,17 +43,36 @@ cleanup() {
   for p in "${PIDS[@]:-}"; do
     [ -n "$p" ] && kill -9 "$p" 2>/dev/null || true
   done
+  # Best-effort port reclamation. We bound lsof to 2s because on macOS
+  # it can stall enumerating stale sockets. The PID kill above is the
+  # primary cleanup.
   for p in "$PORT_HTTP" "$PORT_GRPC" "$PORT_ADMIN" "$PORT_AGENT" "$PORT_FAKE"; do
-    leftover=$(lsof -ti tcp:"$p" 2>/dev/null || true)
+    leftover=$(timeout_cmd 2 lsof -ti tcp:"$p" 2>/dev/null || true)
     [ -n "$leftover" ] && kill -9 $leftover 2>/dev/null || true
   done
   rm -rf "$TMP"
 }
+
+# Cross-platform `timeout` helper. macOS doesn't ship coreutils' timeout;
+# use `gtimeout` if installed, otherwise fall back to running the command
+# directly (no bound).
+timeout_cmd() {
+  local secs=$1; shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$secs" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$secs" "$@"
+  else
+    "$@"
+  fi
+}
+
 trap cleanup EXIT INT TERM
 
-# Pre-flight: free the test ports if a previous run leaked.
+# Pre-flight: free the test ports if a previous run leaked. Bounded so we
+# don't get stuck on a slow lsof enumeration.
 for p in "$PORT_HTTP" "$PORT_GRPC" "$PORT_ADMIN" "$PORT_AGENT" "$PORT_FAKE"; do
-  pids=$(lsof -ti tcp:"$p" 2>/dev/null || true)
+  pids=$(timeout_cmd 2 lsof -ti tcp:"$p" 2>/dev/null || true)
   if [ -n "$pids" ]; then
     echo "==> freeing port $p (killing $pids)"
     kill -9 $pids 2>/dev/null || true
@@ -228,7 +247,12 @@ fi
 ok "auth middleware: with-bearer → $single (not 401)"
 
 # 10. Rate-limit: fire 5 concurrent with key. burst=1 → at least one 429.
+#
+# Note: we capture the curl PIDs and `wait` only for *those* — a bare `wait`
+# would block on every background child including the daemons (agent,
+# router, fake_engine) which never exit on their own.
 codes=$(mktemp)
+curl_pids=()
 for _ in 1 2 3 4 5; do
   ( curl -s -o /dev/null -w '%{http_code}\n' -m 30 \
       -H 'Content-Type: application/json' \
@@ -236,8 +260,11 @@ for _ in 1 2 3 4 5; do
       "http://127.0.0.1:$PORT_HTTP/v1/chat/completions" \
       -d '{"model":"ci/test","messages":[{"role":"user","content":"x"}],"max_tokens":1}' \
       >> "$codes" ) &
+  curl_pids+=("$!")
 done
-wait
+for pid in "${curl_pids[@]}"; do
+  wait "$pid" 2>/dev/null || true
+done
 n429=$(grep -c "^429$" "$codes" || true)
 [ "$n429" -ge 1 ] || { cat "$codes"; fail "rate-limit did not trigger any 429"; }
 ok "rate-limit middleware: $n429/5 → 429 (rps=1, burst=1)"

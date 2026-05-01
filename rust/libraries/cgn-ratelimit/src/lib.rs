@@ -19,7 +19,7 @@ pub mod redis_backend;
 pub use redis_backend::RedisLimiter;
 
 use std::num::NonZeroU32;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use axum::{
     body::Body,
@@ -28,12 +28,25 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use cgn_telemetry::prometheus::{self, IntCounter};
 use dashmap::DashMap;
 use governor::{
     clock::DefaultClock,
     state::{InMemoryState, NotKeyed},
     Quota, RateLimiter,
 };
+
+static RATE_LIMITED: LazyLock<IntCounter> = LazyLock::new(|| {
+    let c = prometheus::IntCounter::new(
+        "cgn_router_rate_limited_total",
+        "Requests rejected by the rate-limit middleware.",
+    )
+    .expect("metric: rate_limited");
+    cgn_telemetry::registry()
+        .register(Box::new(c.clone()))
+        .ok();
+    c
+});
 
 /// Inner per-key limiter type.
 type Limiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
@@ -84,6 +97,7 @@ pub async fn ratelimit_middleware(
 ) -> Response {
     let key = principal_or_ip(&req);
     if let Err(_e) = rl.check(&key) {
+        RATE_LIMITED.inc();
         tracing::info!(key = %key, "rate-limited");
         return (
             StatusCode::TOO_MANY_REQUESTS,

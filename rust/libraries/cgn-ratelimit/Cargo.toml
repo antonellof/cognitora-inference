@@ -15,7 +15,8 @@ default = []
 redis-backend = ["dep:redis", "dep:chrono"]
 
 [dependencies]
-cgn-core = { workspace = true }
+cgn-core      = { workspace = true }
+cgn-telemetry = { workspace = true }
 
 axum            = { workspace = true }
 http            = "1.1"

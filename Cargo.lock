@@ -814,6 +814,7 @@ dependencies = [
  "async-trait",
  "axum",
  "cgn-core",
+ "cgn-telemetry",
  "chrono",
  "dashmap 6.1.0",
  "governor",

@@ -30,17 +30,21 @@ done
 if curl -fsS -m 1 "http://${ETCD_ENDPOINT:-127.0.0.1:2379}/health" >/dev/null 2>&1; then
   printf '\nregistered nodes (etcd /cognitora/nodes/):\n'
   etcdctl get --prefix /cognitora/nodes/ --print-value-only 2>/dev/null \
-    | python3 -c '
+    | python3 -c "
 import sys, json
 for line in sys.stdin:
     line = line.strip()
     if not line: continue
     try:
         d = json.loads(line)
-        print(f"  {d.get(\"node_id\",\"?\"):<14}  {d.get(\"model\",\"?\"):<40}  ready={d.get(\"ready\",False)}  {d.get(\"address\",\"\")}")
+        node = d.get('node_id', '?')
+        model = d.get('model', '?')
+        ready = d.get('ready', False)
+        addr = d.get('address', '')
+        print(f'  {node:<14}  {model:<40}  ready={ready}  {addr}')
     except Exception:
-        print("  " + line[:120])
-'
+        print('  ' + line[:120])
+"
 fi
 
 [ -n "$PROFILE" ] && [ -f "$PROFILE/router.toml" ] && {
