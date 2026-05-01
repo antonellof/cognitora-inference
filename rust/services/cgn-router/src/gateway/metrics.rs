@@ -16,9 +16,7 @@ pub static CHAT_REQUESTS: LazyLock<IntCounterVec> = LazyLock::new(|| {
         &["model", "status"],
     )
     .expect("metric: chat_requests");
-    cgn_telemetry::registry()
-        .register(Box::new(v.clone()))
-        .ok();
+    cgn_telemetry::registry().register(Box::new(v.clone())).ok();
     v
 });
 
@@ -31,9 +29,7 @@ pub static CHAT_COMPLETION_TOKENS: LazyLock<IntCounterVec> = LazyLock::new(|| {
         &["model"],
     )
     .expect("metric: chat_completion_tokens");
-    cgn_telemetry::registry()
-        .register(Box::new(v.clone()))
-        .ok();
+    cgn_telemetry::registry().register(Box::new(v.clone())).ok();
     v
 });
 
@@ -43,15 +39,11 @@ pub static CHAT_LATENCY: LazyLock<HistogramVec> = LazyLock::new(|| {
             "cgn_router_chat_latency_seconds",
             "End-to-end chat-completion latency (router-observed).",
         )
-        .buckets(vec![
-            0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 60.0,
-        ]),
+        .buckets(vec![0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 60.0]),
         &["model", "stream"],
     )
     .expect("metric: chat_latency");
-    cgn_telemetry::registry()
-        .register(Box::new(h.clone()))
-        .ok();
+    cgn_telemetry::registry().register(Box::new(h.clone())).ok();
     h
 });
 

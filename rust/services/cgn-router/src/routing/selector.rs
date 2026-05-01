@@ -156,6 +156,8 @@ pub fn decision_for_test(node: Arc<NodeEntry>, score: Score) -> RoutingDecision 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cluster::NodeRegistry;
+    use crate::state::RoutingPolicy;
 
     fn fake_state() -> SharedState {
         let cfg = cgn_core::config::Config::default();

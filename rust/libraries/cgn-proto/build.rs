@@ -39,7 +39,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             includes.push(p);
         }
     } else {
-        for candidate in ["/usr/include", "/usr/local/include", "/opt/homebrew/include"] {
+        for candidate in [
+            "/usr/include",
+            "/usr/local/include",
+            "/opt/homebrew/include",
+        ] {
             if PathBuf::from(candidate)
                 .join("google/protobuf/empty.proto")
                 .is_file()

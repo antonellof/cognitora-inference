@@ -2,14 +2,13 @@
 //!
 //! Each engine kind has its own argv shape:
 //!
-//! * **vllm**       `vllm serve <model> --tensor-parallel-size <tp>
-//!                  [--max-model-len <len>] [extra ...]`
-//! * **llama_cpp**  python_server: `python -m llama_cpp.server --host <h>
-//!                  --port <p> --model <gguf> --model_alias <name>
-//!                  --n_ctx <ctx> --n_threads <n> [--n_gpu_layers <k>]
-//!                  [extra ...]`
-//!                  binary mode: `<binary> --model <gguf> --host <h>
-//!                  --port <p> [extra ...]`
+//! * **vllm** — `vllm serve <model> --tensor-parallel-size <tp>
+//!   [--max-model-len <len>] [extra ...]`
+//! * **llama_cpp** — `python_server` mode: `python -m llama_cpp.server
+//!   --host <h> --port <p> --model <gguf> --model_alias <name>
+//!   --n_ctx <ctx> --n_threads <n> [--n_gpu_layers <k>] [extra ...]`.
+//!   `binary` mode: `<binary> --model <gguf> --host <h> --port <p>
+//!   [extra ...]`.
 //! * **openai_compat** — no spawn; caller checks `should_spawn()`.
 
 use cgn_core::{
@@ -227,12 +226,8 @@ mod tests {
             "infinity".to_string(),
             "{model}".to_string(),
         ];
-        let argv = render_argv(
-            &vllm_cfg(),
-            &spec("Qwen/Qwen2.5-0.5B", None),
-            Some(&legacy),
-        )
-        .unwrap();
+        let argv =
+            render_argv(&vllm_cfg(), &spec("Qwen/Qwen2.5-0.5B", None), Some(&legacy)).unwrap();
         assert_eq!(argv[0], "/bin/sleep");
         assert_eq!(argv[2], "Qwen/Qwen2.5-0.5B");
     }

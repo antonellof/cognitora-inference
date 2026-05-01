@@ -100,9 +100,7 @@ pub async fn completions(
 
     match result {
         Ok((text, completion_tokens, finish, used_model)) => {
-            CHAT_REQUESTS
-                .with_label_values(&[&used_model, "200"])
-                .inc();
+            CHAT_REQUESTS.with_label_values(&[&used_model, "200"]).inc();
             CHAT_COMPLETION_TOKENS
                 .with_label_values(&[&used_model])
                 .inc_by(completion_tokens as u64);

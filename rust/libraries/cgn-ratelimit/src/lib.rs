@@ -42,9 +42,7 @@ static RATE_LIMITED: LazyLock<IntCounter> = LazyLock::new(|| {
         "Requests rejected by the rate-limit middleware.",
     )
     .expect("metric: rate_limited");
-    cgn_telemetry::registry()
-        .register(Box::new(c.clone()))
-        .ok();
+    cgn_telemetry::registry().register(Box::new(c.clone())).ok();
     c
 });
 

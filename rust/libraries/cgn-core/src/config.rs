@@ -278,12 +278,12 @@ impl Default for AgentConfig {
 /// Cognitora's `cgn-agent` proxies to an OpenAI-compatible HTTP server. This
 /// block describes which engine to spawn and how. Three kinds are supported:
 ///
-/// * `vllm`          — the agent spawns `vllm serve <model> ...` (GPU).
-/// * `llama_cpp`     — the agent spawns `python -m llama_cpp.server` or a
-///                     standalone `llama-server` binary (CPU or GPU offload).
-/// * `openai_compat` — the agent does not spawn anything; it just proxies to
-///                     `engine.url`. Use this when the engine is managed by
-///                     systemd / Kubernetes / a sidecar.
+/// * `vllm` — the agent spawns `vllm serve <model> ...` (GPU).
+/// * `llama_cpp` — the agent spawns `python -m llama_cpp.server` or a
+///   standalone `llama-server` binary (CPU or GPU offload).
+/// * `openai_compat` — the agent does not spawn anything; it just proxies
+///   to `engine.url`. Use this when the engine is managed by
+///   systemd / Kubernetes / a sidecar.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EngineConfig {
