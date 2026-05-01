@@ -2,6 +2,7 @@
 
 use cgn_core::Result;
 use kube::api::{Api, ListParams};
+use kube::core::NamespaceResourceScope;
 use kube::Client;
 use serde::de::DeserializeOwned;
 
@@ -12,10 +13,13 @@ pub async fn client() -> Result<Client> {
         .map_err(|e| cgn_core::Error::Unavailable(format!("kube client: {e}")))
 }
 
-/// Cluster-wide list helper, returns objects sorted by `metadata.name`.
-pub async fn list_all<T>(client: Client, ns: &str) -> Result<Vec<T>>
+/// Namespaced list helper, returns objects sorted by `metadata.name`.
+pub async fn list_namespaced<T>(client: Client, ns: &str) -> Result<Vec<T>>
 where
-    T: kube::Resource<DynamicType = ()> + DeserializeOwned + Clone + std::fmt::Debug,
+    T: kube::Resource<DynamicType = (), Scope = NamespaceResourceScope>
+        + DeserializeOwned
+        + Clone
+        + std::fmt::Debug,
 {
     let api: Api<T> = Api::namespaced(client, ns);
     let mut items = api.list(&ListParams::default()).await

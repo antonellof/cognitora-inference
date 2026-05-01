@@ -29,7 +29,7 @@ pub struct ChatRequest {
     pub seed: Option<u32>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum StopSpec {
     Single(String),

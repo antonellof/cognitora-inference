@@ -10,7 +10,6 @@ use cgn_proto::v1::{
     AgentGenerateRequest, KvHandoffSpec, ModelRef, ModelSpec, NodeHealth, Status as PStatus, Token,
 };
 use futures::Stream;
-use prost_types::Empty;
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{transport::Server, Request, Response, Status, Streaming};
@@ -113,7 +112,7 @@ impl Agent for AgentSvc {
         Ok(Response::new(PStatus { code: 0, message: "ok".into() }))
     }
 
-    async fn health(&self, _req: Request<Empty>) -> Result<Response<NodeHealth>, Status> {
+    async fn health(&self, _req: Request<()>) -> Result<Response<NodeHealth>, Status> {
         let ready = self.supervisor.engine.ready().await;
         Ok(Response::new(NodeHealth {
             node_id: self.supervisor.cfg.agent.node_id.clone(),
@@ -132,7 +131,7 @@ impl Agent for AgentSvc {
         }))
     }
 
-    async fn drain(&self, _req: Request<Empty>) -> Result<Response<PStatus>, Status> {
+    async fn drain(&self, _req: Request<()>) -> Result<Response<PStatus>, Status> {
         self.supervisor.shutdown().await;
         Ok(Response::new(PStatus { code: 0, message: "drained".into() }))
     }

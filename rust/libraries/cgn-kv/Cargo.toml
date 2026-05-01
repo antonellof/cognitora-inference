@@ -8,6 +8,13 @@ homepage.workspace = true
 authors.workspace = true
 description = "Cognitora: KV cache primitives, RocksDB index, QUIC transfer wire format"
 
+[features]
+# Persistent RocksDB-backed index. On by default; turn off for dev builds
+# on hosts that can't build rocksdb's C++ tree (macOS 15+ SDKs sometimes
+# trip on the bundled rocksdb 8.10 source).
+default          = ["persistent-index"]
+persistent-index = ["dep:rocksdb"]
+
 [dependencies]
 cgn-core  = { workspace = true }
 cgn-proto = { workspace = true }
@@ -16,7 +23,7 @@ tokio        = { workspace = true }
 tokio-util   = { workspace = true }
 futures      = { workspace = true }
 bytes        = "1.7"
-rocksdb      = { workspace = true }
+rocksdb      = { workspace = true, optional = true }
 quinn        = { workspace = true }
 serde        = { workspace = true }
 bincode      = { workspace = true }

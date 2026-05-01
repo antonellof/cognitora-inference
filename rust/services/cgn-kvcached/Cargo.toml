@@ -12,12 +12,16 @@ description = "Cognitora KV cache daemon: GPU/RAM/SSD tiering, RocksDB index, QU
 name = "cgn-kvcached"
 path = "src/main.rs"
 
+[features]
+default = ["persistent-index"]
+persistent-index = ["cgn-kv/persistent-index", "dep:rocksdb"]
+
 [dependencies]
 cgn-core      = { workspace = true }
 cgn-proto     = { workspace = true }
 cgn-tls       = { workspace = true }
 cgn-telemetry = { workspace = true }
-cgn-kv        = { workspace = true }
+cgn-kv        = { workspace = true, default-features = false }
 
 tokio          = { workspace = true }
 tokio-stream   = { workspace = true }
@@ -29,7 +33,7 @@ rustls-pemfile = { workspace = true }
 rustls-pki-types = { workspace = true }
 futures        = { workspace = true }
 async-trait    = { workspace = true }
-rocksdb        = { workspace = true }
+rocksdb        = { workspace = true, optional = true }
 bytes          = "1.7"
 serde          = { workspace = true }
 serde_json     = { workspace = true }

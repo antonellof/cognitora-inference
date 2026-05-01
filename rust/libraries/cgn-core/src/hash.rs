@@ -14,10 +14,8 @@ pub fn hash_chunk(model: &str, tokens: &[u32]) -> [u8; 32] {
     h.update(b"cognitora.v1\0");
     h.update(model.as_bytes());
     h.update(b"\0");
-    let mut buf = [0u8; 4];
     for &t in tokens {
-        buf = t.to_le_bytes();
-        h.update(&buf);
+        h.update(&t.to_le_bytes());
     }
     *h.finalize().as_bytes()
 }

@@ -72,7 +72,11 @@ impl Supervisor {
     }
 
     pub async fn shutdown(&self) {
-        if let Some(mut child) = self.child.lock().take() {
+        // Take ownership of the child handle in a tight scope so the
+        // parking_lot guard isn't held across the await below (which would
+        // make the surrounding future !Send and break the gRPC trait).
+        let child = self.child.lock().take();
+        if let Some(mut child) = child {
             info!("terminating engine child");
             let _ = child.start_kill();
             let _ = tokio::time::timeout(Duration::from_secs(30), child.wait()).await;

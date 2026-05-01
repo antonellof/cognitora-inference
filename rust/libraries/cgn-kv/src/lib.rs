@@ -8,10 +8,12 @@
 #![forbid(unsafe_code)]
 
 pub mod block;
+#[cfg(feature = "persistent-index")]
 pub mod index;
 pub mod tier;
 pub mod transport;
 
 pub use block::{BlockAddress, BlockHandle, BlockMeta};
+#[cfg(feature = "persistent-index")]
 pub use index::Index;
 pub use tier::{Tier, TierKind};

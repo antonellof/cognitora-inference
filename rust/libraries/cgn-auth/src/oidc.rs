@@ -47,6 +47,7 @@ struct Jwk {
     e: Option<String>,
     x: Option<String>,
     y: Option<String>,
+    #[allow(dead_code)] // some IdPs send `crv` for EC keys; we infer it from the components.
     crv: Option<String>,
     kty: String,
 }

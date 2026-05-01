@@ -50,8 +50,10 @@ pub struct AgentSpec {
     /// nodeSelector to pin agents to GPU hosts.
     #[serde(default)]
     pub node_selector: std::collections::BTreeMap<String, String>,
+    /// Pod tolerations as a free-form JSON array (matches the upstream
+    /// k8s `core/v1` Toleration shape; not validated by schemars).
     #[serde(default)]
-    pub tolerations: Vec<k8s_openapi::api::core::v1::Toleration>,
+    pub tolerations: Vec<serde_json::Value>,
     #[serde(default)]
     pub resources: Resources,
 }

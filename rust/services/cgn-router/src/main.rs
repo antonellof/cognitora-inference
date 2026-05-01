@@ -86,10 +86,7 @@ async fn serve_grpc(state: Arc<SharedState>) -> Result<()> {
         .map_err(|e| Error::Config(format!("router.listen_grpc: {e}")))?;
     info!(%addr, "grpc listening");
 
-    let svc = routing::grpc::RouterGrpc::new(state.clone());
-    let mut srv = Server::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .add_service(RouterServer::new(svc));
+    let mut builder = Server::builder().timeout(std::time::Duration::from_secs(120));
 
     if state.cfg.security.require_mtls {
         let (Some(ca), Some(cert), Some(key)) = (
@@ -100,11 +97,14 @@ async fn serve_grpc(state: Arc<SharedState>) -> Result<()> {
             return Err(Error::Config("require_mtls=true but cert/key/ca not set".into()));
         };
         let tls = cgn_tls::server_tls(ca, cert, key)?;
-        srv = srv.tls_config(tls)
+        builder = builder.tls_config(tls)
             .map_err(|e| Error::Tls(format!("server tls: {e}")))?;
     }
 
-    srv.serve(addr).await
+    let svc = routing::grpc::RouterGrpc::new(state.clone());
+    builder
+        .add_service(RouterServer::new(svc))
+        .serve(addr).await
         .map_err(|e| Error::Internal(format!("grpc serve: {e}")))
 }
 

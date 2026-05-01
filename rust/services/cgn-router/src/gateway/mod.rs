@@ -42,30 +42,26 @@ pub async fn serve(state: Arc<SharedState>, addr: SocketAddr) -> Result<()> {
 
 fn router(state: Arc<SharedState>) -> Router {
     let auth = build_auth_state(&state);
+    let auth_active = auth.required || auth.api_keys.is_some() || auth.oidc.is_some();
 
-    let api = Router::new()
+    let mut api = Router::new()
         .route("/v1/chat/completions", post(chat::completions))
         .route("/v1/completions",      post(chat::completions))
         .route("/v1/embeddings",       post(embed::embeddings))
-        .route("/v1/models",           get(models::list));
+        .route("/v1/models",           get(models::list))
+        .with_state(state.clone());
 
-    let api = if auth.required || auth.api_keys.is_some() || auth.oidc.is_some() {
-        api.layer(axum::middleware::from_fn_with_state(
-            auth.clone(),
+    if auth_active {
+        api = api.layer(axum::middleware::from_fn_with_state(
+            auth,
             cgn_auth::middleware::auth_middleware,
-        ))
-        .with_state(auth.clone())
-    } else {
-        api
-    };
-
-    let _ = auth; // future: rate limit reuses the same state container.
+        ));
+    }
 
     Router::new()
         .merge(api)
         .route("/healthz", get(|| async { "ok" }))
         .route("/readyz",  get(|| async { "ok" }))
-        .with_state(state)
 }
 
 fn build_auth_state(state: &SharedState) -> cgn_auth::middleware::AuthState {
