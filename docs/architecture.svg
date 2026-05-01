@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1140 580" role="img" aria-labelledby="t d" font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+  <title id="t">Cognitora architecture</title>
+  <desc id="d">A request flows from an OpenAI SDK client over HTTP to cgn-router, which selects a node via KV-aware scoring and forwards the request via gRPC mTLS to cgn-agent. cgn-agent supervises the inference engine (vLLM, SGLang, TRT-LLM) over a local HTTP API. cgn-router watches etcd for cluster state. cgn-agent talks to a colocated cgn-kvcached over a Unix socket; cgn-kvcached owns GPU, RAM, and SSD KV tiers and uses QUIC or RDMA to fetch missing blocks from peer nodes.</desc>
+
+  <style>
+    .bg          { fill: #ffffff; }
+    .stroke      { stroke: #1f2328; stroke-width: 1.5; fill: none; }
+    .box         { fill: #f6f8fa; stroke: #1f2328; stroke-width: 1.5; }
+    .box-cgn     { fill: #ddf4ff; stroke: #0969da; stroke-width: 1.5; }
+    .box-router  { fill: #ddf4ff; stroke: #0969da; stroke-width: 2.5; }
+    .box-ext     { fill: #f6f8fa; stroke: #57606a; stroke-width: 1.25; stroke-dasharray: 4 3; }
+    .arrowhead   { fill: #1f2328; }
+    .text        { fill: #1f2328; font-size: 16px; }
+    .title-text  { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+    .sub         { font-size: 13px; fill: #57606a; }
+    .label       { font-size: 12px; fill: #57606a; font-weight: 500; }
+    .accent      { fill: #0969da; font-weight: 600; }
+    .lane        { fill: none; stroke: #d0d7de; stroke-width: 1; stroke-dasharray: 2 4; }
+    .lane-text   { font-size: 11px; fill: #8c959f; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; }
+
+    @media (prefers-color-scheme: dark) {
+      .bg          { fill: #0d1117; }
+      .stroke      { stroke: #c9d1d9; }
+      .box         { fill: #161b22; stroke: #c9d1d9; }
+      .box-cgn     { fill: #1c2c4c; stroke: #58a6ff; }
+      .box-router  { fill: #1c2c4c; stroke: #58a6ff; }
+      .box-ext     { fill: #161b22; stroke: #6e7681; }
+      .arrowhead   { fill: #c9d1d9; }
+      .text        { fill: #c9d1d9; }
+      .sub         { fill: #8b949e; }
+      .label       { fill: #8b949e; }
+      .accent      { fill: #58a6ff; }
+      .lane        { stroke: #30363d; }
+      .lane-text   { fill: #6e7681; }
+    }
+  </style>
+
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto-start-reverse">
+      <path d="M0,0 L9,5 L0,10 z" class="arrowhead" />
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1140" height="580" />
+
+  <!-- Lane separators -->
+  <line class="lane" x1="40" y1="240" x2="1100" y2="240" />
+  <text class="lane-text" x="60" y="234">Hot path &#183; request fan-out</text>
+  <text class="lane-text" x="60" y="262">Cluster state &#183; KV plane</text>
+
+  <!-- ===================== Row 1: hot path ===================== -->
+  <!-- Client -->
+  <rect class="box-ext" x="60" y="110" width="180" height="80" rx="10" />
+  <text class="text title-text" x="150" y="148" text-anchor="middle">Client</text>
+  <text class="text sub" x="150" y="170" text-anchor="middle">OpenAI SDK</text>
+
+  <!-- cgn-router -->
+  <rect class="box-router" x="300" y="100" width="320" height="100" rx="10" />
+  <text class="text title-text accent" x="460" y="135" text-anchor="middle">cgn-router</text>
+  <text class="text sub" x="460" y="158" text-anchor="middle">OpenAI-compat HTTP / SSE</text>
+  <text class="text sub" x="460" y="176" text-anchor="middle">KV-aware routing &#183; score &#183; cascade</text>
+  <text class="text sub" x="460" y="194" text-anchor="middle">disaggregation &#183; admission control</text>
+
+  <!-- cgn-agent -->
+  <rect class="box-cgn" x="680" y="110" width="180" height="80" rx="10" />
+  <text class="text title-text accent" x="770" y="148" text-anchor="middle">cgn-agent</text>
+  <text class="text sub" x="770" y="170" text-anchor="middle">engine supervisor (Rust)</text>
+
+  <!-- engine -->
+  <rect class="box-ext" x="920" y="110" width="180" height="80" rx="10" />
+  <text class="text title-text" x="1010" y="148" text-anchor="middle">engine</text>
+  <text class="text sub" x="1010" y="170" text-anchor="middle">vLLM &#183; SGLang &#183; TRT-LLM</text>
+
+  <!-- Arrows: Client -> Router -->
+  <line class="stroke" x1="240" y1="150" x2="300" y2="150" marker-end="url(#arr)" />
+  <text class="text label" x="270" y="140" text-anchor="middle">HTTP</text>
+
+  <!-- Router -> Agent -->
+  <line class="stroke" x1="620" y1="150" x2="680" y2="150" marker-end="url(#arr)" />
+  <text class="text label" x="650" y="140" text-anchor="middle">gRPC mTLS</text>
+
+  <!-- Agent -> engine -->
+  <line class="stroke" x1="860" y1="150" x2="920" y2="150" marker-end="url(#arr)" />
+  <text class="text label" x="890" y="140" text-anchor="middle">HTTP</text>
+
+  <!-- ===================== Row 2: state plane ===================== -->
+  <!-- etcd -->
+  <rect class="box-ext" x="380" y="320" width="160" height="80" rx="10" />
+  <text class="text title-text" x="460" y="356" text-anchor="middle">etcd</text>
+  <text class="text sub" x="460" y="378" text-anchor="middle">membership &#183; policy</text>
+
+  <!-- cgn-kvcached -->
+  <rect class="box-cgn" x="680" y="320" width="260" height="80" rx="10" />
+  <text class="text title-text accent" x="810" y="354" text-anchor="middle">cgn-kvcached</text>
+  <text class="text sub" x="810" y="375" text-anchor="middle">GPU (hot) &#183; RAM (warm) &#183; SSD (cold)</text>
+
+  <!-- Arrows: router <-> etcd, agent -> kvcached -->
+  <line class="stroke" x1="460" y1="200" x2="460" y2="320" marker-end="url(#arr)" />
+  <text class="text label" x="475" y="265" text-anchor="start">watch + write</text>
+
+  <line class="stroke" x1="770" y1="190" x2="770" y2="320" marker-end="url(#arr)" />
+  <text class="text label" x="785" y="265" text-anchor="start">UDS &#183; gRPC</text>
+
+  <!-- ===================== Row 3: cross-node KV ===================== -->
+  <rect class="box-ext" x="730" y="480" width="160" height="60" rx="10" />
+  <text class="text title-text" x="810" y="510" text-anchor="middle">peer node</text>
+  <text class="text sub" x="810" y="528" text-anchor="middle">cgn-kvcached</text>
+
+  <line class="stroke" x1="810" y1="400" x2="810" y2="480" marker-end="url(#arr)" />
+  <text class="text label" x="825" y="445" text-anchor="start">QUIC / RDMA</text>
+</svg>

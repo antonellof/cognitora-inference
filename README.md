@@ -22,21 +22,9 @@ It is **engine-agnostic by design**: the agent process drives the inference engi
 
 Every Cognitora binary is **a single statically-linked Rust executable** — no Python, Go, or JVM runtime in any container.
 
-```
-┌─────────────┐    ┌────────────────────────────────┐    ┌──────────┐
-│   Client    │───▶│           cgn-router           │───▶│ cgn-agent│──▶ engine
-│ OpenAI SDK  │HTTP│ OpenAI-compat + KV-aware route │gRPC│ (Rust)   │HTTP   (vLLM, SGLang,
-└─────────────┘    │   gateway · score · cascade    │    └─────┬────┘        TRT-LLM, …)
-                   └───────────────┬────────────────┘          │
-                                   │                            ▼
-                                   │                    ┌──────────────┐
-                                   ▼                    │ cgn-kvcached │
-                              ┌──────────┐ UDS          │ GPU/RAM/SSD  │
-                              │   etcd   │              └──────┬───────┘
-                              └──────────┘                     │ QUIC/RDMA
-                                                               ▼
-                                                       (cross-node KV)
-```
+<p align="center">
+  <img src="docs/architecture.svg" alt="Cognitora architecture: Client over HTTP to cgn-router; cgn-router routes via gRPC mTLS to cgn-agent which supervises the inference engine (vLLM, SGLang, TRT-LLM). cgn-router watches etcd for cluster state. cgn-agent talks to a colocated cgn-kvcached over UDS; cgn-kvcached owns GPU/RAM/SSD KV tiers and uses QUIC/RDMA to fetch from peer nodes." width="90%" />
+</p>
 
 ## Why Cognitora?
 

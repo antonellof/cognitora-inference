@@ -6,21 +6,9 @@
 
 ## 1. Topology
 
-```
-┌─────────────┐    ┌────────────────────────────────┐    ┌──────────┐
-│   Client    │───▶│           cgn-router           │───▶│ cgn-agent│──▶ engine
-│ OpenAI SDK  │HTTP│  OpenAI-compat + KV-aware route│gRPC│  (Rust)  │HTTP   (vLLM, ...)
-└─────────────┘    │   gateway · score · cascade    │    └─────┬────┘
-                   └───────────────┬────────────────┘          │ UDS / gRPC
-                                   │                            ▼
-                                   ▼                    ┌──────────────┐
-                              ┌──────────┐              │ cgn-kvcached │
-                              │   etcd   │              │ GPU/RAM/SSD  │
-                              └──────────┘              └──────┬───────┘
-                                                               │ QUIC / RDMA
-                                                               ▼
-                                                       (cross-node KV)
-```
+<p align="center">
+  <img src="architecture.svg" alt="Cognitora architecture diagram" width="100%" />
+</p>
 
 Every box is a single statically-linked Rust binary. `cgn-metrics`,
 `cgn-ctl`, and `cgn-operator` are shown elsewhere; they sit alongside
