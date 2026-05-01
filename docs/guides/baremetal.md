@@ -1,13 +1,24 @@
 # Bare-metal guide
 
-The fastest path is the one-line installer:
+The fastest path is the one-line installer. It downloads a sha256-verified
+release tarball from GitHub, drops binaries into `/usr/local/bin` (or
+`$HOME/.cognitora/bin` if root is unavailable), and prints PATH guidance.
 
 ```bash
-curl -sSfL https://get.cognitora.dev | sh
+curl -fsSL https://raw.githubusercontent.com/antonellof/cognitora-inference/main/deploy/installer/install.sh | sh
 cgn-ctl pki bootstrap                 # generates dev PKI material
 cgn-ctl install baremetal             # systemd units + config
 systemctl enable --now cognitora.target
 ```
+
+The installer respects these env vars:
+
+| Variable        | Purpose                                            |
+|-----------------|----------------------------------------------------|
+| `CGN_VERSION`   | Pin a tag (default: latest GitHub release).        |
+| `CGN_PREFIX`    | Install prefix (default: `/usr/local` or `$HOME/.cognitora`). |
+| `CGN_REPO`      | GitHub `owner/name` (default: `antonellof/cognitora-inference`). |
+| `CGN_BASE_URL`  | Override artefact host (useful for forks/mirrors). |
 
 After ~5 seconds:
 
@@ -66,12 +77,14 @@ The keys file is hot-reloaded by the router; no restart needed.
 ## Upgrade
 
 ```bash
-curl -sSfL https://get.cognitora.dev | sh -s -- --version v0.2.0
+curl -fsSL https://raw.githubusercontent.com/antonellof/cognitora-inference/main/deploy/installer/install.sh \
+  | CGN_VERSION=v0.2.0 sh
 systemctl restart cognitora.target
 ```
 
-The installer always verifies sha256 + cosign before overwriting
-binaries; partial upgrades roll back on signature failure.
+The installer always verifies the sha256 sum before overwriting binaries.
+Cosign signature verification runs additionally when `cosign` is on the
+PATH.
 
 ## Uninstall
 

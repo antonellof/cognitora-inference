@@ -59,7 +59,7 @@ cognitora/
 │   │   └── helm/cognitora/ templates/, values.yaml
 │   ├── terraform/
 │   │   └── {aws,gcp,azure,hetzner,baremetal}/
-│   └── installer/install.sh      cosign-verified one-liner
+│   └── installer/install.sh      sha256 + cosign verified one-liner
 │
 ├── docs/
 │   ├── ARCHITECTURE.md
@@ -72,10 +72,21 @@ cognitora/
 ├── configs/                cognitora.toml.example
 ├── SECURITY/               cosign.pub for release verification
 │
+├── examples/
+│   ├── local-mac/          Mac/Ollama profile (engine.kind = "openai_compat")
+│   └── multi-llm/          Linux/server profile (vLLM or llama-cpp-python)
+│
 ├── tests/
-│   ├── e2e/                single_node.sh, multi_node_kv.sh
+│   ├── e2e/                multi_engine.sh (plugin layer + middleware),
+│   │                       single_node.sh, multi_node_kv.sh
 │   └── perf/               criterion benches (CI perf gates)
-├── scripts/                e2e-gpu.sh
+│
+├── scripts/
+│   ├── install/            bootstrap-debian.sh, install-etcd.sh,
+│   │                       install-engine-{cpu,gpu}.sh, download-model.sh
+│   ├── run/                up.sh / down.sh / status.sh (profile orchestrator)
+│   └── release/            pack.sh (build a local tarball matching release.yml)
+│
 └── .github/workflows/      ci.yml, release.yml, e2e.yml
 ```
 

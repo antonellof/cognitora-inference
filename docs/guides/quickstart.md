@@ -18,14 +18,16 @@ laptop test, or a CI smoke check.
 Pick one of:
 
 ```bash
-# Option A — prebuilt (Linux x86_64/aarch64, macOS arm64/x86_64)
-curl -sSfL https://get.cognitora.dev | sh
+# Option A — prebuilt binaries (Linux x86_64/aarch64, macOS arm64/x86_64).
+# Pulls a sha256-verified release tarball from GitHub. Override CGN_PREFIX
+# to install somewhere other than /usr/local/bin or ~/.cognitora/bin.
+curl -fsSL https://raw.githubusercontent.com/antonellof/cognitora-inference/main/deploy/installer/install.sh | sh
 
 # Option B — from source
-git clone https://github.com/antonellof/open-inference cognitora
+git clone https://github.com/antonellof/cognitora-inference cognitora
 cd cognitora
-cargo build --release --workspace --no-default-features \
-    --exclude cgn-kvcached --exclude cgn-kv
+cargo build --release --no-default-features \
+  -p cgn-router -p cgn-agent -p cgn-kvcached -p cgn-ctl
 ```
 
 If you used option B, the binaries are under `target/release/`.
@@ -118,17 +120,38 @@ but for an actual model end-to-end use one of the bundled engine drivers:
 | `llama_cpp`     | CPU node, Apple Silicon, or GPU offload via `n_gpu_layers`.  |
 | `openai_compat` | The engine is managed by systemd / k8s; the agent only proxies. |
 
-A complete two-engine example lives in
-[`examples/multi-llm`](../../examples/multi-llm/README.md). The short
-version, on a CPU box:
+Two ready-to-run profiles live under [`examples/`](../../examples/):
+
+| Profile                                                | Engine                       | Best for |
+|--------------------------------------------------------|------------------------------|----------|
+| [`examples/local-mac`](../../examples/local-mac)       | `openai_compat` → Ollama     | macOS laptop. No Python venv, no GGUF download — just `ollama pull phi3:mini`. |
+| [`examples/multi-llm`](../../examples/multi-llm)       | `vllm` (GPU) or `llama_cpp` (CPU) | Linux box, server, or CI. Multi-model with a real engine. |
+
+### macOS (Ollama path)
+
+```bash
+brew install jq unzip
+ollama serve &
+ollama pull phi3:mini
+ollama pull llama3.2
+
+cargo build --release --no-default-features \
+  -p cgn-router -p cgn-agent -p cgn-kvcached -p cgn-ctl
+bash scripts/install/install-etcd.sh
+bash scripts/run/up.sh examples/local-mac
+bash examples/local-mac/demo.sh
+```
+
+### Linux (vLLM or llama.cpp)
 
 ```bash
 bash scripts/install/bootstrap-debian.sh        # apt + rustup
-bash scripts/install/install-engine-cpu.sh      # llama-cpp-python venv
-bash scripts/install/install-etcd.sh            # local etcd
+bash scripts/install/install-engine-cpu.sh      # or install-engine-gpu.sh
+bash scripts/install/install-etcd.sh
 bash scripts/install/download-model.sh \
   --gguf qwen2.5-0.5b-instruct-q4_k_m.gguf  Qwen/Qwen2.5-0.5B-Instruct-GGUF
-cargo build --release -p cgn-router -p cgn-agent --no-default-features
+cargo build --release --no-default-features \
+  -p cgn-router -p cgn-agent -p cgn-kvcached -p cgn-ctl
 bash scripts/run/up.sh examples/multi-llm
 bash examples/multi-llm/demo.sh
 ```
@@ -136,21 +159,37 @@ bash examples/multi-llm/demo.sh
 The same TOML profile boots a vLLM stack on a GPU host — only the
 `[engine]` block in `agent-*.toml` changes.
 
-## 8. What's next
+## 8. Run the smoke tests
+
+These tests need only the binaries and Python 3 — no models, no GPUs:
+
+```bash
+# Engine-plugin layer + auth + rate-limit middleware. ~3 s.
+./tests/e2e/multi_engine.sh
+
+# Multi-node KV transport. Skips with REQUIRE_MULTINODE=0 if the second
+# host isn't available; runs full QUIC handoff when it is.
+./tests/e2e/multi_node_kv.sh
+```
+
+For a tighter dev loop, drop `CGN_SKIP_BUILD=1` in front of the test
+once your `target/release` is warm.
+
+## 9. What's next
 
 - **Understand the route** → [routing deep dive](../architecture/routing.md).
-- **Cluster of one becomes cluster of N** → drop the
-  `etcd = []` line, point at a real etcd, and start more agents.
+- **Cluster of one becomes cluster of N** → point `etcd_endpoints` at a
+  real etcd, start more agents on more hosts, watch them register.
 - **Skim the OpenAI surface** → [API reference](../api/openai.md).
 - **Production install** → [bare-metal guide](baremetal.md) or
   [Kubernetes guide](kubernetes.md).
 
-## 9. Tear down
+## 10. Tear down
 
 ```bash
 kill %1                                # the backgrounded router
 rm -rf /tmp/cognitora /tmp/pki
 
-# or, if you used scripts/run/up.sh:
-bash scripts/run/down.sh
+# or, if you used scripts/run/up.sh with a profile:
+bash scripts/run/down.sh examples/local-mac      # or examples/multi-llm
 ```

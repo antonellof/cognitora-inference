@@ -21,10 +21,10 @@ Thumbs.db
 .env.*
 !.env.example
 
-# Build artifacts
-dist/
-out/
-release/
+# Build artifacts (anchor to repo root so e.g. scripts/release/ is not caught)
+/dist/
+/out/
+/release/
 
 # Terraform
 **/.terraform/
