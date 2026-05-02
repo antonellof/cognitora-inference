@@ -19,5 +19,5 @@ kv_uds   = "/tmp/cognitora-kv.sock"
 kind = "openai_compat"
 url  = "http://127.0.0.1:8102"
 
-[models."cog-qwen-7b-vllm"]
+[models."cog-deepseek-8b-vllm"]
 tp = 1

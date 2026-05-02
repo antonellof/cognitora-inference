@@ -1,9 +1,16 @@
 //! Pick a node for an incoming request.
 //!
-//! 1. Compute prefix hashes of the prompt's token IDs.
+//! 1. Compute *sequence-chained* prefix hashes of the prompt's token IDs
+//!    via [`cgn_core::hash::hash_seq_chunks`]. Sequence-chained digests
+//!    encode the entire prefix up to each position, so they correctly
+//!    identify reusable KV state (independent per-window hashes would
+//!    falsely match positionally-distinct token windows).
 //! 2. For every candidate node (`cgn-agent`s reporting the requested role
-//!    and model), compute KV overlap from the prefix index.
-//! 3. Score each node via [`score_node`].
+//!    and model), compute the longest contiguous prefix the node holds
+//!    via `prefix.longest_prefix_overlap`. This is the actual length of
+//!    prefill the node can skip — not just a count of matching chunks.
+//! 3. Score each node via [`score_node`], using
+//!    `prefix_length / total_chunks` as the KV signal.
 //! 4. Pick the highest scorer; randomise on ties.
 
 use std::sync::Arc;
@@ -40,14 +47,19 @@ pub async fn pick(
     }
     let n_candidates = candidates.len();
 
-    // Step 1: hash the request's prefix chunks once.
-    let digests = cgn_core::hash::hash_chunks(model, token_ids);
+    // Step 1: sequence-chained prefix hashes — chunk N depends on chunks
+    // 0..N, so equal digests imply identical prefixes. This is what makes
+    // longest-prefix matching correct (independent per-window hashes would
+    // falsely cross-match windows from unrelated requests).
+    let digests = cgn_core::hash::hash_seq_chunks(model, token_ids);
 
-    // Step 2: per-node KV overlap = (chunks held / total chunks).
-    let overlap_by_node = if digests.is_empty() {
+    // Step 2: per-node *longest contiguous prefix length* in chunks.
+    // This is the actual prefill we'd skip if we routed here — Smith's-rule
+    // / WSPT scheduling later consumes the same number to estimate cost.
+    let prefix_len_by_node = if digests.is_empty() {
         Default::default()
     } else {
-        state.prefix.overlap(&digests)
+        state.prefix.longest_prefix_overlap(&digests)
     };
 
     // Step 3: pre-compute peer_max_power for normalisation.
@@ -60,11 +72,11 @@ pub async fn pick(
     let policy = state.policy.load();
     let mut best: Option<(Arc<NodeEntry>, Score, f32)> = None;
     for node in &candidates {
-        let cached = overlap_by_node.get(&node.node_id).copied().unwrap_or(0);
+        let prefix_chunks = prefix_len_by_node.get(&node.node_id).copied().unwrap_or(0);
         let overlap = if digests.is_empty() {
             0.0
         } else {
-            cached as f32 / digests.len() as f32
+            prefix_chunks as f32 / digests.len() as f32
         };
         let s = score_node(&policy, node, overlap, peer_max_power);
         match &best {

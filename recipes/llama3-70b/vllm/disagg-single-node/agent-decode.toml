@@ -1,0 +1,41 @@
+# cgn-agent (decode, TP=4) for llama3-70b · vllm · disaggregated, single-node.
+# Pinned to GPUs 4-7 — the up.sh wrapper sets CUDA_VISIBLE_DEVICES=4,5,6,7
+# for this agent so that vLLM only sees the second half of the GPUs.
+
+[cluster]
+name           = "cognitora-llama3-70b-disagg-sn"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7081"
+role     = "decode"
+node_id  = "agent-llama3-70b-decode"
+kv_uds   = "/tmp/cognitora-kv.sock"
+gpu_index = 4
+
+[engine]
+kind = "vllm"
+url  = "http://127.0.0.1:8002"
+
+[engine.vllm]
+binary     = "vllm"
+extra_args = [
+  "--enable-chunked-prefill",
+  "--block-size", "128",
+  "--gpu-memory-utilization", "0.90",
+  "--port", "8002",
+  "--host", "127.0.0.1",
+  "--kv-transfer-config",
+  "{\"kv_connector\":\"NixlConnector\",\"kv_role\":\"kv_consumer\"}",
+]
+
+[models."RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"]
+tp            = 4
+max_model_len = 8192

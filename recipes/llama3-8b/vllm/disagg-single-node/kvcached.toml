@@ -1,0 +1,24 @@
+# cgn-kvcached for llama3-8b · vllm · disaggregated, single-node.
+#
+# Both agents share the colocated KV daemon over a UDS. The QUIC
+# listener is configured but unused in single-node deployments — it
+# becomes the cross-node KV transport in the multi-node variant.
+
+[cluster]
+name           = "cognitora-llama3-8b-disagg-sn"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[kv]
+listen            = "127.0.0.1:7090"
+uds               = "/tmp/cognitora-kv.sock"
+ram_gib           = 32
+ssd_dir           = "/tmp/cognitora-kv-ssd"
+ssd_gib           = 64
+index_dir         = "/tmp/cognitora-kv-index"
+transport         = "quic"
+quic_listen       = "127.0.0.1:7091"
+block_size_tokens = 16

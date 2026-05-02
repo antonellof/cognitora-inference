@@ -78,7 +78,12 @@ impl PrefixIndex {
 
     /// Compute, for every node, how many of `digests` it holds. Returns a
     /// hash map of `node_id -> count`. The router uses this to score nodes
-    /// by KV overlap.
+    /// by *content* overlap.
+    ///
+    /// This counts every matching digest regardless of position. Use
+    /// [`Self::longest_prefix_overlap`] when the digests are
+    /// sequence-chained (`hash_seq_chunks`) and you want the actual
+    /// length of the cached prefix the node can serve without a prefill.
     pub fn overlap(&self, digests: &[[u8; 32]]) -> std::collections::HashMap<String, usize> {
         let mut out: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         let now = Instant::now();
@@ -90,6 +95,68 @@ impl PrefixIndex {
                         *out.entry(n.node_id.clone()).or_insert(0) += 1;
                     }
                 }
+            }
+        }
+        out
+    }
+
+    /// For each node, report the length of the longest contiguous prefix
+    /// of `digests` (starting at index 0) that the node holds.
+    ///
+    /// `digests` MUST be sequence-chained — i.e. produced by
+    /// [`crate::hash::hash_seq_chunks`] — otherwise the result is
+    /// meaningless. With sequence-chained digests, "node X holds chunks
+    /// `0..K` in the right order" reduces to "node X has digest_i for
+    /// every i in `0..K`", because the chained hash already encodes
+    /// positional dependency.
+    ///
+    /// Returns `node_id -> prefix_length_in_chunks` for every node that
+    /// holds at least chunk 0. Nodes with no prefix overlap are absent
+    /// from the map.
+    pub fn longest_prefix_overlap(
+        &self,
+        digests: &[[u8; 32]],
+    ) -> std::collections::HashMap<String, usize> {
+        let mut out: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        if digests.is_empty() {
+            return out;
+        }
+        let now = Instant::now();
+
+        // Seed with nodes holding chunk 0.
+        let first = match self.inner.get(&digests[0]) {
+            Some(e) => e,
+            None => return out,
+        };
+        let mut active: std::collections::HashSet<String> = first
+            .read()
+            .iter()
+            .filter(|n| now.duration_since(n.last_seen) < self.ttl)
+            .map(|n| n.node_id.clone())
+            .collect();
+        for n in &active {
+            out.insert(n.clone(), 1);
+        }
+        drop(first);
+
+        // Walk forward, intersecting the active set with the holders of
+        // each successive chunk. Once a node drops out it cannot rejoin.
+        for (i, d) in digests.iter().enumerate().skip(1) {
+            if active.is_empty() {
+                break;
+            }
+            let holders: std::collections::HashSet<String> = match self.inner.get(d) {
+                Some(e) => e
+                    .read()
+                    .iter()
+                    .filter(|n| now.duration_since(n.last_seen) < self.ttl)
+                    .map(|n| n.node_id.clone())
+                    .collect(),
+                None => Default::default(),
+            };
+            active.retain(|n| holders.contains(n));
+            for n in &active {
+                out.insert(n.clone(), i + 1);
             }
         }
         out
@@ -145,5 +212,34 @@ mod tests {
         let counts = ix.overlap(&[d(1), d(2), d(3), d(4)]);
         assert_eq!(counts.get("n1").copied(), Some(2));
         assert_eq!(counts.get("n2").copied(), Some(1));
+    }
+
+    #[test]
+    fn longest_prefix_overlap_walks_in_order() {
+        // n1 holds chunks 0, 1, 2 → prefix length 3.
+        // n2 holds chunks 0, 2    → prefix length 1 (gap at chunk 1).
+        // n3 holds nothing useful → absent from map.
+        let ix = PrefixIndex::new(Duration::from_secs(60));
+        ix.insert(d(1), "n1");
+        ix.insert(d(2), "n1");
+        ix.insert(d(3), "n1");
+        ix.insert(d(1), "n2");
+        ix.insert(d(3), "n2");
+        ix.insert(d(7), "n3");
+
+        let req = [d(1), d(2), d(3), d(4)];
+        let lp = ix.longest_prefix_overlap(&req);
+        assert_eq!(lp.get("n1").copied(), Some(3));
+        assert_eq!(lp.get("n2").copied(), Some(1));
+        assert!(!lp.contains_key("n3"));
+    }
+
+    #[test]
+    fn longest_prefix_overlap_empty_when_no_chunk0() {
+        let ix = PrefixIndex::new(Duration::from_secs(60));
+        ix.insert(d(2), "n1");
+        ix.insert(d(3), "n1");
+        let lp = ix.longest_prefix_overlap(&[d(1), d(2), d(3)]);
+        assert!(lp.is_empty(), "no node holds chunk 0 → no prefix overlap");
     }
 }

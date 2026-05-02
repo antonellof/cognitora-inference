@@ -1,0 +1,40 @@
+# cgn-agent for llama3-8b · llama.cpp · CPU.
+#
+# Set LLAMA_GGUF=/abs/path/to/model.gguf in the environment, or replace
+# the placeholder under [models."Meta-Llama-3.1-8B-Instruct"].path.
+
+[cluster]
+name           = "cognitora-llama3-8b-llamacpp"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7080"
+role     = "both"
+node_id  = "agent-llama3-8b-llamacpp"
+kv_uds   = "/tmp/cognitora-kv.sock"
+
+[engine]
+kind = "llama_cpp"
+url  = "http://127.0.0.1:8001"
+
+[engine.llama_cpp]
+binary       = "python"
+mode         = "python_server"
+host         = "127.0.0.1"
+port         = 8001
+n_ctx        = 8192
+n_threads    = 8
+n_gpu_layers = 0      # 0 = CPU only; set -1 to offload everything to GPU
+
+[models."Meta-Llama-3.1-8B-Instruct"]
+tp            = 1
+max_model_len = 8192
+# Path to a Llama-3.1 GGUF. Override via $LLAMA_GGUF before running up.sh.
+path          = "${LLAMA_GGUF}"

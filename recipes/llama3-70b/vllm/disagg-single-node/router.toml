@@ -1,0 +1,38 @@
+# cgn-router for llama3-70b · vllm · disaggregated, single-node.
+
+[cluster]
+name           = "cognitora-llama3-70b-disagg-sn"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[router]
+listen_http  = "0.0.0.0:8080"
+listen_grpc  = "0.0.0.0:9090"
+listen_admin = "127.0.0.1:9091"
+node_id      = "router-llama3-70b-disagg-sn"
+
+[router.score_weights]
+kv       = 0.50
+load     = 0.30
+power    = 0.10
+capacity = 0.10
+
+[router.admission]
+max_queue                  = 8192
+ttft_slo                   = "1500ms"
+max_concurrent_per_replica = 16
+
+[router.disagg]
+enabled               = true
+colocate_below_tokens = 256
+
+[models."RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"]
+tp               = 4
+prefill_replicas = 1
+decode_replicas  = 1

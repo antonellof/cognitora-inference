@@ -14,8 +14,6 @@ listen_http  = "127.0.0.1:8080"
 listen_grpc  = "127.0.0.1:7070"
 listen_admin = "127.0.0.1:9091"
 
-# Default policy: KV-aware routing dominates.
-# We hot-swap this via etcdctl during the F-block (RR vs KV) ablation.
 [router.score_weights]
 kv       = 0.55
 load     = 0.25
@@ -25,24 +23,13 @@ capacity = 0.10
 [router.rate_limit]
 enabled = false
 
-# ─── Block A/B: distinct model IDs per (engine, size) ────────────────────────
-[models."cog-qwen-05b-ollama"]
-tp = 1
-[models."cog-qwen-05b-llamacpp"]
-tp = 1
 [models."cog-qwen-05b-vllm"]
 tp = 1
 [models."cog-qwen-05b-vllm-nocache"]
 tp = 1
-
-[models."cog-qwen-7b-ollama"]
-tp = 1
-[models."cog-qwen-7b-llamacpp"]
-tp = 1
-[models."cog-qwen-7b-vllm"]
+[models."cog-deepseek-8b-vllm"]
 tp = 1
 
-# ─── Block F: one model name advertised by TWO vLLM-small agents ─────────────
-# Routing policy decides which of the two replicas serves any given request.
+# Block F: same model id, advertised by 2 vLLM-small agents (A on :8101, B on :8104)
 [models."cog-qwen-05b-pair"]
 tp = 1

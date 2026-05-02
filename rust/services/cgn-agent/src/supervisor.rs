@@ -39,6 +39,7 @@ impl Supervisor {
         let engine_cfg = resolve_engine_config(&cfg);
         let engine_kind: &'static str = match engine_cfg.kind {
             EngineKind::Vllm => "vllm",
+            EngineKind::Sglang => "sglang",
             EngineKind::LlamaCpp => "llama_cpp",
             EngineKind::OpenaiCompat => "openai_compat",
         };

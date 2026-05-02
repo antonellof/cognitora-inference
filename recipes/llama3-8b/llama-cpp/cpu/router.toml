@@ -1,0 +1,36 @@
+# cgn-router for llama3-8b · llama.cpp · CPU.
+
+[cluster]
+name           = "cognitora-llama3-8b-llamacpp"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[router]
+listen_http  = "0.0.0.0:8080"
+listen_grpc  = "0.0.0.0:9090"
+listen_admin = "127.0.0.1:9091"
+node_id      = "router-llama3-8b-llamacpp"
+
+[router.score_weights]
+kv       = 0.55
+load     = 0.25
+power    = 0.10
+capacity = 0.10
+
+[router.admission]
+max_queue                  = 256
+ttft_slo                   = "5s"     # CPU is slow — relax the SLO
+max_concurrent_per_replica = 2
+
+[router.rate_limit]
+rps   = 5
+burst = 20
+
+[models."Meta-Llama-3.1-8B-Instruct"]
+tp = 1

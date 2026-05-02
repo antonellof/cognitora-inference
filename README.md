@@ -18,13 +18,14 @@ KV-aware routing · Prefill/decode disaggregation · GPU/RAM/SSD KV tiering · M
 
 Cognitora is a low-overhead orchestration layer that turns one or many LLM inference workers into a production-grade cluster — with **KV-aware routing**, **prefill/decode disaggregation**, **multi-tier KV caching** (GPU/RAM/SSD), and **energy-aware scheduling** as first-class concerns.
 
-It is **engine-agnostic by design**: the agent process drives the inference engine over a stable internal contract — anything that speaks the OpenAI HTTP surface (`/v1/chat/completions`, `/v1/completions`, `/v1/models`, `/health`) plugs in. Three drivers ship today:
+It is **engine-agnostic by design**: the agent process drives the inference engine over a stable internal contract — anything that speaks the OpenAI HTTP surface (`/v1/chat/completions`, `/v1/completions`, `/v1/models`, `/health`) plugs in. Four drivers ship today:
 
 - **`vllm`** — agent spawns `vllm serve <model> ...` (NVIDIA GPU).
+- **`sglang`** — agent spawns `python -m sglang.launch_server ...` (NVIDIA GPU). Adds RadixAttention prefix caching that stacks on top of Cognitora's cross-node prefix routing.
 - **`llama_cpp`** — agent spawns `python -m llama_cpp.server ...` or a standalone `llama-server` binary (CPU or GPU offload).
 - **`openai_compat`** — agent does not spawn anything; it proxies to a pre-managed engine at `engine.url` (Ollama, vLLM-as-a-service, hosted endpoints, ...).
 
-Adding SGLang or TensorRT-LLM is a thin driver on the same trait — see [`docs/reference/config.md`](docs/reference/config.md). The engine itself is always left untouched and runs as a supervised child (or remote) process per node.
+Adding TensorRT-LLM is a thin driver on the same trait — see [`docs/reference/config.md`](docs/reference/config.md). The engine itself is always left untouched and runs as a supervised child (or remote) process per node.
 
 Every Cognitora binary is **a single statically-linked Rust executable** — no Python, Go, or JVM runtime in any container.
 
@@ -40,7 +41,7 @@ Every Cognitora binary is **a single statically-linked Rust executable** — no 
 | Prefill/decode disaggregate    | yes (QUIC handoff)   | no            | yes           | no     |
 | GPU/RAM/SSD KV tiering         | yes (RocksDB index)  | host only     | partial       | no     |
 | Multi-model cascade (SLM→LLM)  | yes (logprob gating) | no            | partial       | no     |
-| Engine-agnostic agent          | yes (vLLM, llama.cpp, OpenAI-compat) | engine-locked | engine-locked | yes    |
+| Engine-agnostic agent          | yes (vLLM, SGLang, llama.cpp, OpenAI-compat) | engine-locked | engine-locked | yes    |
 | Energy-aware SLOs              | yes (Redfish + IPMI) | no            | no            | no     |
 | Single static executable / svc | yes (all Rust)       | n/a           | no            | no     |
 | Bare-metal first-class         | yes (systemd units)  | varies        | k8s-only      | k8s    |
@@ -82,9 +83,36 @@ curl -fsSL .../install.sh | CGN_REPO=acme/cognitora-fork sh
 > cloud VMs). macOS is supported as a development platform via the from-source
 > path below.
 
-Then bring up a real LLM in <30 s — see
+Then bring up a real LLM in <30 s using a **production recipe** —
+one folder per model × engine × topology, each with a 3-line `up.sh`
+that wires the full router + agent + KV daemon stack:
+
+```bash
+# Llama-3.1 8B on a single GPU with vLLM:
+bash recipes/llama3-8b/vllm/agg/up.sh
+
+# Same model with prefill/decode disaggregation on two GPUs:
+bash recipes/llama3-8b/vllm/disagg-single-node/up.sh
+
+# Same model on SGLang (RadixAttention prefix cache):
+bash recipes/llama3-8b/sglang/agg/up.sh
+
+# Llama-3.3 70B FP8 on 4×H100, TP=4:
+HF_TOKEN=… bash recipes/llama3-70b/vllm/agg/up.sh
+
+# Equivalent invocation via the admin CLI:
+cgn-ctl recipe up llama3-8b/vllm/agg
+```
+
+Recipes mirror the layout NVIDIA Dynamo uses for its own production
+deployments (`<model>/<engine>/<topology>/`) but adapt to Cognitora's
+profile-driven runtime: every recipe is a flat folder of TOML — no CRD,
+no operator install required. See [`recipes/README.md`](recipes/README.md)
+and the [recipes guide](docs/guides/recipes.md).
+
+For lower-level dev loops see
 [`examples/multi-llm`](examples/multi-llm) (vLLM/llama-cpp on Linux/GPU) or
-[`examples/local-mac`](examples/local-mac) (Ollama-backed dev loop on macOS).
+[`examples/local-mac`](examples/local-mac) (Ollama-backed on macOS).
 
 ### From source
 
@@ -181,6 +209,9 @@ cognitora/
     reference/                config, env, exit-codes
 
   configs/                    cognitora.toml.example
+  recipes/                    one-line bring-up profiles per model × engine × topology
+                              (llama3-8b/{vllm,sglang,llama-cpp}, llama3-70b/vllm,
+                              qwen3-7b/{vllm,sglang}; mirrors Dynamo's recipes/ layout)
   SECURITY/                   cosign.pub for release verification
   tests/e2e/                  single_node.sh, multi_node_kv.sh
   scripts/                    e2e-gpu.sh + dev/, bench/, release/
@@ -204,6 +235,7 @@ cognitora/
 **Get started**
 
 - [5-minute quickstart](docs/guides/quickstart.md)
+- [Recipes — one-line model bring-up](docs/guides/recipes.md) ([recipes/](recipes/))
 - [Bare-metal guide](docs/guides/baremetal.md) · [Kubernetes guide](docs/guides/kubernetes.md)
 - [Cloud guides](docs/guides/cloud/) — [AWS](docs/guides/cloud/aws.md) · [GCP](docs/guides/cloud/gcp.md) · [Azure](docs/guides/cloud/azure.md) · [Hetzner](docs/guides/cloud/hetzner.md)
 

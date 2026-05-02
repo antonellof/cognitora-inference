@@ -39,5 +39,8 @@ hex          = { workspace = true }
 sha2         = { workspace = true }
 uuid         = { workspace = true }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints]
 workspace = true

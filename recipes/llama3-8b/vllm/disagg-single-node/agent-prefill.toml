@@ -1,0 +1,42 @@
+# cgn-agent (prefill) for llama3-8b · vllm · disaggregated, single-node.
+# Pinned to GPU 0.
+
+[cluster]
+name           = "cognitora-llama3-8b-disagg-sn"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7080"
+role     = "prefill"
+node_id  = "agent-llama3-8b-prefill"
+kv_uds   = "/tmp/cognitora-kv.sock"
+gpu_index = 0
+
+[engine]
+kind = "vllm"
+url  = "http://127.0.0.1:8001"
+
+[engine.vllm]
+binary     = "vllm"
+extra_args = [
+  "--enable-chunked-prefill",
+  "--block-size", "16",
+  "--gpu-memory-utilization", "0.85",
+  "--port", "8001",
+  "--host", "127.0.0.1",
+  # KV transfer config tells vLLM to publish KV blocks over the connector
+  # the colocated cgn-kvcached subscribes to.
+  "--kv-transfer-config",
+  "{\"kv_connector\":\"NixlConnector\",\"kv_role\":\"kv_producer\"}",
+]
+
+[models."meta-llama/Meta-Llama-3.1-8B-Instruct"]
+tp            = 1
+max_model_len = 8192

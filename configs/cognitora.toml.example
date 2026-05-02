@@ -64,13 +64,41 @@ colocate_below_tokens   = 256
 [agent]
 listen_grpc      = "0.0.0.0:7071"
 listen_admin     = "127.0.0.1:9091"
-engine           = "vllm"      # only "vllm" today
-engine_binary    = "vllm"
-engine_workdir   = "/var/lib/cognitora/engine"
-engine_args      = ["--model", "{model}", "--tensor-parallel-size", "{tp}"]
 ready_probe_url  = "http://127.0.0.1:8000/v1/models"
 ready_timeout    = "120s"
 heartbeat        = "5s"
+
+# ---- Engine driver --------------------------------------------------------
+# `kind` selects which engine the agent spawns:
+#   "vllm"          — `vllm serve <model> --tensor-parallel-size <N> ...`
+#   "sglang"        — `python -m sglang.launch_server --model-path <model> --tp <N> ...`
+#   "llama_cpp"     — `python -m llama_cpp.server` or a standalone `llama-server` binary
+#   "openai_compat" — no spawn; agent only proxies to engine.url
+
+[engine]
+kind = "vllm"
+url  = "http://127.0.0.1:8000"
+
+[engine.vllm]
+binary     = "vllm"
+extra_args = ["--enable-chunked-prefill"]
+
+[engine.sglang]
+binary              = "python"
+host                = "127.0.0.1"
+port                = 8000
+context_length      = 4096
+mem_fraction_static = 0.85
+extra_args          = ["--enable-radix-cache"]
+
+[engine.llama_cpp]
+binary       = "python"
+mode         = "python_server"   # or "binary"
+host         = "127.0.0.1"
+port         = 8000
+n_ctx        = 4096
+n_threads    = 4
+n_gpu_layers = 0                  # -1 = offload everything to GPU
 
 # ---- KV cache daemon -------------------------------------------------------
 

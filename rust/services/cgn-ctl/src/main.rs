@@ -4,6 +4,7 @@
 //! cgn-ctl install   <target>          # bare-metal / k8s / cloud install
 //! cgn-ctl cluster   <list|node|drain> # node operations
 //! cgn-ctl model     <load|unload|ls>  # model orchestration
+//! cgn-ctl recipe    <up|down|ls|show> # one-line bring-up of model recipes
 //! cgn-ctl pki       <bootstrap|...>   # mTLS material
 //! cgn-ctl key       <create|revoke>   # API keys
 //! cgn-ctl bench     <chat|embed|...>  # micro-benchmarks
@@ -17,6 +18,7 @@ mod install;
 mod key;
 mod model;
 mod pki;
+mod recipe;
 
 use clap::{Parser, Subcommand};
 
@@ -41,6 +43,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: model::Cmd,
     },
+    /// Production recipes (one-line bring-up of full clusters).
+    Recipe {
+        #[command(subcommand)]
+        cmd: recipe::Cmd,
+    },
     /// PKI / mTLS material.
     Pki {
         #[command(subcommand)]
@@ -63,6 +70,7 @@ async fn main() -> cgn_core::Result<()> {
         Cmd::Install(args) => install::run(args).await,
         Cmd::Cluster { cmd } => cluster::run(cmd).await,
         Cmd::Model { cmd } => model::run(cmd).await,
+        Cmd::Recipe { cmd } => recipe::run(cmd).await,
         Cmd::Pki { cmd } => pki::run(cmd).await,
         Cmd::Key { cmd } => key::run(cmd).await,
         Cmd::Bench(args) => bench::run(args).await,

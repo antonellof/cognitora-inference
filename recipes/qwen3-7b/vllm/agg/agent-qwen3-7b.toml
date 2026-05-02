@@ -1,0 +1,34 @@
+[cluster]
+name           = "cognitora-qwen3-7b-vllm-agg"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7080"
+role     = "both"
+node_id  = "agent-qwen3-7b"
+kv_uds   = "/tmp/cognitora-kv.sock"
+
+[engine]
+kind = "vllm"
+url  = "http://127.0.0.1:8001"
+
+[engine.vllm]
+binary     = "vllm"
+extra_args = [
+  "--enable-chunked-prefill",
+  "--block-size", "16",
+  "--gpu-memory-utilization", "0.90",
+  "--port", "8001",
+  "--host", "127.0.0.1",
+]
+
+[models."Qwen/Qwen3-7B-Instruct"]
+tp            = 1
+max_model_len = 8192

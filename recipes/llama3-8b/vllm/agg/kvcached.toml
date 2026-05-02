@@ -1,0 +1,24 @@
+# cgn-kvcached for llama3-8b · vllm · aggregated.
+#
+# The KV daemon is colocated with the agent. It exposes a UDS for the
+# in-process engine and a QUIC listener for cross-node block fetches
+# (irrelevant in single-node aggregated, kept for symmetry with disagg).
+
+[cluster]
+name           = "cognitora-llama3-8b-agg"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[kv]
+listen            = "127.0.0.1:7090"
+uds               = "/tmp/cognitora-kv.sock"
+ram_gib           = 8
+ssd_dir           = "/tmp/cognitora-kv-ssd"
+ssd_gib           = 32
+index_dir         = "/tmp/cognitora-kv-index"
+transport         = "quic"
+quic_listen       = "127.0.0.1:7091"
+block_size_tokens = 16

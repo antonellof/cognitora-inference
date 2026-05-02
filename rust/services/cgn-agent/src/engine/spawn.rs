@@ -4,6 +4,9 @@
 //!
 //! * **vllm** — `vllm serve <model> --tensor-parallel-size <tp>
 //!   [--max-model-len <len>] [extra ...]`
+//! * **sglang** — `python -m sglang.launch_server --model-path <model>
+//!   --tp <tp> --host <h> --port <p> --context-length <ctx>
+//!   --mem-fraction-static <frac> [extra ...]`
 //! * **llama_cpp** — `python_server` mode: `python -m llama_cpp.server
 //!   --host <h> --port <p> --model <gguf> --model_alias <name>
 //!   --n_ctx <ctx> --n_threads <n> [--n_gpu_layers <k>] [extra ...]`.
@@ -40,6 +43,7 @@ pub fn render_argv(
     }
     match cfg.kind {
         EngineKind::Vllm => Ok(render_vllm(cfg, spec)),
+        EngineKind::Sglang => Ok(render_sglang(cfg, spec)),
         EngineKind::LlamaCpp => render_llama_cpp(cfg, spec),
         EngineKind::OpenaiCompat => Err(Error::Config(
             "engine.kind = openai_compat does not spawn — caller should check should_spawn()"
@@ -61,6 +65,38 @@ fn render_vllm(cfg: &EngineConfig, spec: &ModelSpec) -> Vec<String> {
         argv.push(len.to_string());
     }
     argv.extend(cfg.vllm.extra_args.clone());
+    argv.extend(spec.extra_args.clone());
+    argv
+}
+
+fn render_sglang(cfg: &EngineConfig, spec: &ModelSpec) -> Vec<String> {
+    let model_path = spec
+        .path
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| spec.name.clone());
+
+    let ctx_len = spec.max_model_len.unwrap_or(cfg.sglang.context_length);
+    let mut argv: Vec<String> = vec![
+        cfg.sglang.binary.clone(),
+        "-m".into(),
+        "sglang.launch_server".into(),
+        "--model-path".into(),
+        model_path,
+        "--served-model-name".into(),
+        spec.name.clone(),
+        "--tp".into(),
+        spec.tp.to_string(),
+        "--host".into(),
+        cfg.sglang.host.clone(),
+        "--port".into(),
+        cfg.sglang.port.to_string(),
+        "--context-length".into(),
+        ctx_len.to_string(),
+        "--mem-fraction-static".into(),
+        format!("{:.3}", cfg.sglang.mem_fraction_static),
+    ];
+    argv.extend(cfg.sglang.extra_args.clone());
     argv.extend(spec.extra_args.clone());
     argv
 }
@@ -142,7 +178,7 @@ fn render_legacy(template: &[String], spec: &ModelSpec) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cgn_core::config::{LlamaCppEngineConfig, VllmEngineConfig};
+    use cgn_core::config::{LlamaCppEngineConfig, SglangEngineConfig, VllmEngineConfig};
     use std::path::PathBuf;
 
     fn vllm_cfg() -> EngineConfig {
@@ -153,6 +189,24 @@ mod tests {
                 binary: "vllm".into(),
                 extra_args: vec!["--enable-chunked-prefill".into()],
             },
+            sglang: SglangEngineConfig::default(),
+            llama_cpp: LlamaCppEngineConfig::default(),
+        }
+    }
+
+    fn sglang_cfg() -> EngineConfig {
+        EngineConfig {
+            kind: EngineKind::Sglang,
+            url: "http://127.0.0.1:30000".into(),
+            vllm: VllmEngineConfig::default(),
+            sglang: SglangEngineConfig {
+                binary: "python".into(),
+                host: "127.0.0.1".into(),
+                port: 30000,
+                context_length: 8192,
+                mem_fraction_static: 0.85,
+                extra_args: vec!["--enable-torch-compile".into()],
+            },
             llama_cpp: LlamaCppEngineConfig::default(),
         }
     }
@@ -162,6 +216,7 @@ mod tests {
             kind: EngineKind::LlamaCpp,
             url: "http://127.0.0.1:8000".into(),
             vllm: VllmEngineConfig::default(),
+            sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig {
                 binary: "python".into(),
                 mode: LlamaCppMode::PythonServer,
@@ -194,6 +249,35 @@ mod tests {
         assert!(argv.contains(&"--tensor-parallel-size".to_string()));
         assert!(argv.contains(&"--max-model-len".to_string()));
         assert!(argv.contains(&"--enable-chunked-prefill".to_string()));
+    }
+
+    #[test]
+    fn renders_sglang_command() {
+        let argv =
+            render_argv(&sglang_cfg(), &spec("Qwen/Qwen2.5-7B-Instruct", None), None).unwrap();
+        assert_eq!(argv[0], "python");
+        assert_eq!(argv[1], "-m");
+        assert_eq!(argv[2], "sglang.launch_server");
+        assert!(argv.contains(&"--model-path".to_string()));
+        assert!(argv.contains(&"Qwen/Qwen2.5-7B-Instruct".to_string()));
+        assert!(argv.contains(&"--served-model-name".to_string()));
+        assert!(argv.contains(&"--tp".to_string()));
+        assert!(argv.contains(&"--host".to_string()));
+        assert!(argv.contains(&"--port".to_string()));
+        assert!(argv.contains(&"--mem-fraction-static".to_string()));
+        assert!(argv.contains(&"--enable-torch-compile".to_string()));
+    }
+
+    #[test]
+    fn sglang_uses_local_path_when_present() {
+        let argv = render_argv(
+            &sglang_cfg(),
+            &spec("Qwen/Qwen2.5-7B-Instruct", Some("/models/qwen-7b")),
+            None,
+        )
+        .unwrap();
+        assert!(argv.contains(&"/models/qwen-7b".to_string()));
+        assert!(argv.contains(&"Qwen/Qwen2.5-7B-Instruct".to_string()));
     }
 
     #[test]
@@ -238,6 +322,7 @@ mod tests {
             kind: EngineKind::OpenaiCompat,
             url: "http://127.0.0.1:8000".into(),
             vllm: VllmEngineConfig::default(),
+            sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
         };
         assert!(!should_spawn(&cfg));

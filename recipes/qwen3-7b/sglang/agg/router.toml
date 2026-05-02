@@ -1,0 +1,30 @@
+[cluster]
+name           = "cognitora-qwen3-7b-sglang-agg"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[router]
+listen_http  = "0.0.0.0:8080"
+listen_grpc  = "0.0.0.0:9090"
+listen_admin = "127.0.0.1:9091"
+node_id      = "router-qwen3-7b-sglang-agg"
+
+[router.score_weights]
+kv       = 0.55
+load     = 0.25
+power    = 0.10
+capacity = 0.10
+
+[router.admission]
+max_queue                  = 4096
+ttft_slo                   = "800ms"
+max_concurrent_per_replica = 64
+
+[models."Qwen/Qwen3-7B-Instruct"]
+tp = 1

@@ -17,11 +17,12 @@ for f in "$WORK"/router.pid "$WORK"/agent-*.pid "$WORK"/kvcached.pid "$WORK"/etc
   fi
 done
 
-# Some engine subprocesses (llama-cpp-python, vllm) escape the agent's
-# process group. Best-effort cleanup of the python ones.
-for p in $(pgrep -f "llama_cpp.server" 2>/dev/null) \
-         $(pgrep -f "vllm serve"      2>/dev/null) \
-         $(pgrep -f "vllm.entrypoints" 2>/dev/null); do
+# Some engine subprocesses (llama-cpp-python, vllm, sglang) escape the
+# agent's process group. Best-effort cleanup of the python ones.
+for p in $(pgrep -f "llama_cpp.server"     2>/dev/null) \
+         $(pgrep -f "vllm serve"           2>/dev/null) \
+         $(pgrep -f "vllm.entrypoints"     2>/dev/null) \
+         $(pgrep -f "sglang.launch_server" 2>/dev/null); do
   kill -9 "$p" 2>/dev/null || true
 done
 

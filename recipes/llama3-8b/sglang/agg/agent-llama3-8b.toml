@@ -1,0 +1,45 @@
+# cgn-agent for llama3-8b · sglang · aggregated.
+#
+# Drives `python -m sglang.launch_server`. SGLang exposes the same
+# OpenAI-compatible HTTP surface as vLLM, so the router and KV daemon
+# are unchanged from the vLLM recipe.
+
+[cluster]
+name           = "cognitora-llama3-8b-sglang-agg"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7080"
+role     = "both"
+node_id  = "agent-llama3-8b-sglang"
+kv_uds   = "/tmp/cognitora-kv.sock"
+
+[engine]
+kind = "sglang"
+url  = "http://127.0.0.1:30000"
+
+[engine.sglang]
+binary              = "python"
+host                = "127.0.0.1"
+port                = 30000
+context_length      = 8192
+mem_fraction_static = 0.85
+extra_args = [
+  # RadixAttention prefix cache — SGLang's in-engine analogue to
+  # Cognitora's cross-node prefix routing. The two layers stack.
+  "--enable-radix-cache",
+  # Disable the warm-up so first-request latency is observable; remove
+  # in production.
+  "--disable-cuda-graph-padding",
+]
+
+[models."meta-llama/Meta-Llama-3.1-8B-Instruct"]
+tp            = 1
+max_model_len = 8192

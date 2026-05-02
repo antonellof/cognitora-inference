@@ -1,0 +1,39 @@
+# cgn-router for llama3-70b · vllm · aggregated.
+
+[cluster]
+name           = "cognitora-llama3-70b-agg"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[router]
+listen_http  = "0.0.0.0:8080"
+listen_grpc  = "0.0.0.0:9090"
+listen_admin = "127.0.0.1:9091"
+node_id      = "router-llama3-70b-agg"
+
+# 70B aggregated: load balancing across replicas (when scaled out)
+# matters more than power on a 4-GPU node, but KV reuse still
+# dominates because prompts repeat heavily in chat workloads.
+[router.score_weights]
+kv       = 0.55
+load     = 0.25
+power    = 0.10
+capacity = 0.10
+
+[router.admission]
+max_queue                  = 4096
+ttft_slo                   = "1500ms"   # 70B is heavier — relaxed TTFT SLO
+max_concurrent_per_replica = 16
+
+[router.rate_limit]
+rps   = 100
+burst = 400
+
+[models."RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"]
+tp = 4

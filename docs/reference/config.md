@@ -28,10 +28,16 @@ OpenAI HTTP surface (`/v1/completions`, `/health`, `/v1/models`) plugs in.
 
 | Key                     | Type   | Default                          | Notes |
 |-------------------------|--------|----------------------------------|-------|
-| `engine.kind`           | enum   | `"vllm"`                         | One of `vllm`, `llama_cpp`, `openai_compat`. |
+| `engine.kind`           | enum   | `"vllm"`                         | One of `vllm`, `sglang`, `llama_cpp`, `openai_compat`. |
 | `engine.url`            | string | `http://127.0.0.1:8000`          | OpenAI HTTP base URL. |
 | `engine.vllm.binary`    | string | `"vllm"`                         | Path or PATH-name of the `vllm` CLI. |
 | `engine.vllm.extra_args`| array  | `["--enable-chunked-prefill"]`   | Appended after the auto-rendered argv. |
+| `engine.sglang.binary`             | string | `"python"`                | Python interpreter that runs `-m sglang.launch_server`. |
+| `engine.sglang.host`               | string | `"127.0.0.1"`             | Where the engine listens. |
+| `engine.sglang.port`               | u16    | `8000`                    | Must match `engine.url`. |
+| `engine.sglang.context_length`     | u32    | `4096`                    | Default context window when `[models.\*].max_model_len` is unset. |
+| `engine.sglang.mem_fraction_static`| f32    | `0.85`                    | Mem fraction for SGLang's RadixAttention KV pool. |
+| `engine.sglang.extra_args`         | array  | `[]`                      | Appended after the auto-rendered argv. Pass `--enable-radix-cache` here. |
 | `engine.llama_cpp.binary`     | string | `"python"`                  | Python interpreter (`mode = python_server`) or `llama-server` binary (`mode = binary`). |
 | `engine.llama_cpp.mode`       | enum   | `"python_server"`           | `python_server` or `binary`. |
 | `engine.llama_cpp.host`       | string | `"127.0.0.1"`               | Where the engine listens. |
@@ -45,11 +51,29 @@ When `kind = "openai_compat"` the agent does **not** spawn a child process;
 it only proxies to whatever is at `engine.url`. Use this with systemd /
 Kubernetes / a sidecar that owns the engine lifecycle.
 
+### Engine selection
+
+The four supported engines map to the same OpenAI HTTP surface, so they
+are fully interchangeable from the router's perspective:
+
+* **`vllm`** — `vllm serve <model> --tensor-parallel-size <N> ...`. Best
+  general-purpose GPU engine; supports continuous batching and chunked
+  prefill out of the box.
+* **`sglang`** — `python -m sglang.launch_server --model-path <model>
+  --tp <N> ...`. Adds RadixAttention prefix caching that complements
+  Cognitora's *cross-node* prefix routing — the router still picks the
+  node with the longest cached prefix, and SGLang then reuses cache
+  inside that node.
+* **`llama_cpp`** — CPU-friendly fallback (and CUDA-offload via
+  `n_gpu_layers`); useful for laptops, CI, and edge deployments.
+* **`openai_compat`** — proxy-only.
+
 ### Per-model knobs
 
 `[models."<name>"].path` is required when `engine.kind = "llama_cpp"` (the
-filesystem path to a `.gguf` file). It is ignored for vLLM, which resolves
-the model name as a HuggingFace repo id.
+filesystem path to a `.gguf` file). For SGLang, `path` is optional: when
+unset SGLang resolves the model name as a HuggingFace repo id; when set,
+SGLang loads from the local directory. vLLM behaves the same way.
 
 ### Legacy aliases
 

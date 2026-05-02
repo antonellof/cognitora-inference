@@ -276,9 +276,13 @@ impl Default for AgentConfig {
 /// Inference engine driver.
 ///
 /// Cognitora's `cgn-agent` proxies to an OpenAI-compatible HTTP server. This
-/// block describes which engine to spawn and how. Three kinds are supported:
+/// block describes which engine to spawn and how. Four kinds are supported:
 ///
 /// * `vllm` — the agent spawns `vllm serve <model> ...` (GPU).
+/// * `sglang` — the agent spawns `python -m sglang.launch_server ...` (GPU).
+///   SGLang offers RadixAttention prefix caching and structured-output
+///   acceleration; from the router's perspective it speaks the same OpenAI
+///   surface as vLLM and is fully interchangeable.
 /// * `llama_cpp` — the agent spawns `python -m llama_cpp.server` or a
 ///   standalone `llama-server` binary (CPU or GPU offload).
 /// * `openai_compat` — the agent does not spawn anything; it just proxies
@@ -292,6 +296,8 @@ pub struct EngineConfig {
     pub url: String,
     /// vLLM-specific knobs (used when `kind = "vllm"`).
     pub vllm: VllmEngineConfig,
+    /// SGLang-specific knobs (used when `kind = "sglang"`).
+    pub sglang: SglangEngineConfig,
     /// llama.cpp-specific knobs (used when `kind = "llama_cpp"`).
     pub llama_cpp: LlamaCppEngineConfig,
 }
@@ -301,6 +307,7 @@ impl Default for EngineConfig {
             kind: EngineKind::Vllm,
             url: format!("http://127.0.0.1:{}", crate::ports::VLLM_HTTP),
             vllm: VllmEngineConfig::default(),
+            sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
         }
     }
@@ -310,6 +317,7 @@ impl Default for EngineConfig {
 #[serde(rename_all = "snake_case")]
 pub enum EngineKind {
     Vllm,
+    Sglang,
     LlamaCpp,
     OpenaiCompat,
 }
@@ -328,6 +336,41 @@ impl Default for VllmEngineConfig {
         Self {
             binary: "vllm".into(),
             extra_args: vec!["--enable-chunked-prefill".into()],
+        }
+    }
+}
+
+/// SGLang launch knobs. SGLang is invoked as `python -m sglang.launch_server`
+/// and exposes an OpenAI-compatible HTTP surface on `host:port`. `engine.url`
+/// must point at this surface.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SglangEngineConfig {
+    /// Path or PATH-name of the python interpreter (or the `sglang` CLI).
+    /// Default: `python`.
+    pub binary: String,
+    /// Host the launcher binds to. Mapped to `--host`.
+    pub host: String,
+    /// Port the launcher binds to. Mapped to `--port`.
+    pub port: u16,
+    /// Default context window when [models.\*].max_model_len is unset.
+    /// Mapped to `--context-length`.
+    pub context_length: u32,
+    /// Mem fraction for SGLang's RadixAttention KV pool. Mapped to
+    /// `--mem-fraction-static`. Defaults to `0.85`.
+    pub mem_fraction_static: f32,
+    /// Arguments appended after the auto-rendered base flags.
+    pub extra_args: Vec<String>,
+}
+impl Default for SglangEngineConfig {
+    fn default() -> Self {
+        Self {
+            binary: "python".into(),
+            host: "127.0.0.1".into(),
+            port: crate::ports::VLLM_HTTP,
+            context_length: 4096,
+            mem_fraction_static: 0.85,
+            extra_args: vec![],
         }
     }
 }
