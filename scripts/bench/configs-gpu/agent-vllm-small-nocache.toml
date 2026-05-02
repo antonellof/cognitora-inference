@@ -1,0 +1,23 @@
+[cluster]
+name           = "cognitora-bench-gpu"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7187"
+role     = "both"
+node_id  = "agent-vllm-small-nocache"
+kv_uds   = "/tmp/cognitora-kv.sock"
+
+[engine]
+kind = "openai_compat"
+url  = "http://127.0.0.1:8103"
+
+[models."cog-qwen-05b-vllm-nocache"]
+tp = 1

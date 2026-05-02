@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Single-host bench client for OpenAI-compatible /v1/chat/completions endpoints.
+"""Bench client for OpenAI-compatible /v1/chat/completions endpoints.
 
-Measures, per request:
-  * TTFT  -- time from POST to first SSE token (streaming) or to response start
-            (non-streaming; reported as full latency).
-  * Total wall latency.
-  * Generated token count (from `usage.completion_tokens` if available, else
-    streamed-chunk count).
-  * Tokens/sec (decode throughput) using completion_tokens / (total - TTFT).
+Measurements per request:
+  * TTFT  (streaming only) — time to first SSE chunk that contains a
+          non-empty `choices[0].delta.content`. SSE preambles, role-only
+          openers and empty heartbeats are explicitly *not* counted, so
+          this number is comparable across direct-engine and proxied paths.
+  * total_s — wallclock from POST until response body / SSE [DONE].
+  * completion_tokens — from `usage.completion_tokens` when present, else
+          from a streamed-chunk count (loose fallback).
 
-Aggregates p50/p95/p99 across requests and writes a JSON record to stdout.
+Aggregates p50/p95/p99/mean across requests and writes one JSON record
+per scenario to stdout.
 """
 from __future__ import annotations
 
@@ -20,10 +22,10 @@ import statistics
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 
-import urllib.request
 import urllib.error
+import urllib.request
 
 
 @dataclass
@@ -32,66 +34,83 @@ class Sample:
     ttft_s: float
     total_s: float
     completion_tokens: int
+    prompt_tokens: int = 0
     error: str | None = None
 
 
-def _http_post(url: str, payload: dict, stream: bool, timeout: float) -> Sample:
+def _http_post(url: str, payload: dict, *, stream: bool, timeout: float) -> Sample:
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
         data=body,
-        headers={"content-type": "application/json", "accept": "text/event-stream" if stream else "application/json"},
+        headers={
+            "content-type": "application/json",
+            "accept": "text/event-stream" if stream else "application/json",
+        },
         method="POST",
     )
     t0 = time.perf_counter()
     try:
         resp = urllib.request.urlopen(req, timeout=timeout)
     except urllib.error.HTTPError as exc:
-        return Sample(False, math.nan, time.perf_counter() - t0, 0, f"http {exc.code}: {exc.read()[:200]!r}")
+        return Sample(False, math.nan, time.perf_counter() - t0, 0, error=f"http {exc.code}: {exc.read()[:200]!r}")
     except Exception as exc:  # noqa: BLE001
-        return Sample(False, math.nan, time.perf_counter() - t0, 0, f"err: {exc!r}")
+        return Sample(False, math.nan, time.perf_counter() - t0, 0, error=f"err: {exc!r}")
 
     if not stream:
         raw = resp.read()
         total = time.perf_counter() - t0
         try:
             data = json.loads(raw)
-            ct = int(data.get("usage", {}).get("completion_tokens") or 0)
+            usage = data.get("usage", {}) or {}
+            ct = int(usage.get("completion_tokens") or 0)
+            pt = int(usage.get("prompt_tokens") or 0)
         except Exception:
-            ct = 0
-        return Sample(True, total, total, ct)
+            ct = pt = 0
+        return Sample(True, total, total, ct, prompt_tokens=pt)
 
     ttft: float | None = None
     chunk_count = 0
     completion_tokens = 0
+    prompt_tokens = 0
     try:
-        for line in resp:
-            line = line.decode("utf-8", errors="replace").strip()
+        for raw_line in resp:
+            line = raw_line.decode("utf-8", errors="replace").strip()
             if not line or not line.startswith("data:"):
                 continue
-            payload = line[5:].strip()
-            if payload == "[DONE]":
+            payload_s = line[5:].strip()
+            if payload_s == "[DONE]":
                 break
+            try:
+                ev = json.loads(payload_s)
+            except Exception:
+                continue
+            choices = ev.get("choices") or []
+            usage = ev.get("usage") or {}
+            ct = usage.get("completion_tokens")
+            pt = usage.get("prompt_tokens")
+            if isinstance(ct, int):
+                completion_tokens = max(completion_tokens, ct)
+            if isinstance(pt, int):
+                prompt_tokens = max(prompt_tokens, pt)
+            if not choices:
+                continue
+            delta = choices[0].get("delta") or {}
+            content = delta.get("content") or ""
+            if content == "":
+                continue
             if ttft is None:
                 ttft = time.perf_counter() - t0
             chunk_count += 1
-            try:
-                ev = json.loads(payload)
-                u = ev.get("usage") or {}
-                ct = u.get("completion_tokens")
-                if isinstance(ct, int):
-                    completion_tokens = max(completion_tokens, ct)
-            except Exception:
-                pass
         total = time.perf_counter() - t0
     except Exception as exc:  # noqa: BLE001
-        return Sample(False, math.nan, time.perf_counter() - t0, 0, f"stream err: {exc!r}")
+        return Sample(False, math.nan, time.perf_counter() - t0, 0, error=f"stream err: {exc!r}")
 
     if completion_tokens == 0:
         completion_tokens = chunk_count
     if ttft is None:
         ttft = total
-    return Sample(True, ttft, total, completion_tokens)
+    return Sample(True, ttft, total, completion_tokens, prompt_tokens=prompt_tokens)
 
 
 def percentile(values: list[float], pct: float) -> float:
@@ -106,6 +125,30 @@ def percentile(values: list[float], pct: float) -> float:
     return s[lo] + (s[hi] - s[lo]) * (k - lo)
 
 
+def make_long_prompt(target_tokens: int, *, base_phrase: str | None = None) -> str:
+    """Build a prompt of ~target_tokens tokens using a deterministic filler.
+
+    Approximates 1 token ≈ 0.75 words; we just repeat the base phrase enough
+    times to reach the target length. Engines tokenize this differently, but
+    they tokenize *the same string* so the relative comparison stays valid.
+    """
+    base = base_phrase or (
+        "The European Space Agency is preparing a new mission to map the surface of "
+        "Mars at unprecedented resolution. The mission, code-named Iris, will use "
+        "ground-penetrating radar to study subsurface ice, lava tubes, and ancient "
+        "river beds, returning multi-spectral imagery to Earth via a relay satellite."
+    )
+    words_per_phrase = len(base.split())
+    target_words = int(target_tokens * 0.75)
+    repeats = max(1, target_words // words_per_phrase)
+    body = (" " + base) * repeats
+    return (
+        "You are a precise technical assistant. Read the briefing below and then "
+        "answer the question.\n\nBRIEFING:\n" + body.strip()
+        + "\n\nQUESTION: In one short sentence, name the mission and its primary instrument."
+    )
+
+
 def run_scenario(
     name: str,
     url: str,
@@ -117,10 +160,14 @@ def run_scenario(
     concurrency: int,
     timeout: float,
 ) -> dict:
-    print(f"[bench] {name}: n={len(prompts)} concurrency={concurrency} stream={stream} model={model} url={url}", file=sys.stderr)
+    print(
+        f"[bench] {name}: n={len(prompts)} concurrency={concurrency} "
+        f"stream={stream} model={model} url={url}",
+        file=sys.stderr,
+    )
 
     def one(p: str) -> Sample:
-        body = {
+        body: dict = {
             "model": model,
             "messages": [{"role": "user", "content": p}],
             "max_tokens": max_tokens,
@@ -128,6 +175,7 @@ def run_scenario(
         }
         if stream:
             body["stream"] = True
+            body["stream_options"] = {"include_usage": True}
         return _http_post(url, body, stream=stream, timeout=timeout)
 
     samples: list[Sample] = []
@@ -140,7 +188,6 @@ def run_scenario(
 
     ok = [s for s in samples if s.ok]
     n_ok = len(ok)
-    n_err = len(samples) - n_ok
     if n_ok == 0:
         return {
             "name": name,
@@ -158,6 +205,9 @@ def run_scenario(
         if s.completion_tokens > 0 and decode > 0:
             decodes_s.append(s.completion_tokens / decode)
     total_completion = sum(s.completion_tokens for s in ok)
+    avg_prompt_tokens = (
+        sum(s.prompt_tokens for s in ok) / n_ok if any(s.prompt_tokens for s in ok) else 0
+    )
 
     return {
         "name": name,
@@ -166,8 +216,9 @@ def run_scenario(
         "stream": stream,
         "n": len(samples),
         "ok": n_ok,
-        "err": n_err,
+        "err": len(samples) - n_ok,
         "wall_s": round(wall, 3),
+        "avg_prompt_tokens": round(avg_prompt_tokens, 1),
         "ttft_ms": {
             "p50": round(percentile(ttfts, 0.5) * 1000, 1),
             "p95": round(percentile(ttfts, 0.95) * 1000, 1),
@@ -198,15 +249,16 @@ def main() -> int:
     ap.add_argument("--concurrency", type=int, default=1)
     ap.add_argument("--max-tokens", type=int, default=64)
     ap.add_argument("--stream", action="store_true")
-    ap.add_argument("--prompt-file", default=None, help="One prompt per line; cycled")
-    ap.add_argument("--shared-prefix", action="store_true", help="Reuse the same prompt N times (KV-reuse mode)")
-    ap.add_argument("--timeout", type=float, default=120.0)
+    ap.add_argument("--prompt-tokens", type=int, default=0,
+                    help="If > 0, generate a synthetic prompt of approximately this many tokens.")
+    ap.add_argument("--shared-prefix", action="store_true",
+                    help="Reuse the same prompt N times (engine prefix-cache demo).")
+    ap.add_argument("--timeout", type=float, default=180.0)
     ap.add_argument("--warmup", type=int, default=2)
     args = ap.parse_args()
 
-    if args.prompt_file:
-        with open(args.prompt_file) as fh:
-            base = [ln.strip() for ln in fh if ln.strip()]
+    if args.prompt_tokens > 0:
+        base = [make_long_prompt(args.prompt_tokens)]
     else:
         base = [
             "Explain the difference between BFS and DFS in one short paragraph.",
@@ -216,9 +268,6 @@ def main() -> int:
             "Give one example of a CPU-friendly model.",
             "Why is TTFT important for chat UX?",
         ]
-    if not base:
-        print("no prompts", file=sys.stderr)
-        return 2
 
     if args.shared_prefix:
         prompts = [base[0]] * args.n
@@ -226,7 +275,7 @@ def main() -> int:
         prompts = [base[i % len(base)] for i in range(args.n)]
 
     if args.warmup > 0:
-        warm_prompts = prompts[: args.warmup]
+        warm_prompts = prompts[: max(1, min(args.warmup, len(prompts)))]
         run_scenario(
             args.name + "/warmup",
             args.url,
