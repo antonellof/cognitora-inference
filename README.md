@@ -2,9 +2,9 @@
 
 # Cognitora
 
-**Open, distributed LLM inference platform.**
+**The open-source, datacenter-scale LLM inference stack.**
 
-KV-aware routing · Prefill/decode disaggregation · GPU/RAM/SSD KV tiering · Multi-model cascade (SLM → Mid → LLM) · Energy-aware scheduling · One-line installer for bare metal, Kubernetes, AWS, GCP, Azure, Hetzner.
+Run vLLM, SGLang, TensorRT-LLM, or llama.cpp as a coordinated multi-node cluster — KV-aware, disaggregation-ready, energy-aware — on bare metal, Kubernetes, or any major cloud, installed with a single curl line.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![CI](https://img.shields.io/badge/ci-passing-brightgreen.svg)](.github/workflows/ci.yml)
@@ -16,37 +16,86 @@ KV-aware routing · Prefill/decode disaggregation · GPU/RAM/SSD KV tiering · M
 
 ## What is Cognitora?
 
-Cognitora is a low-overhead orchestration layer that turns one or many LLM inference workers into a production-grade cluster — with **KV-aware routing**, **prefill/decode disaggregation**, **multi-tier KV caching** (GPU/RAM/SSD), and **energy-aware scheduling** as first-class concerns.
+Cognitora is the **orchestration layer above inference engines**. It does not replace vLLM, SGLang, TensorRT-LLM, or llama.cpp — it turns them into a coordinated cluster. KV-aware routing, prefill/decode disaggregation, multi-tier KV offload, multi-model cascade, and energy-aware admission all work together to maximize throughput and minimize TTFT for production LLM workloads.
 
-It is **engine-agnostic by design**: the agent process drives the inference engine over a stable internal contract — anything that speaks the OpenAI HTTP surface (`/v1/chat/completions`, `/v1/completions`, `/v1/models`, `/health`) plugs in. Four drivers ship today:
+Every Cognitora component is a **single statically-linked Rust binary**. No Python control plane, no JVM, no operator install required. The same artifacts run as systemd units on a single host, as a Helm chart on Kubernetes, or as Terraform-deployed VMs on AWS / GCP / Azure / Hetzner.
 
-- **`vllm`** — agent spawns `vllm serve <model> ...` (NVIDIA GPU).
-- **`sglang`** — agent spawns `python -m sglang.launch_server ...` (NVIDIA GPU). Adds RadixAttention prefix caching that stacks on top of Cognitora's cross-node prefix routing.
-- **`llama_cpp`** — agent spawns `python -m llama_cpp.server ...` or a standalone `llama-server` binary (CPU or GPU offload).
-- **`openai_compat`** — agent does not spawn anything; it proxies to a pre-managed engine at `engine.url` (Ollama, vLLM-as-a-service, hosted endpoints, ...).
+## When to use Cognitora
 
-Adding TensorRT-LLM is a thin driver on the same trait — see [`docs/reference/config.md`](docs/reference/config.md). The engine itself is always left untouched and runs as a supervised child (or remote) process per node.
+- You serve LLMs across **multiple GPUs or nodes** and want them to behave as one cluster.
+- You want **KV-aware routing** so repeated prefixes don't get re-prefilled.
+- You need to **independently scale prefill and decode** (disaggregated serving).
+- You want **engine choice** — vLLM today, SGLang tomorrow, llama.cpp at the edge — without rewriting the platform.
+- You operate **bare-metal or hybrid** infrastructure where a Kubernetes-only stack would be overkill.
+- You care about **energy / power budgets** and want them surfaced in routing decisions.
 
-Every Cognitora binary is **a single statically-linked Rust executable** — no Python, Go, or JVM runtime in any container.
+For a single model on a single GPU, the inference engine on its own is usually enough.
+
+## Engine support at a glance
+
+|                                | [vLLM](https://github.com/vllm-project/vllm) | [SGLang](https://github.com/sgl-project/sglang) | [llama.cpp](https://github.com/ggerganov/llama.cpp) | [TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM) | OpenAI-compat (Ollama, hosted, …) |
+|--------------------------------|:----:|:------:|:---------:|:------------:|:-------:|
+| **OpenAI HTTP gateway**        | ✅   | ✅     | ✅        | ✅           | ✅      |
+| **KV-aware routing**           | ✅   | ✅     | ✅        | ✅           | ✅      |
+| **Prefill/decode disaggregate**| ✅ (NIXL) | ✅ (NIXL) | n/a   | ✅ (NIXL)    | n/a     |
+| **KV offload — LMCache**       | ✅   | —      | —         | —            | —       |
+| **KV offload — HiCache**       | —    | ✅     | —         | —            | —       |
+| **KV offload — KVBM (Dynamo)** | ✅   | —      | —         | 🚧           | —       |
+| **Multi-tier KV (RAM / SSD)**  | ✅   | ✅     | ✅        | ✅           | ✅      |
+| **Multi-model cascade (SLM→LLM)** | ✅ | ✅   | ✅        | ✅           | ✅      |
+| **Energy-aware admission**     | ✅   | ✅     | ✅        | ✅           | ✅      |
+
+> ✅ = ships today. 🚧 = wired through the same TOML knob, awaiting an upstream-supported engine version. — = not applicable for that engine.
+
+## Core capabilities
+
+| Capability | What it does | Why it matters |
+|------------|--------------|----------------|
+| [**KV-aware routing**](docs/architecture/routing.md) | `cgn-router` scores candidate workers using **sequence-chained BLAKE3 digests** + **longest-prefix overlap**, plus load / power / capacity terms. | Eliminates redundant prefill computation. Positionally correct where naive chunk-overlap mis-scores interleaved prefixes. |
+| [**Prefill/decode disaggregation**](docs/architecture/routing.md) | Recipe-level split into prefill replicas and decode replicas with `NixlConnector` handoff. | Each phase runs on hardware tuned for its workload; better GPU utilisation. |
+| [**Multi-tier KV cache**](docs/architecture/kv-tiering.md) | `cgn-kvcached` = RAM (DashMap) + SSD (RocksDB-indexed file store) + cross-node QUIC peer fetch. | Extends effective KV capacity; hits across the cluster, not just one host. |
+| [**Pluggable KV offload**](docs/architecture/kv-strategy.md) | One TOML knob (`engine.kv_offload`) selects `none / nixl / lmcache / hicache / kvbm`; `cgn-agent` auto-renders the right `--kv-transfer-config` JSON or `--enable-hierarchical-cache` flags. | Pick the best community-maintained KV layer per engine without hand-writing connector blobs. |
+| [**Engine-agnostic agent**](docs/reference/config.md) | `cgn-agent` drives any process that speaks the OpenAI HTTP surface (`/v1/chat/completions`, `/v1/models`, `/health`). vLLM / SGLang / llama.cpp / OpenAI-compat ship today. | Same control plane, multiple engines. Mix engines in one cluster. |
+| [**Multi-model cascade**](docs/architecture/routing.md) | SLM → Mid → LLM gating on the model's own log-probability ("did the cheap model already get this right?"). | Cuts cost on easy queries while preserving worst-case quality. |
+| [**Energy-aware scheduling**](docs/operations/observability.md) | `cgn-power` reads Redfish + IPMI + DCGM/NVML; the routing score has a power term and admission can drain hot nodes. | Lower W-per-token, fewer SLA breaches under thermal stress. |
+| [**Cross-cluster federation**](docs/architecture/protocols.md) | `cgn-router::federation` forwards across clusters; `cgn-kvcached` peers across QUIC. | Multi-region inference without Kubernetes-of-Kubernetes. |
+| [**One-line install**](deploy/installer/install.sh) | Cosign-verified release tarballs, six binaries dropped into `/usr/local/bin`. | Same artifact bare-metal / VM / container / Kubernetes. |
+| [**Recipes**](recipes/README.md) | Flat TOML profiles per `<model>/<engine>/<topology>` plus a 3-line `up.sh`. | Reproducible bring-up of a real model in <30 s. |
 
 <p align="center">
-  <img src="docs/architecture.svg" alt="Cognitora architecture: Client over HTTP to cgn-router; cgn-router routes via gRPC mTLS to cgn-agent which supervises the inference engine (vLLM, llama.cpp, or any OpenAI-compatible server such as Ollama). cgn-router watches etcd for cluster state. cgn-agent talks to a colocated cgn-kvcached over UDS; cgn-kvcached owns GPU/RAM/SSD KV tiers and uses QUIC/RDMA to fetch from peer nodes." width="90%" />
+  <img src="docs/architecture.svg" alt="Cognitora architecture: an OpenAI SDK client speaks HTTP to cgn-router; cgn-router routes via gRPC mTLS to cgn-agent, which supervises one inference engine per node (vLLM, SGLang, llama.cpp, TensorRT-LLM, or any OpenAI-compatible server). cgn-router watches etcd for cluster state. cgn-agent talks to a colocated cgn-kvcached over UDS; cgn-kvcached owns the RAM and SSD KV tiers, indexes engine-internal GPU residency, and uses QUIC or RDMA to fetch missing blocks from peer nodes." width="90%" />
 </p>
 
-## Why Cognitora?
+## How Cognitora compares to NVIDIA Dynamo
 
-| Capability                     | Cognitora            | Single engine | NVIDIA Dynamo | KServe |
-| ------------------------------ | -------------------- | ------------- | ------------- | ------ |
-| KV-aware prefix routing        | yes (BLAKE3 trie, sequence-chained digests) | local only | yes (chunk overlap) | basic |
-| Prefill/decode disaggregate    | yes (NIXL handoff)   | no            | yes           | no     |
-| KV offload backends            | LMCache · HiCache · KVBM · NIXL · cgn-kvcached (one TOML knob) | host only | KVBM (built-in) + LMCache + FlexKV | no |
-| GPU/RAM/SSD KV tiering         | yes (RocksDB index)  | host only     | yes (G1-G4)   | no     |
-| Multi-model cascade (SLM→LLM)  | yes (logprob gating) | no            | partial       | no     |
-| Engine-agnostic agent          | yes (vLLM, SGLang, llama.cpp, OpenAI-compat) | engine-locked | engine-locked | yes    |
-| Energy-aware SLOs              | yes (Redfish + IPMI) | no            | no            | no     |
-| Single static executable / svc | yes (all Rust)       | n/a           | no            | no     |
-| Bare-metal first-class         | yes (systemd units)  | varies        | k8s-only      | k8s    |
-| Apache-2.0, OSS-only           | yes                  | varies        | yes           | yes    |
+NVIDIA Dynamo is the closest peer in this space. We agree on most fundamentals (KV-aware routing, disaggregated serving, multi-tier KV) and differ on the runtime, deployment surface, and engine coverage.
+
+| Concern | Cognitora | NVIDIA Dynamo |
+|---------|-----------|---------------|
+| **Positioning** | Engine-agnostic orchestration above vLLM / SGLang / llama.cpp / TRT-LLM | Engine-agnostic orchestration above vLLM / SGLang / TRT-LLM |
+| **Runtime artefact** | Six single-file binaries — no Python control plane, JVM, or operator runtime | Rust core + Python frontend / extensibility layer |
+| **First-class engines** | vLLM · SGLang · llama.cpp · OpenAI-compat (TRT-LLM via thin driver) | vLLM · SGLang · TRT-LLM |
+| **KV routing signal** | Sequence-chained BLAKE3 digests + longest-prefix overlap (positionally correct) | RadixTree on chained block hashes |
+| **KV offload backends** | `none / nixl / lmcache / hicache / kvbm` — selected per recipe via one TOML knob, auto-rendered into the engine argv | KVBM (built-in) + LMCache + FlexKV (separate launch scripts per backend) |
+| **Multi-tier KV** | RAM + SSD + cross-cluster QUIC peer fetch (cgn-kvcached) | Full G1–G4 (KVBM owns GPU + Host + SSD + remote pools) |
+| **Cross-cluster federation** | QUIC peer fetch + cgn-router federation | Single cluster |
+| **Disaggregated prefill/decode** | Recipe-level (`vllm/disagg-*`, NIXL) | Recipe-level (1P1D, 2P2D, NIXL) |
+| **SLA-driven autoscaling** | `cgn-operator` + energy-aware admission | Planner (TCO-driven) + AIConfigurator |
+| **Multi-model cascade (SLM→LLM)** | First-class (logprob gating) | Partial |
+| **Multimodal / video** | Not yet | Yes — image E/P/D, FastVideo, SGLang Diffusion |
+| **Topology-aware gang scheduling** | Basic (cgn-operator + node selectors) | Grove (NVL72-aware) |
+| **Energy / power telemetry** | Yes — Redfish + IPMI + DCGM | No |
+| **Service discovery** | etcd (optional), gossip fallback | etcd or NATS (KV routing requires NATS) |
+| **Deployment surfaces** | Bare metal (systemd) · Kubernetes (Helm) · Terraform (AWS / GCP / Azure / Hetzner) — same binaries | Kubernetes-first (operator + CRDs); local dev via container |
+| **Install surface** | One curl line, six static binaries, no runtime | `pip install ai-dynamo`, container, or operator |
+| **External deps** | etcd (optional) | etcd + NATS (when KV routing on) |
+| **License** | Apache-2.0 | Apache-2.0 |
+
+The full deep-dive is in [`docs/architecture/vs-dynamo.md`](docs/architecture/vs-dynamo.md).
+
+What we have that Dynamo doesn't: bare-metal-first deployment with one-curl install · llama.cpp + OpenAI-compat as first-class engines · energy-aware scheduling (Redfish + IPMI + DCGM) · positionally-correct KV digests · cross-cluster QUIC peer fetch · multi-model SLM→LLM cascade · single-binary runtime with no Python control plane.
+
+What Dynamo has that we don't yet: multimodal & video pipelines · ModelExpress GPU-to-GPU weight streaming · Grove NVL72 gang scheduling · AIConfigurator deployment search · in-flight request migration · zero-config DGDR deployment.
 
 ## The six binaries
 
@@ -256,6 +305,7 @@ cognitora/
 - [Top-level architecture](docs/ARCHITECTURE.md) · [Repo layout](docs/architecture/repo-layout.md)
 - Deep dives: [Routing](docs/architecture/routing.md) · [KV tiering](docs/architecture/kv-tiering.md) · [KV strategy (LMCache, HiCache, KVBM, NIXL)](docs/architecture/kv-strategy.md) · [Protocols](docs/architecture/protocols.md)
 - [Security model](docs/architecture/security.md)
+- [Cognitora vs NVIDIA Dynamo (deep comparison)](docs/architecture/vs-dynamo.md)
 
 **API**
 

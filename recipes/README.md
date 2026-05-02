@@ -8,7 +8,7 @@ chosen engine (vLLM / SGLang / llama.cpp / OpenAI-compatible).
 
 The recipes mirror the layout NVIDIA Dynamo uses for its own production
 recipes (one folder per model × engine × topology) but adapt to
-Cognitora's all-Rust, profile-driven runtime: there is no Python
+Cognitora's profile-driven, single-binary runtime: there is no Python
 framework, no operator install required, and every recipe is a flat
 folder of TOMLs you can read in 30 seconds.
 
@@ -109,13 +109,19 @@ cgn-ctl recipe ls
 
 ## Comparison to Dynamo recipes
 
-| Feature                            | Cognitora recipes              | Dynamo recipes                    |
-| ---------------------------------- | ------------------------------ | --------------------------------- |
-| Per-model, per-engine, per-topology | yes                            | yes                               |
-| Bare-metal / single-node           | first-class (`up.sh`)          | optional                          |
-| Kubernetes                         | optional (Helm chart)          | required (operator + CRDs)        |
-| Engines                            | vLLM, SGLang, llama.cpp, OpenAI-compat | vLLM, TRT-LLM, SGLang             |
-| Format                             | flat TOML                      | `DynamoGraphDeployment` CRD       |
-| Bring-up                           | `bash up.sh` or `cgn-ctl recipe up` | `kubectl apply -f`           |
-| KV-aware routing                   | router computes longest prefix on sequence-chained BLAKE3 digests | radix tree on chained block hashes |
-| Disaggregated prefill/decode       | recipe-level, NIXL/QUIC handoff via cgn-kvcached | recipe-level, NixlConnector |
+| Feature                            | Cognitora recipes                                                   | Dynamo recipes                              |
+| ---------------------------------- | ------------------------------------------------------------------- | ------------------------------------------- |
+| Per-model, per-engine, per-topology | yes                                                                | yes                                         |
+| Bare-metal / single-node           | first-class (`up.sh`)                                               | optional                                    |
+| Kubernetes                         | optional (Helm chart)                                               | required (operator + CRDs)                  |
+| Engines                            | vLLM, SGLang, llama.cpp, OpenAI-compat                              | vLLM, TRT-LLM, SGLang                       |
+| KV offload backends                | one TOML knob (`engine.kv_offload`): `none/nixl/lmcache/hicache/kvbm` | per-recipe launch script per backend        |
+| Format                             | flat TOML                                                           | `DynamoGraphDeployment` CRD                 |
+| Bring-up                           | `bash up.sh` or `cgn-ctl recipe up`                                 | `kubectl apply -f`                          |
+| KV-aware routing                   | longest-prefix overlap on sequence-chained BLAKE3 digests           | radix tree on chained block hashes          |
+| Disaggregated prefill/decode       | recipe-level, NIXL handoff (auto-rendered from `kv_offload × role`) | recipe-level, NixlConnector / KVBM / LMCache |
+| Cross-cluster federation           | yes (cgn-kvcached QUIC peer fetch)                                  | not in recipe scope                         |
+
+For the full apples-to-apples deep dive — including modalities,
+autoscaling, fault tolerance, and the LMCache / HiCache / KVBM matrix
+— see [`docs/architecture/vs-dynamo.md`](../docs/architecture/vs-dynamo.md).

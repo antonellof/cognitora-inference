@@ -4,8 +4,9 @@ A **recipe** is a folder of TOML profiles plus a 3-line `up.sh` driver
 that brings up a complete Cognitora cluster — router, agents, optional
 KV daemon, and an embedded etcd — pointed at a specific model, engine,
 and topology. Recipes are inspired by NVIDIA Dynamo's per-model
-production folders, but adapt to Cognitora's all-Rust profile-driven
-runtime: there is no Python framework and no operator install required.
+production folders, but adapt to Cognitora's profile-driven,
+single-binary runtime: there is no Python framework and no operator
+install required.
 
 The in-tree set is rooted at [`recipes/`](../../recipes/).
 

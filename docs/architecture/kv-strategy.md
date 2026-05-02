@@ -103,7 +103,7 @@ convenience:
 | Concern                                            | Dynamo                                          | Cognitora                                                                |
 |----------------------------------------------------|-------------------------------------------------|--------------------------------------------------------------------------|
 | Built-in offload backend                           | KVBM (Rust + Python)                            | None — we integrate LMCache / HiCache / KVBM as alternatives             |
-| Cross-cluster prefix index                         | `kv-router` + Python events                     | `cgn-kvcached` + `cgn-router` (all-Rust, RocksDB, QUIC peer fetch)        |
+| Cross-cluster prefix index                         | `kv-router` + NATS events                       | `cgn-kvcached` + `cgn-router` (single-binary, RocksDB, QUIC peer fetch)   |
 | Routing correctness                                | Radix tree of GPU-resident blocks               | Same idea, plus **sequence-chained BLAKE3 digests** so the router never confuses repeated chunks at different positions (see `cgn-core::hash::hash_seq_chunks`) |
 | Engine support                                     | vLLM, TRT-LLM, SGLang                            | vLLM, **SGLang**, **llama.cpp**, openai-compat                            |
 | Disaggregation                                     | Yes (1P1D, 2P2D)                                | Yes (`vllm/disagg-single-node`, `vllm/disagg-lmcache`)                    |
