@@ -1,0 +1,23 @@
+[cluster]
+name           = "cognitora-bench"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7081"
+role     = "both"
+node_id  = "agent-llamacpp"
+kv_uds   = "/tmp/cognitora-kv.sock"
+
+[engine]
+kind = "openai_compat"
+url  = "http://127.0.0.1:8001"
+
+[models."Qwen/Qwen2.5-0.5B-Instruct"]
+tp = 1
