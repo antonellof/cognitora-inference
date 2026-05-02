@@ -1,0 +1,35 @@
+# Router config for the docker-ollama example.
+#
+# The router connects to the in-network etcd, watches /cognitora/nodes/
+# for agents, and exposes the OpenAI HTTP surface on :8080.
+
+[cluster]
+name           = "cognitora-docker-ollama"
+state_backend  = "etcd"
+etcd_endpoints = ["http://cognitora-etcd:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[router]
+listen_http  = "0.0.0.0:8080"
+listen_grpc  = "0.0.0.0:7070"
+listen_admin = "0.0.0.0:9091"
+
+[router.score_weights]
+kv       = 0.55
+load     = 0.25
+power    = 0.10
+capacity = 0.10
+
+[router.rate_limit]
+enabled = false
+
+# The model names below must match exactly what `ollama list` prints —
+# the agent forwards `req.model` straight through to Ollama. Add more
+# entries here (and in agent.toml) if you've pulled extra models.
+[models."phi3:mini"]
+tp = 1

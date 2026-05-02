@@ -1,0 +1,40 @@
+# Agent config for the docker-ollama example.
+#
+# Two things to know:
+#
+# 1. `agent.listen` is published to etcd verbatim and the router dials
+#    that address back. We bind on the agent container's static IP
+#    (172.30.0.4 — assigned in compose.yaml) so the router can reach it.
+#    Binding on 0.0.0.0 here would publish "0.0.0.0:7071" and break
+#    routing.
+#
+# 2. `engine.kind = "openai_compat"` means the agent does NOT spawn a
+#    child process — it just forwards `/v1/completions` calls to
+#    `engine.url` and streams SSE back. Ollama's OpenAI-compatible API
+#    lives at `http://host.docker.internal:11434/v1` — the agent will
+#    append `/v1/completions` itself, so the URL ends at the host.
+
+[cluster]
+name           = "cognitora-docker-ollama"
+state_backend  = "etcd"
+etcd_endpoints = ["http://cognitora-etcd:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "172.30.0.4:7071"
+role     = "both"
+node_id  = "ollama-bridge"
+kv_uds   = "/tmp/cognitora-kv.sock"
+
+[engine]
+kind       = "openai_compat"
+url        = "http://host.docker.internal:11434"
+kv_offload = "none"
+
+[models."phi3:mini"]
+tp = 1

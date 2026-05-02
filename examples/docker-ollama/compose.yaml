@@ -1,0 +1,90 @@
+# Cognitora ⇄ Ollama on Docker Compose.
+#
+# Pulls the published GHCR image (ghcr.io/antonellof/cognitora) for the
+# router and agent — no local build required. Runs three containers on a
+# user-defined bridge network with static IPs so the address each agent
+# publishes to etcd (`agent.listen` is taken verbatim) is dialable from
+# the router.
+#
+#   client ─► router :8080 ─► agent :7071 ─► host Ollama :11434
+#                  │                ▲
+#                  └─ etcd :2379 ◄──┘  (node discovery + lease)
+#
+# Override the image tag with $COGNITORA_VERSION if you want a different
+# release.
+
+name: cognitora-docker-ollama
+
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.15
+    container_name: cognitora-etcd
+    command:
+      - /usr/local/bin/etcd
+      - --name=cognitora-etcd
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://cognitora-etcd:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://cognitora-etcd:2380
+      - --initial-cluster=cognitora-etcd=http://cognitora-etcd:2380
+      - --initial-cluster-state=new
+    networks:
+      cognitora:
+        ipv4_address: 172.30.0.2
+    ports:
+      - "2379:2379"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/etcdctl", "endpoint", "health"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  router:
+    image: ghcr.io/antonellof/cognitora:${COGNITORA_VERSION:-v0.2.0}
+    container_name: cognitora-router
+    depends_on:
+      etcd:
+        condition: service_healthy
+    command:
+      - /usr/local/bin/cgn-router
+      - --config
+      - /etc/cognitora/cognitora.toml
+    volumes:
+      - ./router.toml:/etc/cognitora/cognitora.toml:ro
+    networks:
+      cognitora:
+        ipv4_address: 172.30.0.3
+    ports:
+      - "8080:8080"  # OpenAI HTTP surface
+      - "9091:9091"  # /metrics, /healthz, /readyz
+      - "7070:7070"  # internal gRPC
+
+  agent:
+    image: ghcr.io/antonellof/cognitora:${COGNITORA_VERSION:-v0.2.0}
+    container_name: cognitora-agent
+    depends_on:
+      etcd:
+        condition: service_healthy
+    command:
+      - /usr/local/bin/cgn-agent
+      - --config
+      - /etc/cognitora/cognitora.toml
+    volumes:
+      - ./agent.toml:/etc/cognitora/cognitora.toml:ro
+    extra_hosts:
+      # Lets the agent reach Ollama running on the docker host. Works on
+      # Docker Desktop (macOS/Windows) and Linux Docker ≥ 20.10.
+      - "host.docker.internal:host-gateway"
+    networks:
+      cognitora:
+        ipv4_address: 172.30.0.4
+    ports:
+      - "7071:7071"
+
+networks:
+  cognitora:
+    name: cognitora
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24

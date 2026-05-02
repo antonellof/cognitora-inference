@@ -19,16 +19,17 @@ all in reverse order.
 
 ## Profiles in this folder
 
-| Profile                                 | Engine                              | Best for                                    |
-|-----------------------------------------|-------------------------------------|---------------------------------------------|
-| [`local-mac/`](local-mac/README.md)     | `openai_compat` → Ollama            | macOS laptop. No Python venv, no GGUF download. |
-| [`multi-llm/`](multi-llm/README.md)     | `vllm` (GPU) or `llama_cpp` (CPU)   | Linux box / server / CI. Multi-model with a real engine. |
+| Profile                                       | Boots via              | Engine                              | Best for                                    |
+|-----------------------------------------------|------------------------|-------------------------------------|---------------------------------------------|
+| [`local-mac/`](local-mac/README.md)           | `scripts/run/up.sh`    | `openai_compat` → Ollama            | macOS laptop. No Python venv, no GGUF download. |
+| [`multi-llm/`](multi-llm/README.md)           | `scripts/run/up.sh`    | `vllm` (GPU) or `llama_cpp` (CPU)   | Linux box / server / CI. Multi-model with a real engine. |
+| [`docker-ollama/`](docker-ollama/README.md)   | `docker compose up`    | `openai_compat` → Ollama            | Anywhere with Docker. Pulls the published GHCR image — no `cargo build`. |
 
 All profiles share the same router, kvcached, and middleware code —
 swapping topologies is *just* a matter of changing the `[engine]` block
 inside each `agent-*.toml`.
 
-## Running any profile
+## Running a binary profile
 
 ```bash
 # Build the binaries once.
@@ -50,6 +51,19 @@ bash scripts/run/down.sh examples/local-mac
 
 Each daemon writes its log to `~/.cache/cognitora/run/<name>.log` and
 its pid to `<name>.pid`.
+
+## Running the Docker Compose profile
+
+```bash
+cd examples/docker-ollama
+docker compose up -d            # pulls ghcr.io/antonellof/cognitora
+bash demo.sh                    # exercise the stack
+docker compose down             # tear it all down
+```
+
+No build, no etcd install — `compose.yaml` ships its own etcd container
+and pulls the published image. See
+[`docker-ollama/README.md`](docker-ollama/README.md) for details.
 
 ## Smoke tests that do *not* need a profile
 
