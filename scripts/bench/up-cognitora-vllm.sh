@@ -48,4 +48,4 @@ echo "=== ports ==="
 ss -ltn | grep -E ":(2379|7184|7185|7186|7187|8080|9091|810[1-4])\b" || true
 echo
 echo "=== /v1/models on router ==="
-curl -fsS http://127.0.0.1:8080/v1/models | python3 -m json.tool | head -50 || echo "router not ready yet"
+curl -fsS http://127.0.0.1:8090/v1/models | python3 -m json.tool | head -50 || echo "router not ready yet"

@@ -294,6 +294,10 @@ pub struct EngineConfig {
     pub kind: EngineKind,
     /// HTTP base URL where the engine exposes the OpenAI surface.
     pub url: String,
+    /// Engine-side KV offload / cross-worker connector. Picks the
+    /// `--kv-transfer-config` JSON for vLLM and the
+    /// `--enable-hierarchical-cache` flag set for SGLang. See [`KvOffload`].
+    pub kv_offload: KvOffload,
     /// vLLM-specific knobs (used when `kind = "vllm"`).
     pub vllm: VllmEngineConfig,
     /// SGLang-specific knobs (used when `kind = "sglang"`).
@@ -306,6 +310,7 @@ impl Default for EngineConfig {
         Self {
             kind: EngineKind::Vllm,
             url: format!("http://127.0.0.1:{}", crate::ports::VLLM_HTTP),
+            kv_offload: KvOffload::None,
             vllm: VllmEngineConfig::default(),
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
@@ -320,6 +325,62 @@ pub enum EngineKind {
     Sglang,
     LlamaCpp,
     OpenaiCompat,
+}
+
+/// Engine-side KV connector / offload backend.
+///
+/// Selects which `--kv-transfer-config` (vLLM) or hierarchical-cache flag
+/// set (SGLang) the agent injects when spawning the engine. The router
+/// is unaware of this dial — it only sees prefix-overlap signals via
+/// `cgn-kvcached` either way.
+///
+/// Compatibility:
+///
+/// | Engine        | `none` | `nixl` | `lmcache` | `hicache` | `kvbm` |
+/// |---------------|--------|--------|-----------|-----------|--------|
+/// | `vllm`        | yes    | yes    | yes       | no        | yes    |
+/// | `sglang`      | yes    | yes    | no        | yes       | no     |
+/// | `llama_cpp`   | yes    | no     | no        | no        | no     |
+/// | `openai_compat` | yes  | no     | no        | no        | no     |
+///
+/// In disaggregated topologies (`[agent].role = "prefill"` or `"decode"`)
+/// the renderer automatically composes the offload backend with NIXL so
+/// blocks produced on the prefill GPU stream to the decode GPU. See
+/// `cgn-agent::engine::spawn` for the full table.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KvOffload {
+    /// No engine-side connector. Default. Use this for dev loops or
+    /// when KV state is purely engine-internal.
+    #[default]
+    None,
+    /// NIXL only — sufficient for prefill→decode handoff in disagg
+    /// without any extra offload backend.
+    Nixl,
+    /// LMCache (`LMCacheConnectorV1`). Adds CPU/SSD/Redis/Mooncake KV
+    /// reuse on top of vLLM. In disagg, automatically wraps with a
+    /// `PdConnector(LMCache + NIXL)` MultiConnector.
+    Lmcache,
+    /// SGLang Hierarchical Cache (`--enable-hierarchical-cache`).
+    /// SGLang-only. Stacks on top of RadixAttention.
+    Hicache,
+    /// NVIDIA Dynamo KVBM (`DynamoConnector` from
+    /// `kvbm.vllm_integration.connector`). Requires the `kvbm` Python
+    /// package on the engine host.
+    Kvbm,
+}
+
+impl KvOffload {
+    /// Lower-case canonical name (matches the TOML serialization).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Nixl => "nixl",
+            Self::Lmcache => "lmcache",
+            Self::Hicache => "hicache",
+            Self::Kvbm => "kvbm",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

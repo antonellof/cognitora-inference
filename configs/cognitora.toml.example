@@ -79,6 +79,15 @@ heartbeat        = "5s"
 kind = "vllm"
 url  = "http://127.0.0.1:8000"
 
+# Engine-side KV offload backend. One of:
+#   "none"     — no engine-side connector (default)
+#   "nixl"     — NIXL only, for prefill->decode handoff
+#   "lmcache"  — LMCache (vLLM only); auto-stacks with NIXL in disagg
+#   "hicache"  — SGLang Hierarchical Cache (sglang only)
+#   "kvbm"     — NVIDIA Dynamo KVBM (vLLM only)
+# See docs/architecture/kv-strategy.md for the compatibility matrix.
+kv_offload = "none"
+
 [engine.vllm]
 binary     = "vllm"
 extra_args = ["--enable-chunked-prefill"]

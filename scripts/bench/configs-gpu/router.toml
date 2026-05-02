@@ -10,7 +10,7 @@ require_mtls = false
 enabled = false
 
 [router]
-listen_http  = "127.0.0.1:8080"
+listen_http  = "127.0.0.1:8090"
 listen_grpc  = "127.0.0.1:7070"
 listen_admin = "127.0.0.1:9091"
 

@@ -1,0 +1,44 @@
+# cgn-agent for llama3-8b · sglang · aggregated · HiCache offload.
+
+[cluster]
+name           = "cognitora-llama3-8b-sglang-hicache"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7080"
+role     = "both"
+node_id  = "agent-llama3-8b-sglang-hicache"
+kv_uds   = "/tmp/cognitora-kv.sock"
+
+[engine]
+kind       = "sglang"
+url        = "http://127.0.0.1:30000"
+# `hicache` makes cgn-agent inject:
+#   --enable-hierarchical-cache --hicache-ratio 2
+#   --hicache-write-policy write_through
+#   --hicache-storage-backend nixl
+# into the `python -m sglang.launch_server` argv. Layer above
+# RadixAttention; the two compose.
+kv_offload = "hicache"
+
+[engine.sglang]
+binary              = "python"
+host                = "127.0.0.1"
+port                = 30000
+context_length      = 8192
+mem_fraction_static = 0.85
+extra_args = [
+  "--enable-radix-cache",
+  "--disable-cuda-graph-padding",
+]
+
+[models."meta-llama/Meta-Llama-3.1-8B-Instruct"]
+tp            = 1
+max_model_len = 8192

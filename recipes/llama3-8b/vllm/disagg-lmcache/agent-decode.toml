@@ -1,0 +1,43 @@
+# cgn-agent (decode) for llama3-8b · vllm · disagg + LMCache offload.
+# Pinned to GPU 1. Decode does not run LMCache — it just consumes KV
+# from the prefill worker over NIXL.
+
+[cluster]
+name           = "cognitora-llama3-8b-disagg-lmcache"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen    = "127.0.0.1:7081"
+role      = "decode"
+node_id   = "agent-llama3-8b-decode-lmcache"
+kv_uds    = "/tmp/cognitora-kv.sock"
+gpu_index = 1
+
+[engine]
+kind       = "vllm"
+url        = "http://127.0.0.1:8002"
+# `lmcache` + role = "decode" makes cgn-agent inject NixlConnector only:
+#   --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'
+# (decode is the consumer; LMCache lives on the prefill side).
+kv_offload = "lmcache"
+
+[engine.vllm]
+binary     = "vllm"
+extra_args = [
+  "--enable-chunked-prefill",
+  "--block-size", "16",
+  "--gpu-memory-utilization", "0.85",
+  "--port", "8002",
+  "--host", "127.0.0.1",
+]
+
+[models."meta-llama/Meta-Llama-3.1-8B-Instruct"]
+tp            = 1
+max_model_len = 8192

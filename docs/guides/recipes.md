@@ -21,6 +21,18 @@ bash recipes/llama3-8b/vllm/disagg-single-node/up.sh
 # Same model on SGLang with RadixAttention prefix caching:
 bash recipes/llama3-8b/sglang/agg/up.sh
 
+# Same model with LMCache "prefill-once-reuse-everywhere" KV offload:
+bash recipes/llama3-8b/vllm/agg-lmcache/up.sh
+
+# Same model on SGLang with HiCache hierarchical KV (GPU + host):
+bash recipes/llama3-8b/sglang/agg-hicache/up.sh
+
+# Disagg + LMCache (highest TTFT improvement, 2 GPUs):
+bash recipes/llama3-8b/vllm/disagg-lmcache/up.sh
+
+# Head-to-head benchmark vs Dynamo (KVBM offload):
+bash recipes/llama3-8b/vllm/agg-kvbm/up.sh
+
 # CPU-only laptop / dev loop with llama.cpp:
 LLAMA_GGUF=~/models/Meta-Llama-3.1-8B-Instruct.Q4_K_M.gguf \
   bash recipes/llama3-8b/llama-cpp/cpu/up.sh
@@ -92,7 +104,7 @@ deployments and `agent-<model>.toml` for aggregated ones.
 | `DynamoGraphDeployment` CRD                | flat TOML profile (no CRD)             |
 | Frontend service                           | `cgn-router` (one binary, no Python)   |
 | `VllmPrefillWorker` / `VllmDecodeWorker`   | `agent-prefill.toml` / `agent-decode.toml` |
-| `kv-transfer-config` on the worker         | passed through `[engine.vllm].extra_args` |
+| `kv-transfer-config` on the worker         | auto-rendered from `[engine].kv_offload` × `[agent].role` (or override via `[engine.vllm].extra_args`) |
 | RadixTree KV router                        | `cgn-router` longest-prefix routing on sequence-chained BLAKE3 digests |
 
 ## Authoring a new recipe

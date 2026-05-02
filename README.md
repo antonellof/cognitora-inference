@@ -37,9 +37,10 @@ Every Cognitora binary is **a single statically-linked Rust executable** — no 
 
 | Capability                     | Cognitora            | Single engine | NVIDIA Dynamo | KServe |
 | ------------------------------ | -------------------- | ------------- | ------------- | ------ |
-| KV-aware prefix routing        | yes (BLAKE3 trie)    | local only    | yes           | basic  |
-| Prefill/decode disaggregate    | yes (QUIC handoff)   | no            | yes           | no     |
-| GPU/RAM/SSD KV tiering         | yes (RocksDB index)  | host only     | partial       | no     |
+| KV-aware prefix routing        | yes (BLAKE3 trie, sequence-chained digests) | local only | yes (chunk overlap) | basic |
+| Prefill/decode disaggregate    | yes (NIXL handoff)   | no            | yes           | no     |
+| KV offload backends            | LMCache · HiCache · KVBM · NIXL · cgn-kvcached (one TOML knob) | host only | KVBM (built-in) + LMCache + FlexKV | no |
+| GPU/RAM/SSD KV tiering         | yes (RocksDB index)  | host only     | yes (G1-G4)   | no     |
 | Multi-model cascade (SLM→LLM)  | yes (logprob gating) | no            | partial       | no     |
 | Engine-agnostic agent          | yes (vLLM, SGLang, llama.cpp, OpenAI-compat) | engine-locked | engine-locked | yes    |
 | Energy-aware SLOs              | yes (Redfish + IPMI) | no            | no            | no     |
@@ -97,12 +98,23 @@ bash recipes/llama3-8b/vllm/disagg-single-node/up.sh
 # Same model on SGLang (RadixAttention prefix cache):
 bash recipes/llama3-8b/sglang/agg/up.sh
 
+# Same model with LMCache "prefill-once-reuse-everywhere" KV offload:
+bash recipes/llama3-8b/vllm/agg-lmcache/up.sh
+
+# Same model on SGLang with HiCache hierarchical KV:
+bash recipes/llama3-8b/sglang/agg-hicache/up.sh
+
 # Llama-3.3 70B FP8 on 4×H100, TP=4:
 HF_TOKEN=… bash recipes/llama3-70b/vllm/agg/up.sh
 
 # Equivalent invocation via the admin CLI:
 cgn-ctl recipe up llama3-8b/vllm/agg
 ```
+
+The KV offload backend is a single TOML knob (`engine.kv_offload`)
+that auto-renders the right `--kv-transfer-config` JSON or HiCache
+flags. See [docs/architecture/kv-strategy.md](docs/architecture/kv-strategy.md)
+for the full LMCache / HiCache / KVBM matrix.
 
 Recipes mirror the layout NVIDIA Dynamo uses for its own production
 deployments (`<model>/<engine>/<topology>/`) but adapt to Cognitora's
@@ -242,7 +254,7 @@ cognitora/
 **Architecture**
 
 - [Top-level architecture](docs/ARCHITECTURE.md) · [Repo layout](docs/architecture/repo-layout.md)
-- Deep dives: [Routing](docs/architecture/routing.md) · [KV tiering](docs/architecture/kv-tiering.md) · [Protocols](docs/architecture/protocols.md)
+- Deep dives: [Routing](docs/architecture/routing.md) · [KV tiering](docs/architecture/kv-tiering.md) · [KV strategy (LMCache, HiCache, KVBM, NIXL)](docs/architecture/kv-strategy.md) · [Protocols](docs/architecture/protocols.md)
 - [Security model](docs/architecture/security.md)
 
 **API**

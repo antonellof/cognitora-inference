@@ -75,7 +75,8 @@ impl Supervisor {
         };
 
         let legacy = self.cfg.agent.vllm_cmd.as_deref();
-        let argv = render_argv(&self.engine_cfg, &spec, legacy)?;
+        let role = self.cfg.agent.role;
+        let argv = render_argv(&self.engine_cfg, &spec, role, legacy)?;
         info!(argv = ?argv, kind = %self.engine.name(), "spawning engine");
 
         let mut cmd = Command::new(&argv[0]);

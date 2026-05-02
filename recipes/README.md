@@ -51,13 +51,22 @@ bash scripts/run/down.sh recipes/llama3-8b/vllm/agg
 | Model                      | Engine     | Topology                    | GPUs  | Notes                          |
 | -------------------------- | ---------- | --------------------------- | ----- | ------------------------------ |
 | Llama-3.1 8B               | vLLM       | [`agg`](llama3-8b/vllm/agg)                         | 1     | TP=1, baseline aggregated      |
+| Llama-3.1 8B               | vLLM       | [`agg-lmcache`](llama3-8b/vllm/agg-lmcache)         | 1     | LMCache KV offload (`kv_offload = "lmcache"`) |
+| Llama-3.1 8B               | vLLM       | [`agg-kvbm`](llama3-8b/vllm/agg-kvbm)               | 1     | NVIDIA KVBM offload (`kv_offload = "kvbm"`); benchmark parity vs Dynamo |
 | Llama-3.1 8B               | vLLM       | [`disagg-single-node`](llama3-8b/vllm/disagg-single-node) | 2 | Prefill/decode split, NIXL handoff |
+| Llama-3.1 8B               | vLLM       | [`disagg-lmcache`](llama3-8b/vllm/disagg-lmcache)   | 2     | Prefill+LMCache+NIXL multi-connector |
 | Llama-3.1 8B               | SGLang     | [`agg`](llama3-8b/sglang/agg)                       | 1     | RadixAttention prefix cache    |
+| Llama-3.1 8B               | SGLang     | [`agg-hicache`](llama3-8b/sglang/agg-hicache)       | 1     | HiCache hierarchical KV (`kv_offload = "hicache"`) |
 | Llama-3.1 8B               | llama.cpp  | [`cpu`](llama3-8b/llama-cpp/cpu)                    | 0     | CPU-only via GGUF              |
 | Llama-3.3 70B              | vLLM       | [`agg`](llama3-70b/vllm/agg)                        | 4     | TP=4, FP8                      |
 | Llama-3.3 70B              | vLLM       | [`disagg-single-node`](llama3-70b/vllm/disagg-single-node) | 8 | TP=4 prefill + TP=4 decode     |
 | Qwen-3 7B                  | vLLM       | [`agg`](qwen3-7b/vllm/agg)                          | 1     | TP=1, baseline                 |
 | Qwen-3 7B                  | SGLang     | [`agg`](qwen3-7b/sglang/agg)                        | 1     | RadixAttention prefix cache    |
+
+The `agg-*` and `disagg-*` variants for Llama-3.1 8B walk through every
+KV-offload backend Cognitora supports (`none` / `lmcache` / `hicache` /
+`kvbm`). Pick one based on the matrix in
+[`docs/architecture/kv-strategy.md`](../docs/architecture/kv-strategy.md).
 
 > **What does "engine" mean?** Cognitora is engine-agnostic: the agent
 > drives a child process that speaks the OpenAI HTTP surface

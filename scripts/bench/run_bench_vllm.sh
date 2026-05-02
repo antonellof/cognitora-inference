@@ -34,24 +34,24 @@ run() {
 # A — short-prompt overhead, sequential, both model sizes
 ############################################
 run "A-vllm-direct-small"       "http://127.0.0.1:8101/v1/chat/completions" "qwen-05b-vllm"
-run "A-cog-vllm-small"          "http://127.0.0.1:8080/v1/chat/completions" "cog-qwen-05b-vllm"
+run "A-cog-vllm-small"          "http://127.0.0.1:8090/v1/chat/completions" "cog-qwen-05b-vllm"
 run "A-vllm-direct-mid"         "http://127.0.0.1:8102/v1/chat/completions" "deepseek-8b-vllm"
-run "A-cog-vllm-mid"            "http://127.0.0.1:8080/v1/chat/completions" "cog-deepseek-8b-vllm"
+run "A-cog-vllm-mid"            "http://127.0.0.1:8090/v1/chat/completions" "cog-deepseek-8b-vllm"
 
 ############################################
 # B — streaming TTFT (proper first-content-token measurement)
 ############################################
 run "B-vllm-direct-small-stream" "http://127.0.0.1:8101/v1/chat/completions" "qwen-05b-vllm"        --stream
-run "B-cog-vllm-small-stream"    "http://127.0.0.1:8080/v1/chat/completions" "cog-qwen-05b-vllm"    --stream
+run "B-cog-vllm-small-stream"    "http://127.0.0.1:8090/v1/chat/completions" "cog-qwen-05b-vllm"    --stream
 run "B-vllm-direct-mid-stream"   "http://127.0.0.1:8102/v1/chat/completions" "deepseek-8b-vllm"     --stream
-run "B-cog-vllm-mid-stream"      "http://127.0.0.1:8080/v1/chat/completions" "cog-deepseek-8b-vllm" --stream
+run "B-cog-vllm-mid-stream"      "http://127.0.0.1:8090/v1/chat/completions" "cog-deepseek-8b-vllm" --stream
 
 ############################################
 # C — input-token sweep with shared-prefix (engine prefix-cache effect)
 ############################################
 for size in 1024 4096 ; do
   run "C-vllm-mid-${size}"     "http://127.0.0.1:8102/v1/chat/completions" "deepseek-8b-vllm"     --prompt-tokens "$size" --shared-prefix
-  run "C-cog-vllm-mid-${size}" "http://127.0.0.1:8080/v1/chat/completions" "cog-deepseek-8b-vllm" --prompt-tokens "$size" --shared-prefix
+  run "C-cog-vllm-mid-${size}" "http://127.0.0.1:8090/v1/chat/completions" "cog-deepseek-8b-vllm" --prompt-tokens "$size" --shared-prefix
 done
 
 ############################################
@@ -67,7 +67,7 @@ run "D-vllm-small-cacheOFF-4096"  "http://127.0.0.1:8103/v1/chat/completions" "q
 ############################################
 for c in 4 16 32 ; do
   run "E-vllm-mid-c${c}"     "http://127.0.0.1:8102/v1/chat/completions" "deepseek-8b-vllm"     --concurrency "$c"
-  run "E-cog-vllm-mid-c${c}" "http://127.0.0.1:8080/v1/chat/completions" "cog-deepseek-8b-vllm" --concurrency "$c"
+  run "E-cog-vllm-mid-c${c}" "http://127.0.0.1:8090/v1/chat/completions" "cog-deepseek-8b-vllm" --concurrency "$c"
 done
 
 ############################################
@@ -76,7 +76,7 @@ done
 # and will be invoked by the orchestration script that hot-swaps policies.
 ############################################
 if [ "${POLICY_TAG:-}" != "" ] ; then
-  run "F-cog-pair-${POLICY_TAG}-1024" "http://127.0.0.1:8080/v1/chat/completions" "cog-qwen-05b-pair" --prompt-tokens 1024 --shared-prefix
+  run "F-cog-pair-${POLICY_TAG}-1024" "http://127.0.0.1:8090/v1/chat/completions" "cog-qwen-05b-pair" --prompt-tokens 1024 --shared-prefix
 fi
 
 echo "results -> $OUT"

@@ -30,6 +30,7 @@ OpenAI HTTP surface (`/v1/completions`, `/health`, `/v1/models`) plugs in.
 |-------------------------|--------|----------------------------------|-------|
 | `engine.kind`           | enum   | `"vllm"`                         | One of `vllm`, `sglang`, `llama_cpp`, `openai_compat`. |
 | `engine.url`            | string | `http://127.0.0.1:8000`          | OpenAI HTTP base URL. |
+| `engine.kv_offload`     | enum   | `"none"`                         | Engine-side KV offload backend. One of `none`, `nixl`, `lmcache`, `hicache`, `kvbm`. See [Engine-side KV offload](#engine-side-kv-offload) below. |
 | `engine.vllm.binary`    | string | `"vllm"`                         | Path or PATH-name of the `vllm` CLI. |
 | `engine.vllm.extra_args`| array  | `["--enable-chunked-prefill"]`   | Appended after the auto-rendered argv. |
 | `engine.sglang.binary`             | string | `"python"`                | Python interpreter that runs `-m sglang.launch_server`. |
@@ -67,6 +68,29 @@ are fully interchangeable from the router's perspective:
 * **`llama_cpp`** — CPU-friendly fallback (and CUDA-offload via
   `n_gpu_layers`); useful for laptops, CI, and edge deployments.
 * **`openai_compat`** — proxy-only.
+
+### Engine-side KV offload
+
+`engine.kv_offload` selects which connector `cgn-agent` injects when
+spawning the engine. The router is unaware of this dial — it only sees
+prefix-overlap signals via `cgn-kvcached` either way — so swapping
+backends is a one-line change.
+
+| Value     | Effect (vLLM)                                                                                       | Effect (SGLang)                                                                          |
+|-----------|------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------|
+| `none`    | nothing injected                                                                                     | nothing injected                                                                          |
+| `nixl`    | `--kv-transfer-config '{"kv_connector":"NixlConnector",...}'` with role-aware `kv_role`              | (rejected — SGLang HiCache uses NIXL internally; pick `hicache` instead)                  |
+| `lmcache` | `LMCacheConnectorV1` (agg) or `PdConnector(LMCache+NIXL)` (disagg, prefill role)                     | (rejected — LMCache is vLLM-side)                                                         |
+| `hicache` | (rejected — vLLM has no HiCache)                                                                     | `--enable-hierarchical-cache --hicache-ratio 2 --hicache-write-policy write_through --hicache-storage-backend nixl` |
+| `kvbm`    | `--kv-transfer-config '{"kv_connector":"DynamoConnector","kv_connector_module_path":"kvbm.vllm_integration.connector",...}'` | (rejected — KVBM has no SGLang support)                                                   |
+
+Disagg topologies (`[agent].role = "prefill"` or `"decode"`) compose
+the chosen backend with NIXL automatically. The full table — including
+the exact JSON blobs — lives in [`docs/architecture/kv-strategy.md`](../architecture/kv-strategy.md).
+
+LMCache, HiCache, and KVBM all require the corresponding Python
+package to be installed in the engine's virtualenv. `cgn-agent` does
+not install them; the recipe's `up.sh` warns when they're missing.
 
 ### Per-model knobs
 

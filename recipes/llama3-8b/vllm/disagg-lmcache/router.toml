@@ -1,0 +1,41 @@
+# cgn-router for llama3-8b · vllm · disagg + LMCache.
+
+[cluster]
+name           = "cognitora-llama3-8b-disagg-lmcache"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[router]
+listen_http  = "0.0.0.0:8080"
+listen_grpc  = "0.0.0.0:9090"
+listen_admin = "127.0.0.1:9091"
+node_id      = "router-llama3-8b-disagg-lmcache"
+
+# Disagg + LMCache: KV overlap is the dominant signal for prefill
+# routing (LMCache turns repeat prefixes into near-zero compute) and
+# load matters for decode. Power floats.
+[router.score_weights]
+kv       = 0.60
+load     = 0.25
+power    = 0.05
+capacity = 0.10
+
+[router.admission]
+max_queue                  = 4096
+ttft_slo                   = "800ms"
+max_concurrent_per_replica = 32
+
+[router.disagg]
+enabled               = true
+colocate_below_tokens = 256
+
+[models."meta-llama/Meta-Llama-3.1-8B-Instruct"]
+tp               = 1
+prefill_replicas = 1
+decode_replicas  = 1
