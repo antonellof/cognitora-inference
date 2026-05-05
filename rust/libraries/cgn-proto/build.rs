@@ -1,17 +1,14 @@
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Walk up to the workspace root (rust/libraries/cgn-proto -> rust/libraries
-    // -> rust -> workspace).
+    // The .proto files live at $CARGO_MANIFEST_DIR/proto. In the workspace
+    // checkout these are symlinks pointing to the canonical workspace-root
+    // `proto/` tree (which `buf` lints and which is the single source of
+    // truth). When `cargo publish` packages this crate, cargo follows the
+    // symlinks and copies the actual file content into the .crate archive,
+    // so consumers downloading from crates.io get a self-contained crate.
     let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let workspace = crate_dir
-        .parent()
-        .unwrap() // rust/libraries
-        .parent()
-        .unwrap() // rust
-        .parent()
-        .unwrap(); // workspace root
-    let proto_dir = workspace.join("proto");
+    let proto_dir = crate_dir.join("proto");
 
     let files = [
         "cognitora/v1/common.proto",
