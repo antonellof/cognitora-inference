@@ -507,7 +507,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "cgn-agent"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -539,7 +539,7 @@ dependencies = [
 
 [[package]]
 name = "cgn-auth"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -568,7 +568,7 @@ dependencies = [
 
 [[package]]
 name = "cgn-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -594,7 +594,7 @@ dependencies = [
 
 [[package]]
 name = "cgn-ctl"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "cgn-core",
@@ -625,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "cgn-helm"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "cgn-core",
@@ -641,7 +641,7 @@ dependencies = [
 
 [[package]]
 name = "cgn-k8s"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -661,7 +661,7 @@ dependencies = [
 
 [[package]]
 name = "cgn-kv"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -686,7 +686,7 @@ dependencies = [
 
 [[package]]
 name = "cgn-kvcached"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -720,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "cgn-metrics"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -744,7 +744,7 @@ dependencies = [
 
 [[package]]
 name = "cgn-operator"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -778,7 +778,7 @@ dependencies = [
 
 [[package]]
 name = "cgn-power"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -799,7 +799,7 @@ dependencies = [
 
 [[package]]
 name = "cgn-proto"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "prost",
  "prost-types",
@@ -809,7 +809,7 @@ dependencies = [
 
 [[package]]
 name = "cgn-ratelimit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -829,7 +829,7 @@ dependencies = [
 
 [[package]]
 name = "cgn-router"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -877,7 +877,7 @@ dependencies = [
 
 [[package]]
 name = "cgn-telemetry"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -896,7 +896,7 @@ dependencies = [
 
 [[package]]
 name = "cgn-tls"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "cgn-core",
