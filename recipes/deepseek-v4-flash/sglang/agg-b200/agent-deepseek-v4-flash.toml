@@ -1,0 +1,61 @@
+# cgn-agent for deepseek-v4-flash · sglang · aggregated · 4× B200.
+#
+# TP=4 + MXFP4 MoE via FlashInfer + EAGLE MTP 3/4. Mirrors NVIDIA
+# Dynamo's `sglang-agg` recipe. The DeepSeek-V4-specific argv is passed
+# through `[engine.sglang].extra_args` because it's still upstream-only
+# and not part of cgn-agent's first-class flag set.
+
+[cluster]
+name           = "cognitora-dsv4-flash-sglang-agg-b200"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7080"
+role     = "both"            # aggregated: same worker does prefill + decode
+node_id  = "agent-dsv4-flash-sglang-agg-b200"
+kv_uds   = "/tmp/cognitora-kv.sock"
+
+[engine]
+kind = "sglang"
+url  = "http://127.0.0.1:30000"
+
+[engine.sglang]
+binary              = "python"
+host                = "127.0.0.1"
+port                = 30000
+context_length      = 32768
+mem_fraction_static = 0.85
+extra_args = [
+  # Custom modeling code (DeepSeek-V4 architecture).
+  "--trust-remote-code",
+  # MXFP4 MoE kernel via FlashInfer for the V4 expert weights.
+  "--moe-runner-backend", "flashinfer_mxfp4",
+  # EAGLE MTP speculative decoding: 3 draft steps, top-1 over the
+  # EAGLE head, 4 draft tokens per step.
+  "--speculative-algo", "EAGLE",
+  "--speculative-num-steps", "3",
+  "--speculative-eagle-topk", "1",
+  "--speculative-num-draft-tokens", "4",
+  # Chunk long prompts at 4 k tokens for steady-state decode interleaving.
+  "--chunked-prefill-size", "4096",
+  # Skip per-shape FlashInfer autotune at startup; the dsv4 base ships
+  # pre-tuned defaults.
+  "--disable-flashinfer-autotune",
+  # SGLang's RadixAttention prefix cache (engine-side; stacks under the
+  # router's KV-aware scoring).
+  "--enable-radix-cache",
+  # DeepSeek-V4 reasoning + tool-call parsers.
+  "--reasoning-parser", "deepseek_v4",
+  "--tool-call-parser", "deepseek_v4",
+]
+
+[models."deepseek-ai/DeepSeek-V4-Flash"]
+tp            = 4
+max_model_len = 32768

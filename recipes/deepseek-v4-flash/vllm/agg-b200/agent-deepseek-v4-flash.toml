@@ -1,0 +1,61 @@
+# cgn-agent for deepseek-v4-flash · vllm · aggregated · 4× B200.
+#
+# DP=4 + Expert Parallel, TP=1. Mirrors NVIDIA Dynamo's
+# `vllm-agg-b200` recipe. The DeepSeek-V4-specific argv is passed
+# through `[engine.vllm].extra_args` because it's still upstream-only
+# and not part of cgn-agent's first-class flag set.
+
+[cluster]
+name           = "cognitora-dsv4-flash-vllm-agg-b200"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7080"
+role     = "both"            # aggregated: same worker does prefill + decode
+node_id  = "agent-dsv4-flash-vllm-agg-b200"
+kv_uds   = "/tmp/cognitora-kv.sock"
+
+[engine]
+kind = "vllm"
+url  = "http://127.0.0.1:8001"
+
+[engine.vllm]
+binary     = "vllm"
+extra_args = [
+  # Custom modeling code (DeepSeek-V4 architecture).
+  "--trust-remote-code",
+  # FP8 KV cache + 256 block size — matches the upstream V4 recipe.
+  "--kv-cache-dtype", "fp8",
+  "--block-size", "256",
+  # DP=4 + EP across the 4 B200s. cgn-agent injects --tensor-parallel-size
+  # from spec.tp (1 here).
+  "--data-parallel-size", "4",
+  "--enable-expert-parallel",
+  # DeepSeek-V4 tokenizer + reasoning + tool-call parsers.
+  "--tokenizer-mode", "deepseek_v4",
+  "--reasoning-parser", "deepseek_v4",
+  "--tool-call-parser", "deepseek_v4",
+  "--enable-auto-tool-choice",
+  # Blackwell FP4 indexer cache for CSA + HCA attention.
+  "--attention-config", "{\"use_fp4_indexer_cache\":true}",
+  # Full + piecewise CUDA graphs with all custom ops enabled. Single-node
+  # DEP compilation config from the upstream recipe.
+  "--compilation-config", "{\"cudagraph_mode\":\"FULL_AND_PIECEWISE\",\"custom_ops\":[\"all\"]}",
+  # Concurrency cap and HBM budget.
+  "--max-num-seqs", "256",
+  "--gpu-memory-utilization", "0.90",
+  # OpenAI-compat HTTP surface — what cgn-agent talks to.
+  "--host", "127.0.0.1",
+  "--port", "8001",
+]
+
+[models."deepseek-ai/DeepSeek-V4-Flash"]
+tp            = 1
+max_model_len = 32768

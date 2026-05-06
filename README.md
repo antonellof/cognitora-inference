@@ -272,7 +272,8 @@ cognitora/
   configs/                    cognitora.toml.example
   recipes/                    one-line bring-up profiles per model × engine × topology
                               (llama3-8b/{vllm,sglang,llama-cpp}, llama3-70b/vllm,
-                              qwen3-7b/{vllm,sglang}; mirrors Dynamo's recipes/ layout)
+                              qwen3-7b/{vllm,sglang}, deepseek-v4-flash/{vllm,sglang};
+                              mirrors Dynamo's recipes/ layout)
   SECURITY/                   cosign.pub for release verification
   tests/e2e/                  single_node.sh, multi_node_kv.sh
   scripts/                    e2e-gpu.sh + dev/, bench/, release/

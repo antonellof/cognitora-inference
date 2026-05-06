@@ -1,0 +1,25 @@
+# cgn-kvcached for deepseek-v4-flash · vllm · aggregated · 4× B200.
+#
+# Sized for a 284B-total / 13B-active MoE on 4× B200. The engine owns
+# the GPU KV tier (FP8, block=256). cgn-kvcached holds the warm RAM tier
+# and the cold SSD tier above it, and serves QUIC peer-fetch from
+# sibling nodes if you ever scale out.
+
+[cluster]
+name           = "cognitora-dsv4-flash-vllm-agg-b200"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[kv]
+listen            = "127.0.0.1:7090"
+uds               = "/tmp/cognitora-kv.sock"
+ram_gib           = 256
+ssd_dir           = "/var/lib/cognitora/kv-ssd"
+ssd_gib           = 1024
+index_dir         = "/var/lib/cognitora/kv-index"
+transport         = "quic"
+quic_listen       = "0.0.0.0:7091"
+block_size_tokens = 256

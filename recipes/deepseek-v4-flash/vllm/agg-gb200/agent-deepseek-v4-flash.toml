@@ -1,0 +1,62 @@
+# cgn-agent for deepseek-v4-flash · vllm · aggregated · 4× GB200 (NVL4).
+#
+# TP=4 + Expert Parallel + DeepGEMM mega MoE. Mirrors NVIDIA Dynamo's
+# `vllm-agg-gb200` recipe. Runs on the 4 GB200 GPUs of one NVL4 tray
+# (arm64) — the intra-tray NVLink makes TP attractive over DP at this
+# size class.
+
+[cluster]
+name           = "cognitora-dsv4-flash-vllm-agg-gb200"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7080"
+role     = "both"            # aggregated: same worker does prefill + decode
+node_id  = "agent-dsv4-flash-vllm-agg-gb200"
+kv_uds   = "/tmp/cognitora-kv.sock"
+
+[engine]
+kind = "vllm"
+url  = "http://127.0.0.1:8001"
+
+[engine.vllm]
+binary     = "vllm"
+extra_args = [
+  # Custom modeling code (DeepSeek-V4 architecture).
+  "--trust-remote-code",
+  # FP8 KV cache + 256 block size — matches the upstream V4 recipe.
+  "--kv-cache-dtype", "fp8",
+  "--block-size", "256",
+  # TP=4 + EP across the NVL4 tray. cgn-agent injects --tensor-parallel-size
+  # from spec.tp (4 here); --enable-expert-parallel goes via extra_args.
+  "--enable-expert-parallel",
+  # DeepGEMM "mega MoE" kernel — the optimized FP8 MoE path for V4
+  # expert routing on Blackwell.
+  "--moe-backend", "deep_gemm_mega_moe",
+  # DeepSeek-V4 tokenizer + reasoning + tool-call parsers.
+  "--tokenizer-mode", "deepseek_v4",
+  "--reasoning-parser", "deepseek_v4",
+  "--tool-call-parser", "deepseek_v4",
+  "--enable-auto-tool-choice",
+  # Blackwell FP4 indexer cache for CSA + HCA attention.
+  "--attention-config", "{\"use_fp4_indexer_cache\":true}",
+  # Full + piecewise CUDA graphs with all custom ops enabled.
+  "--compilation-config", "{\"cudagraph_mode\":\"FULL_AND_PIECEWISE\",\"custom_ops\":[\"all\"]}",
+  # Concurrency cap and HBM budget.
+  "--max-num-seqs", "256",
+  "--gpu-memory-utilization", "0.90",
+  # OpenAI-compat HTTP surface — what cgn-agent talks to.
+  "--host", "127.0.0.1",
+  "--port", "8001",
+]
+
+[models."deepseek-ai/DeepSeek-V4-Flash"]
+tp            = 4
+max_model_len = 32768

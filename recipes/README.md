@@ -62,6 +62,10 @@ bash scripts/run/down.sh recipes/llama3-8b/vllm/agg
 | Llama-3.3 70B              | vLLM       | [`disagg-single-node`](llama3-70b/vllm/disagg-single-node) | 8 | TP=4 prefill + TP=4 decode     |
 | Qwen-3 7B                  | vLLM       | [`agg`](qwen3-7b/vllm/agg)                          | 1     | TP=1, baseline                 |
 | Qwen-3 7B                  | SGLang     | [`agg`](qwen3-7b/sglang/agg)                        | 1     | RadixAttention prefix cache    |
+| DeepSeek-V4-Flash          | vLLM       | [`vllm/agg-b200`](deepseek-v4-flash/vllm/agg-b200)         | 4     | DP=4 + EP, FP4/FP8 MoE, B200    |
+| DeepSeek-V4-Flash          | vLLM       | [`vllm/agg-gb200`](deepseek-v4-flash/vllm/agg-gb200)       | 4     | TP=4 + EP, DeepGEMM mega MoE, GB200 NVL4 |
+| DeepSeek-V4-Flash          | SGLang     | [`sglang/agg-b200`](deepseek-v4-flash/sglang/agg-b200)     | 4     | TP=4, MXFP4 MoE, EAGLE MTP 3/4, B200 |
+| DeepSeek-V4-Flash          | SGLang     | [`sglang/agg-gb200`](deepseek-v4-flash/sglang/agg-gb200)   | 4     | TP=4, MXFP4 MoE, EAGLE MTP 3/4, GB200 NVL4 |
 
 The `agg-*` and `disagg-*` variants for Llama-3.1 8B walk through every
 KV-offload backend Cognitora supports (`none` / `lmcache` / `hicache` /

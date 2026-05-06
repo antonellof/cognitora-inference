@@ -1,0 +1,20 @@
+# cgn-kvcached for deepseek-v4-flash · vllm · aggregated · 4× GB200 (NVL4).
+
+[cluster]
+name           = "cognitora-dsv4-flash-vllm-agg-gb200"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[kv]
+listen            = "127.0.0.1:7090"
+uds               = "/tmp/cognitora-kv.sock"
+ram_gib           = 256
+ssd_dir           = "/var/lib/cognitora/kv-ssd"
+ssd_gib           = 1024
+index_dir         = "/var/lib/cognitora/kv-index"
+transport         = "quic"
+quic_listen       = "0.0.0.0:7091"
+block_size_tokens = 256
