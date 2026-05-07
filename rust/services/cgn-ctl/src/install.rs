@@ -51,7 +51,7 @@ pub struct Args {
     pub tp: u32,
 
     /// Override the GHCR image tag used for router + agent.
-    #[arg(long, default_value = "ghcr.io/antonellof/cognitora:v0.2.1")]
+    #[arg(long, default_value = "ghcr.io/antonellof/cognitora:v0.3.0")]
     pub image: String,
 
     /// Output directory for `cognitora.toml` and `compose.yaml`.

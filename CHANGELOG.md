@@ -10,6 +10,20 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-07
+
+The "make every plan.md claim runnable end-to-end" release. Five of the
+0.3 milestone items shipped over PRs #1, #3, #4, #5, #6: real `cgn-ctl`
+control plane, real `/v1/embeddings`, real `cgn-metrics` federation
+scraper, single-node installer renderer, soft perf gate in CI, and a
+working Kubernetes quickstart. Two follow-up items (Helm chart redesign
+and fleshed-out terraform modules) move forward into the 0.3.x patch
+window. Versioning bumped from 0.2.1 to 0.3.0 because the public surface
+expanded materially (new `/v1/embeddings`, new `/federate`, new
+`cgn-ctl install --apply`) and one bug fix (chat completions returning
+empty content) is significant enough that pre-0.3 builds should be
+treated as broken for chat-template models.
+
 ### Fixed
 - **`/v1/chat/completions` now returns the model's actual answer
   instead of an empty string.** The agent was sending requests to

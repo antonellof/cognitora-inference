@@ -98,10 +98,11 @@ PR is in flight. The detailed deltas vs NVIDIA Dynamo live in
 the engine-side KV strategy lives in
 [`docs/architecture/kv-strategy.md`](docs/architecture/kv-strategy.md).
 
-### 0.3 — close the credibility gaps
+### 0.3 — close the credibility gaps · shipped in 0.3.0
 
 Targeted at making every `plan.md` capability claim runnable end to
-end on bare metal.
+end on bare metal. Five of seven items landed in 0.3.0; the remaining
+two carry forward into the 0.3.x patch window below.
 
 * ✓ **`cgn-ctl` is a real client, not a logger.** Shipped in 0.2.1.
   `cluster nodes / cordon / uncordon / drain` and `model load / unload
@@ -119,30 +120,39 @@ end on bare metal.
   `--apply` it also runs `docker compose up -d`; without, it stays a
   pure-text dry run for review. Engine, image tag, tensor parallelism,
   and HF repo are CLI flags.
-* **Fleshed-out terraform modules.** At least one cloud module
-  (`aws` or `hetzner`) drives a runnable end-to-end install; the
-  others import from it. Today every cloud module ships as a
-  near-empty `main.tf`. (Partial credit: GKE has a verified
-  CPU-only quickstart at
-  `deploy/kubernetes/quickstart/cognitora-cpu.yaml` that runs the
-  full data plane on Autopilot for ~$0.10/hr — see
-  `docs/guides/cloud/gcp.md`. The GPU + terraform path is the work
-  remaining here.)
-* **Helm chart redesign.** Today
-  `deploy/kubernetes/helm/cognitora/` requires `[security].require_mtls
-  = true` with no PKI bootstrap and has no engine sidecar option, so
-  `helm install` alone won't produce a working stack. Goal: optional
-  engine sidecar (vLLM / SGLang / llama.cpp / openai-compat),
-  `require_mtls = false` default for dev, conditional pki secret
-  mount, and an OCI chart push from the release workflow so
-  `helm install cognitora oci://ghcr.io/antonellof/charts/cognitora`
-  matches the README claim.
+* (carry-forward) **Fleshed-out terraform modules** — see "0.3.x"
+  below.
+* (carry-forward) **Helm chart redesign** — see "0.3.x" below.
 * ✓ **Soft perf gate in CI.** A new `bench` workflow runs
   `cargo bench -p cgn-perf --bench prefix --bench routing`, uploads
   the criterion artefacts, and sticks a Markdown table on every PR.
   It's intentionally non-blocking — the noise floor on shared runners
   is too high for hard gating; a hard gate against an S3 baseline
   arrives in 0.4.
+
+### 0.3.x — patch window
+
+Carry-overs from the 0.3 milestone, now scoped as patch-level work
+because they don't change the public OpenAI surface — they just make
+existing claims more honest.
+
+* **Helm chart redesign.** Today
+  `deploy/kubernetes/helm/cognitora/` requires
+  `[security].require_mtls = true` with no PKI bootstrap and has no
+  engine sidecar option, so `helm install` alone won't produce a
+  working stack. Goal: optional engine sidecar (vLLM / SGLang /
+  llama.cpp / openai-compat), `require_mtls = false` default for dev,
+  conditional pki secret mount, and an OCI chart push from the
+  release workflow so
+  `helm install cognitora oci://ghcr.io/antonellof/charts/cognitora`
+  matches the README claim. Until then the working K8s install path
+  is the quickstart manifest at
+  `deploy/kubernetes/quickstart/cognitora-cpu.yaml`.
+* **Fleshed-out terraform modules.** At least one cloud module
+  (`aws` or `hetzner`) drives a runnable end-to-end install; the
+  others import from it. Today every cloud module ships as a
+  near-empty `main.tf`, with a partial-credit GKE quickstart in
+  `deploy/kubernetes/quickstart/`.
 
 ### 0.4 — beat Dynamo on the routing path
 
