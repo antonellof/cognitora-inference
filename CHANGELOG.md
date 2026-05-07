@@ -10,6 +10,31 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+### Added
+- **Real `/v1/embeddings`.** `Agent.Embed` is now defined on the proto,
+  implemented in `cgn-agent` against the engine's `/v1/embeddings`
+  surface, and the router's gateway forwards over gRPC mTLS instead of
+  returning synthetic vectors. The handler reuses the same KV-aware
+  routing (and cordon-aware filtering) as `/v1/chat/completions`. Empty
+  input returns 400; engine 404 (model isn't an embedding model) is
+  surfaced as 503 with a clear message.
+- **Real `cgn-metrics` federation scraper.** New `[metrics].scrape_targets`
+  config field; the scraper fetches every target's `/metrics` body
+  on the configured `scrape_interval`, decorates each metric line with
+  a `cgn_target = "<name>"` label, and exposes the union under
+  `/federate`. Per-target failures increment
+  `cgn_metrics_scrape_errors_total`. Five unit tests cover the text
+  decorator (HELP/TYPE pass-through, label injection, escape handling,
+  blank-line handling, label-less metrics).
+
+### Changed
+- **Proto:** `EmbedRequest` and `EmbedResponse` moved from
+  `router.proto` to `common.proto` so `Agent` and `Router` share the
+  same message shape. `EmbedResponse` now carries an optional `model`
+  field (set on the agent variant; echoed by the router).
+- The router no longer carries the obsolete `embed_via_router_compat`
+  extension trait.
+
 ## [0.2.1] — 2026-05-07
 
 First release where `cgn-ctl cluster` and `cgn-ctl model` are real

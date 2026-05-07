@@ -128,6 +128,18 @@ redfish_url     = ""           # https://bmc.example/redfish/v1
 redfish_user    = ""
 redfish_pass_file = ""
 
+# Federation targets. Every entry is fetched on `scrape_interval`;
+# the union is exposed under `/federate` with a `cgn_target = "<name>"`
+# label injected on every line so an upstream Prometheus can scrape
+# this single endpoint and still see per-component metrics.
+#
+# scrape_targets = [
+#   { name = "router",      url = "http://router.cognitora.local:9091/metrics" },
+#   { name = "agent-1",     url = "http://node-1.cognitora.local:9091/metrics" },
+#   { name = "kvcached-rk0", url = "http://node-1.cognitora.local:9092/metrics" },
+# ]
+scrape_targets = []
+
 # ---- Models declared up front (optional; can also be done at runtime) ------
 
 [models.llama3-8b]

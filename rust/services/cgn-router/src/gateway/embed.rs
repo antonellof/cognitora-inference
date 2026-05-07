@@ -1,7 +1,19 @@
 //! `/v1/embeddings` handler.
 //!
-//! Forwards to the router's gRPC `Embed` RPC and re-shapes the response into
-//! OpenAI's wire format.
+//! Pipeline:
+//!
+//! 1. Pick a target node via the same scoring path as `/v1/chat/completions`
+//!    (KV-aware, role-filtered, cordon-aware).
+//! 2. Connect to the agent over gRPC mTLS via `state.connect_agent`.
+//! 3. Call `Agent.Embed` and reshape the response into OpenAI's wire
+//!    format (`{ object:"list", data:[{embedding:[…]}], model, usage }`).
+//!
+//! Errors are translated as:
+//!   * empty input → 400 invalid_request_error
+//!   * routing error → 503 service_unavailable
+//!   * agent UNAVAILABLE (e.g. engine returned 404 from /v1/embeddings) →
+//!     503 with the engine's message
+//!   * other agent gRPC errors → 502 bad_gateway
 
 use std::sync::Arc;
 
@@ -13,6 +25,7 @@ use axum::{
 };
 use cgn_proto::v1::{EmbedRequest as PEmbedRequest, NodeRole};
 use serde_json::json;
+use tracing::{info, warn};
 
 use crate::routing;
 use crate::state::SharedState;
@@ -25,63 +38,104 @@ pub async fn embeddings(
 ) -> Response {
     let inputs = req.input.into_vec();
     if inputs.is_empty() {
-        return error("input must be a non-empty string or array");
+        return error_with(
+            StatusCode::BAD_REQUEST,
+            "invalid_request_error",
+            "input must be a non-empty string or array",
+        );
     }
 
     let token_ids = approximate_token_ids(&inputs.join(" "));
     let decision = match routing::pick(&state, &req.model, NodeRole::Both, &token_ids).await {
         Ok(d) => d,
-        Err(e) => return error(&format!("routing: {e}")),
+        Err(e) => {
+            return error_with(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "service_unavailable",
+                &format!("routing: {e}"),
+            );
+        }
     };
-    let _ = decision; // address used inside the gRPC client below
+    info!(
+        node = %decision.node.node_id,
+        score = decision.score.total,
+        candidates = decision.n_candidates,
+        "embed decision"
+    );
 
-    // Build the proto request. The Agent service does not yet expose
-    // Embed (the router gRPC surface returns Unimplemented today), so
-    // we synthesise a deterministic vector below and surface a real
-    // response so SDK clients that probe `/v1/embeddings` for capability
-    // detection get a 200. This is replaced with the actual gRPC
-    // round-trip when Agent.Embed lands.
-    let _proto = PEmbedRequest {
+    let mut client = match state.connect_agent(&decision.node.address).await {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(error=?e, node=%decision.node.node_id, "agent connect failed for embed");
+            return error_with(
+                StatusCode::BAD_GATEWAY,
+                "bad_gateway",
+                &format!("agent connect: {e}"),
+            );
+        }
+    };
+
+    let proto = PEmbedRequest {
         model: req.model.clone(),
         inputs: inputs.clone(),
         tenant: req.user.unwrap_or_default(),
     };
 
-    let dim = 1024usize;
-    let mut data = Vec::with_capacity(inputs.len());
-    for (i, text) in inputs.iter().enumerate() {
-        data.push(EmbedItem {
+    let resp = match client.embed(proto).await {
+        Ok(r) => r.into_inner(),
+        Err(s) => {
+            let (code, ty) = match s.code() {
+                tonic::Code::Unavailable => {
+                    (StatusCode::SERVICE_UNAVAILABLE, "service_unavailable")
+                }
+                tonic::Code::InvalidArgument => (StatusCode::BAD_REQUEST, "invalid_request_error"),
+                tonic::Code::Unimplemented => (StatusCode::NOT_IMPLEMENTED, "not_implemented"),
+                _ => (StatusCode::BAD_GATEWAY, "bad_gateway"),
+            };
+            return error_with(code, ty, s.message());
+        }
+    };
+
+    if resp.embeddings.len() != inputs.len() {
+        return error_with(
+            StatusCode::BAD_GATEWAY,
+            "bad_gateway",
+            &format!(
+                "agent returned {} embeddings for {} inputs",
+                resp.embeddings.len(),
+                inputs.len()
+            ),
+        );
+    }
+
+    let data = resp
+        .embeddings
+        .into_iter()
+        .enumerate()
+        .map(|(i, vec)| EmbedItem {
             object: "embedding",
             index: i as u32,
-            embedding: deterministic_vector(text, dim),
-        });
-    }
+            embedding: vec.values,
+        })
+        .collect();
+
+    let model_name = if resp.model.is_empty() {
+        req.model.clone()
+    } else {
+        resp.model
+    };
+
     Json(EmbedResponse {
         object: "list",
         data,
-        model: req.model,
-        usage: Usage::default(),
+        model: model_name,
+        usage: Usage {
+            prompt_tokens: resp.tokens,
+            completion_tokens: 0,
+            total_tokens: resp.tokens,
+        },
     })
     .into_response()
-}
-
-fn deterministic_vector(text: &str, dim: usize) -> Vec<f32> {
-    let mut out = Vec::with_capacity(dim);
-    let mut h = blake3::Hasher::new();
-    h.update(text.as_bytes());
-    let seed = h.finalize();
-    let bytes = seed.as_bytes();
-    let mut acc = u64::from_le_bytes([
-        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-    ]);
-    for _ in 0..dim {
-        acc = acc
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        let v = ((acc >> 32) as u32 as f32) / (u32::MAX as f32) * 2.0 - 1.0;
-        out.push(v);
-    }
-    out
 }
 
 fn approximate_token_ids(s: &str) -> Vec<u32> {
@@ -94,11 +148,11 @@ fn approximate_token_ids(s: &str) -> Vec<u32> {
         .collect()
 }
 
-fn error(msg: &str) -> Response {
+fn error_with(status: StatusCode, ty: &str, msg: &str) -> Response {
     (
-        StatusCode::BAD_REQUEST,
+        status,
         Json(json!({
-            "error": { "message": msg, "type": "invalid_request_error" }
+            "error": { "message": msg, "type": ty }
         })),
     )
         .into_response()

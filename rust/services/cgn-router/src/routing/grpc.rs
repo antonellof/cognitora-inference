@@ -14,8 +14,8 @@
 use std::sync::Arc;
 
 use cgn_proto::v1::{
-    agent_client::AgentClient, router_server::Router, AgentGenerateRequest, EmbedRequest,
-    EmbedResponse, GenerateRequest, NodeRole, Token,
+    router_server::Router, AgentGenerateRequest, EmbedRequest, EmbedResponse, GenerateRequest,
+    NodeRole, Token,
 };
 use futures::{Stream, StreamExt};
 use tokio::sync::mpsc;
@@ -69,6 +69,9 @@ impl Router for RouterGrpc {
 
     async fn embed(&self, req: Request<EmbedRequest>) -> Result<Response<EmbedResponse>, Status> {
         let body = req.into_inner();
+        if body.inputs.is_empty() {
+            return Err(Status::invalid_argument("inputs must be non-empty"));
+        }
         let token_ids = approximate_token_ids(&body.inputs.join(" "));
         let decision = super::pick(&self.state, &body.model, NodeRole::Both, &token_ids)
             .await
@@ -79,7 +82,7 @@ impl Router for RouterGrpc {
             .connect_agent(&decision.node.address)
             .await
             .map_err(|e| Status::unavailable(format!("agent: {e}")))?;
-        let resp = client.embed_via_router_compat(body).await?.into_inner();
+        let resp = client.embed(body).await?.into_inner();
         Ok(Response::new(resp))
     }
 }
@@ -182,25 +185,4 @@ fn approximate_token_ids(s: &str) -> Vec<u32> {
             ])
         })
         .collect()
-}
-
-// Compatibility helper — `Embed` is not yet defined on the generated
-// `AgentClient`. We add an extension trait so the call site stays clean
-// and the implementation can be filled in once the proto adds Embed.
-trait AgentClientExt {
-    async fn embed_via_router_compat(
-        &mut self,
-        req: EmbedRequest,
-    ) -> Result<tonic::Response<EmbedResponse>, Status>;
-}
-
-impl AgentClientExt for AgentClient<tonic::transport::Channel> {
-    async fn embed_via_router_compat(
-        &mut self,
-        _req: EmbedRequest,
-    ) -> Result<tonic::Response<EmbedResponse>, Status> {
-        Err(Status::unimplemented(
-            "Agent.Embed not yet defined; use generate with embedding model",
-        ))
-    }
 }

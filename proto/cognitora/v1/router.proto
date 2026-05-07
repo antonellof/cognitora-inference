@@ -31,14 +31,6 @@ message GenerateRequest {
   uint32         deadline_ms  = 10;
 }
 
-message EmbedRequest {
-  string         model   = 1;
-  repeated string inputs = 2;
-  string         tenant  = 3;
-}
-
-message EmbedResponse {
-  message Vector { repeated float values = 1; }
-  repeated Vector embeddings = 1;
-  uint32          tokens     = 2;
-}
+// EmbedRequest / EmbedResponse moved to common.proto so Agent and Router
+// can share them. Re-exporting them here would require a `import public`
+// path (proto2 only); consumers should import common.proto directly.
