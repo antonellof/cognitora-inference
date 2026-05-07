@@ -14,17 +14,26 @@
 
 mod bench;
 mod cluster;
+mod etcd;
 mod install;
 mod key;
 mod model;
 mod pki;
 mod recipe;
 
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(name = "cgn-ctl", version, about = "Cognitora admin CLI")]
 struct Cli {
+    /// Path to cognitora.toml. Falls back to `$CGN_CONFIG` and
+    /// `/etc/cognitora/cognitora.toml`. Used by `cluster` and `model`
+    /// subcommands to discover etcd endpoints.
+    #[arg(short = 'c', long, global = true)]
+    config: Option<PathBuf>,
+
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -66,10 +75,11 @@ enum Cmd {
 async fn main() -> cgn_core::Result<()> {
     cgn_telemetry::init("cgn-ctl");
     let cli = Cli::parse();
+    let cfg_path = cli.config.as_deref();
     match cli.cmd {
         Cmd::Install(args) => install::run(args).await,
-        Cmd::Cluster { cmd } => cluster::run(cmd).await,
-        Cmd::Model { cmd } => model::run(cmd).await,
+        Cmd::Cluster { cmd } => cluster::run(cmd, cfg_path).await,
+        Cmd::Model { cmd } => model::run(cmd, cfg_path).await,
         Cmd::Recipe { cmd } => recipe::run(cmd).await,
         Cmd::Pki { cmd } => pki::run(cmd).await,
         Cmd::Key { cmd } => key::run(cmd).await,

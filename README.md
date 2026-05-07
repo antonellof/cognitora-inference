@@ -322,7 +322,7 @@ cognitora/
 
 **Project**
 
-- [Project plan](plan.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
+- [Project plan & roadmap](plan.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 
 ## Status
 

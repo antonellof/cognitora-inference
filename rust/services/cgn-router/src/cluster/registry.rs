@@ -20,6 +20,12 @@ pub struct NodeEntry {
     pub free_blocks: u32,
     pub total_blocks: u32,
     pub power_watts: f32,
+    /// Operator-set flag mirrored from `/cognitora/cordon/<node_id>`.
+    /// Cordoned nodes are excluded from candidate selection so the
+    /// router stops sending new traffic to them. Inflight requests
+    /// continue until they finish or the agent is drained explicitly.
+    #[serde(default)]
+    pub cordoned: bool,
     #[serde(skip, default = "Instant::now")]
     pub last_heartbeat: Instant,
 }
@@ -65,6 +71,22 @@ impl NodeRegistry {
         self.inner.remove(node_id);
     }
 
+    /// Toggle the `cordoned` flag on a node already in the registry.
+    /// No-op if the node is not currently registered (the flag is only
+    /// useful when the node is live anyway).
+    pub fn set_cordon(&self, node_id: &str, cordoned: bool) {
+        let Some(slot) = self.inner.get(node_id) else {
+            return;
+        };
+        let mut guard = slot.value().write();
+        if guard.cordoned == cordoned {
+            return;
+        }
+        let mut next = (**guard).clone();
+        next.cordoned = cordoned;
+        *guard = Arc::new(next);
+    }
+
     pub fn len(&self) -> usize {
         self.inner.len()
     }
@@ -80,12 +102,17 @@ impl NodeRegistry {
             .collect()
     }
 
-    /// Snapshot all live nodes filtered by role.
+    /// Snapshot all live nodes filtered by role. Cordoned nodes are
+    /// excluded — the router scoring never picks a cordoned node, so
+    /// `cgn-ctl cluster cordon <id>` immediately stops new traffic.
     pub fn nodes_for(&self, role: NodeRole, model: Option<&str>) -> Vec<Arc<NodeEntry>> {
         self.inner
             .iter()
             .filter_map(|kv| {
                 let n = kv.value().read().clone();
+                if n.cordoned {
+                    return None;
+                }
                 let role_match = matches!(role, NodeRole::Unspecified)
                     || n.role_enum() == role
                     || n.role_enum() == NodeRole::Both;

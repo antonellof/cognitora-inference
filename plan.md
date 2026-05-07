@@ -89,6 +89,96 @@ The following are explicit non-goals for the 0.x line. They are not
   TDX/SEV attestation, and confidential VMs are tracked under a future
   "regulated" tier and are not in the 0.x scope.
 
+## Roadmap
+
+Snapshot view of what we plan to ship next, grouped by milestone.
+Items move out of "next" only when they're tracked by an issue and a
+PR is in flight. The detailed deltas vs NVIDIA Dynamo live in
+[`docs/architecture/vs-dynamo.md`](docs/architecture/vs-dynamo.md);
+the engine-side KV strategy lives in
+[`docs/architecture/kv-strategy.md`](docs/architecture/kv-strategy.md).
+
+### 0.3 — close the credibility gaps
+
+Targeted at making every `plan.md` capability claim runnable end to
+end on bare metal.
+
+* **`cgn-ctl` is a real client, not a logger.** `cluster nodes / cordon
+  / uncordon / drain` and `model load / unload / ls` were stubbed in
+  0.2.x; 0.3 finishes the wiring so they read and write the same etcd
+  key prefixes the router watches.
+* **First-class `/v1/embeddings`.** Define `Embed` on the `Agent`
+  proto, implement it in `cgn-agent` against the engine's
+  `/v1/embeddings`, and replace the synthetic vectors the router
+  currently returns with the real gRPC round-trip.
+* **Single-node installer renderer.** `cgn-ctl install --target
+  single-node` generates a `docker-compose.yml` from the cluster spec
+  and runs `docker compose up -d`. Today the preflight checks pass
+  but the renderer hasn't landed.
+* **Fleshed-out terraform modules.** At least one cloud module
+  (`aws` or `hetzner`) drives a runnable end-to-end install; the
+  others import from it. Today every cloud module ships as a
+  near-empty `main.tf`.
+* **Real `cgn-metrics` federation.** Replace the
+  `scrape_once → debug!("placeholder")` loop with a real `reqwest →
+  prometheus::TextEncoder` re-encoding pipeline.
+* **Soft perf gate in CI.** Add a `cargo bench --bench prefix --bench
+  routing` job that uploads a baseline as an artefact and posts the
+  diff on PRs. Hard regression gating waits for 0.4 once the baseline
+  is stable.
+
+### 0.4 — beat Dynamo on the routing path
+
+The `vs-dynamo.md` deltas where we want to lead, not match.
+
+* **WSPT prefill scheduling** in `cgn-router::admission`. The
+  longest-prefix-overlap signal already exists; the queue restructure
+  (Smith's-rule weighted shortest predicted task) is what's missing.
+* **Federated peer-fetch policy.** A new routing knob,
+  `[router.federation].prefer_local_cache_hit_over_remote_lmcache`,
+  bounds egress when peer-fetching from another cluster.
+* **Smarter federation peer scoring.** `federation::pick_peer` admits
+  to "first healthy wins"; replace it with geo / RTT / cache-overlap
+  weighted scoring.
+* **First-class TOML for SGLang HiCache backend.**
+  `[engine.sglang].hicache_storage_backend = "nixl|mooncake|nvme|s3"`
+  instead of `extra_args` overrides.
+* **`kv_offload = "flexkv"`.** Tencent's
+  [FlexKV](https://github.com/taco-project/FlexKV) connector. Same
+  rendering shape as LMCache; we just need a renderer branch and a
+  recipe.
+* **Streaming cascade.** Incremental logprob gating on SSE responses;
+  today only buffered responses pass through `Cascade::run`.
+
+### 0.5+ — research and infra
+
+* **Hard perf gate in CI.** Fail PRs whose criterion baseline
+  regresses > N% on key benches; baseline lives in S3 keyed by
+  `main`'s tip.
+* **RDMA verbs path.** Finish the `rdma` feature gate so the
+  cross-host KV transport has a real ibverbs implementation behind
+  it; QUIC stays the default.
+* **GPU-backed nightly e2e.** Run `scripts/e2e-gpu.sh` on a schedule
+  even when no PR is labelled `run-gpu-e2e`.
+* **Helm values schema.** Ship `values.schema.json` so `helm install`
+  rejects bad inputs locally; `helm lint` is the only check today.
+
+### Out of scope (not on any milestone)
+
+* **Multimodal text+image E/P/D.** Track once vLLM and SGLang ship
+  stable disaggregated multimodal hooks. Until then this is a vendor
+  gap, not a roadmap item.
+* **Native G1 GPU pool inside `cgn-kvcached`.** L2 backends
+  (LMCache / KVBM / HiCache) cover every workload we've benchmarked.
+  Only landing a native G1 if a workload genuinely doesn't fit.
+* **Kubernetes-only deployment paths.** Bare metal stays first-class.
+* **Python control plane.** New control-plane logic stays in Rust.
+* **CRD-as-config.** Recipes stay flat TOML, not custom resources.
+
+The non-goals already listed in the [Out of scope](#out-of-scope)
+section above (training, model registry, FIPS, MPS time-slicing) still
+apply.
+
 ## Where the architecture lives
 
 This file is intentionally short. The detailed architecture, protocol,
@@ -96,6 +186,7 @@ deployment, and operations content lives in the docs tree:
 
 | Topic                    | Canonical file                                                            |
 |--------------------------|---------------------------------------------------------------------------|
+| Release notes            | [`CHANGELOG.md`](CHANGELOG.md)                                            |
 | One-page architecture    | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)                            |
 | Repo + crate layout      | [`docs/architecture/repo-layout.md`](docs/architecture/repo-layout.md)    |
 | Routing + score function | [`docs/architecture/routing.md`](docs/architecture/routing.md)            |
