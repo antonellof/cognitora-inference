@@ -53,9 +53,22 @@ pub struct ModelSpec {
 }
 
 #[derive(Debug, Clone)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct GenerateReq {
     pub id: String,
     pub model: String,
+    /// Original chat messages from the OpenAI client. When non-empty
+    /// the engine driver hits `/v1/chat/completions` so the engine
+    /// applies the model's chat template. When empty, the driver
+    /// falls back to legacy `/v1/completions` with `prompt`.
+    pub messages: Vec<ChatMessage>,
+    /// Legacy plain-text completion path. Only used when `messages`
+    /// is empty (e.g. raw `/v1/completions` with no chat history).
     pub prompt: String,
     pub max_tokens: u32,
     pub temperature: f32,

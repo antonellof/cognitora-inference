@@ -189,11 +189,37 @@ cargo build --release --no-default-features \
 
 ### Kubernetes
 
+The fastest way to put Cognitora on a real Kubernetes cluster is the
+self-contained CPU quickstart manifest — no Helm, no PKI, no GPU,
+public OpenAI-compatible URL on port 80:
+
 ```bash
-helm install cognitora oci://ghcr.io/antonellof/charts/cognitora \
+kubectl apply -f deploy/kubernetes/quickstart/cognitora-cpu.yaml
+kubectl -n cognitora wait --for=condition=ready pod \
+  -l app=cognitora --timeout=10m
+IP=$(kubectl -n cognitora get svc cognitora-router \
+        -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+curl -sS http://$IP/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"model":"tinyllama","messages":[{"role":"user","content":"hi"}]}'
+```
+
+Verified end-to-end on GKE Autopilot in < 5 minutes; the same manifest
+works on EKS / AKS / k3d / kind. See
+[`docs/guides/cloud/gcp.md`](docs/guides/cloud/gcp.md) for the full
+GKE walkthrough.
+
+For production GPU deployments use the Helm chart:
+
+```bash
+helm install cognitora ./deploy/kubernetes/helm/cognitora \
+    --namespace cognitora --create-namespace \
     --set router.replicas=2 \
     --set models.llama3-70b.tp=4
 ```
+
+> The OCI Helm chart at `oci://ghcr.io/antonellof/charts/cognitora`
+> isn't published yet; pass the local chart path as above. Tracked in
+> [`plan.md`](plan.md) under "Roadmap".
 
 ### Releases
 

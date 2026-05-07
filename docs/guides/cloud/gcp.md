@@ -1,11 +1,133 @@
 # GCP deployment
 
-The reference GKE module is at
-[`deploy/terraform/gcp/`](../../../deploy/terraform/gcp/). It
-provisions a regional GKE cluster, a GPU node pool (`g2-standard-8`
-with 1× L4 by default), and applies the Cognitora chart.
+Three paths, in order of how cheap and fast they are to validate:
 
-## Apply
+1. **Quickstart on GKE Autopilot** — single-pod, CPU-only, < 5 min to a
+   public OpenAI-compatible URL. Best for "does this thing actually
+   run on Kubernetes?". Verified end-to-end on
+   `gke_cognitora_us-central1_cognitora-test`.
+2. **Helm chart on GKE Standard with GPU** — production shape; one
+   router replica + agent DaemonSet on a GPU node pool, your choice of
+   engine.
+3. **Terraform module** — same as (2) but described declaratively.
+   Currently a single GKE Standard regional cluster + GPU pool; future
+   work will fold the chart install in too.
+
+## 1. Quickstart on GKE Autopilot (recommended for first-time
+demos)
+
+Costs roughly **$0.10 / hour** while running and tears down to zero.
+No GPU required, no quotas, no Helm. The model — TinyLlama 1.1B —
+gets downloaded by an init container on first boot.
+
+```bash
+# 0. One-time per project: enable APIs.
+gcloud services enable container.googleapis.com compute.googleapis.com \
+  --project YOUR_PROJECT
+
+# 1. Create the cheapest possible Autopilot cluster (regional, no
+#    per-cluster fee). Takes ~10 minutes.
+gcloud container clusters create-auto cognitora-test \
+  --project YOUR_PROJECT \
+  --region us-central1 \
+  --release-channel regular
+
+# 2. Deploy the self-contained quickstart manifest. Brings up etcd +
+#    llama.cpp engine + cgn-router + cgn-agent + cgn-metrics in one
+#    Pod, fronted by a LoadBalancer Service.
+kubectl apply -f deploy/kubernetes/quickstart/cognitora-cpu.yaml
+
+# 3. Wait for the public IP (~30-90s) and the Pod to come up
+#    (~3-5 min on first apply because of the model download).
+kubectl -n cognitora wait --for=condition=ready pod \
+  -l app=cognitora --timeout=10m
+IP=$(kubectl -n cognitora get svc cognitora-router \
+        -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+echo "router: http://$IP"
+
+# 4. Talk to it.
+curl -sS http://$IP/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"tinyllama","messages":[{"role":"user","content":"What is 2+2?"}]}' \
+  | jq
+
+# 5. Stream the response.
+curl -sN http://$IP/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"tinyllama","messages":[{"role":"user","content":"Hi"}],"stream":true}'
+
+# 6. Tear down.
+kubectl delete -f deploy/kubernetes/quickstart/cognitora-cpu.yaml
+gcloud container clusters delete cognitora-test --region us-central1 --quiet
+```
+
+What the quickstart proves out:
+
+- The full data plane: HTTP gateway → router → agent → engine over
+  loopback, all in one Pod.
+- KV-aware routing on a single node (degenerate but exercises the
+  scoring path).
+- `/v1/chat/completions` (buffered + streaming SSE) and `/v1/models`.
+- `cgn-metrics` federation: `/federate` returns every router metric
+  with a `cgn_target="router"` label injected.
+- Prometheus scrape at `/metrics` and `/healthz` / `/readyz`.
+
+What it does **not** do:
+
+- No GPU, no vLLM / SGLang. The engine is `llama.cpp` running CPU.
+  Swap the `engine` container in the manifest for a vLLM image and
+  add a GPU node selector when you want to test GPU paths.
+- No mTLS. `[security].require_mtls = false` to keep the bring-up
+  trivial. For production use the Helm chart or terraform paths
+  below.
+- Single Pod, so disaggregation and cross-node KV transport are
+  exercised but degenerate (prefill and decode resolve to the same
+  agent).
+
+> **Pin the image.** The manifest references
+> `ghcr.io/antonellof/cognitora:latest`. The chat-template fix
+> required for buffered chat completions to return non-empty content
+> shipped in **v0.2.2**; pin to `:v0.2.2` (or newer) if you want a
+> reproducible install.
+
+## 2. Helm chart on GKE Standard with GPU
+
+Production shape. One Router Deployment + Agent DaemonSet on a GPU
+node pool.
+
+```bash
+gcloud container clusters create cognitora \
+  --region us-central1 \
+  --release-channel stable \
+  --num-nodes 1 \
+  --machine-type e2-standard-4
+
+gcloud container node-pools create gpu-pool \
+  --cluster cognitora --region us-central1 \
+  --machine-type g2-standard-8 \
+  --accelerator type=nvidia-l4,count=1 \
+  --num-nodes 1 \
+  --node-taints nvidia.com/gpu=true:NoSchedule \
+  --node-labels nvidia.com/gpu.present=true
+
+# Apply NVIDIA driver installer on GPU nodes.
+kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml
+
+helm install cognitora ./deploy/kubernetes/helm/cognitora \
+  --namespace cognitora --create-namespace \
+  --set router.replicas=1 \
+  --set models.llama3-8b.tp=1
+```
+
+> **Caveat.** The Helm chart in `deploy/kubernetes/helm/cognitora/`
+> currently expects you to bring your own engine container (e.g. via a
+> sidecar Deployment) and has `[security].require_mtls = true` by
+> default. We're tracking a chart redesign in plan.md to fold an
+> optional engine sidecar in and disable mTLS by default for dev
+> installs; until then the quickstart manifest above is the closest
+> thing to a "one-command working install".
+
+## 3. Terraform module
 
 ```bash
 cd deploy/terraform/gcp
@@ -25,7 +147,10 @@ After ~10 minutes:
   `nvidia.com/gpu` taint.
 - The Cognitora chart installed in the `cognitora` namespace.
 
-## Sizing
+The terraform module is intentionally minimal today — same caveat as
+the Helm path: bring your own engine container.
+
+## Sizing for GPU paths
 
 | Workload      | Machine type        | GPU         | Notes                       |
 |---------------|---------------------|-------------|-----------------------------|
@@ -77,5 +202,11 @@ Grant that GSA `roles/storage.objectViewer` on the model bucket.
 ## Tear down
 
 ```bash
-terraform destroy
+# Quickstart path:
+kubectl delete -f deploy/kubernetes/quickstart/cognitora-cpu.yaml
+gcloud container clusters delete cognitora-test --region us-central1 --quiet
+
+# Helm / terraform paths:
+helm uninstall cognitora -n cognitora
+terraform destroy   # if you used the terraform module
 ```

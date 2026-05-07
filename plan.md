@@ -122,7 +122,21 @@ end on bare metal.
 * **Fleshed-out terraform modules.** At least one cloud module
   (`aws` or `hetzner`) drives a runnable end-to-end install; the
   others import from it. Today every cloud module ships as a
-  near-empty `main.tf`.
+  near-empty `main.tf`. (Partial credit: GKE has a verified
+  CPU-only quickstart at
+  `deploy/kubernetes/quickstart/cognitora-cpu.yaml` that runs the
+  full data plane on Autopilot for ~$0.10/hr — see
+  `docs/guides/cloud/gcp.md`. The GPU + terraform path is the work
+  remaining here.)
+* **Helm chart redesign.** Today
+  `deploy/kubernetes/helm/cognitora/` requires `[security].require_mtls
+  = true` with no PKI bootstrap and has no engine sidecar option, so
+  `helm install` alone won't produce a working stack. Goal: optional
+  engine sidecar (vLLM / SGLang / llama.cpp / openai-compat),
+  `require_mtls = false` default for dev, conditional pki secret
+  mount, and an OCI chart push from the release workflow so
+  `helm install cognitora oci://ghcr.io/antonellof/charts/cognitora`
+  matches the README claim.
 * ✓ **Soft perf gate in CI.** A new `bench` workflow runs
   `cargo bench -p cgn-perf --bench prefix --bench routing`, uploads
   the criterion artefacts, and sticks a Markdown table on every PR.

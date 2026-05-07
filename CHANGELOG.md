@@ -10,7 +10,32 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+### Fixed
+- **`/v1/chat/completions` now returns the model's actual answer
+  instead of an empty string.** The agent was sending requests to
+  the engine's legacy `/v1/completions` endpoint with a synthesised
+  `<role>\n<content>` plain-text prompt, which bypasses the model's
+  chat template and produces near-empty output for instruct/chat
+  models. The agent now forwards the original `messages` array to
+  `/v1/chat/completions` and parses the chat-style SSE
+  (`delta.content`) response. The legacy `/v1/completions` plain
+  prompt path is preserved as a fallback. Verified end-to-end on
+  GKE Autopilot with TinyLlama-1.1B (CPU) — sample latency 1.3s
+  buffered, streaming SSE deltas working cleanly.
+
 ### Added
+- **Self-contained Kubernetes quickstart manifest.** New
+  `deploy/kubernetes/quickstart/cognitora-cpu.yaml` brings up the
+  full Cognitora data plane (etcd + llama.cpp engine + cgn-router +
+  cgn-agent + cgn-metrics) in a single Pod with a public
+  LoadBalancer, no Helm, no PKI, no operator. Validated on GKE
+  Autopilot in ≈ 5 min from `kubectl apply` to a working OpenAI URL.
+  See `deploy/kubernetes/quickstart/README.md` and
+  `docs/guides/cloud/gcp.md`.
+- **`.dockerignore`.** Excludes `target/`, `.git/`, `.temp/`, and
+  IDE caches from the docker build context — cuts the build context
+  from ≈ 19 GiB to a few MiB and prevents
+  `no space left on device` failures on Docker Desktop.
 - **Real `/v1/embeddings`.** `Agent.Embed` is now defined on the proto,
   implemented in `cgn-agent` against the engine's `/v1/embeddings`
   surface, and the router's gateway forwards over gRPC mTLS instead of

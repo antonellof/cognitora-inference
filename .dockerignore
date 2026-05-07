@@ -1,0 +1,30 @@
+# Skip large host artefacts from the docker build context. Without
+# this `docker buildx build` copies our 15-20 GiB Cargo target/ into
+# the build context and almost always hits "no space left on device"
+# on Docker Desktop's default disk image. The build runs `cargo build
+# --release` inside the container with its own cache mount, so the
+# host target/ adds nothing useful anyway.
+
+target/
+**/target/
+
+# Local tooling caches and editor scratch.
+.git/
+.github/
+.idea/
+.vscode/
+.cursor/
+node_modules/
+
+# Vendored upstream sources (Dynamo etc) used only for inspiration.
+.temp/
+
+# Build / packaging output.
+dist/
+*.tar.gz
+*.sha256
+
+# Editor swap files.
+*.swp
+*.swo
+.DS_Store
