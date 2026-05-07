@@ -208,6 +208,27 @@ fn escape_toml_key(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::ValueEnum;
+
+    /// Locks down the CLI surface for `--engine`: the values must match
+    /// the TOML `[engine].kind` field exactly (snake_case), otherwise
+    /// users hit confusing "invalid value" errors when copy/pasting from
+    /// our own example configs.
+    #[test]
+    fn engine_flag_values_match_toml_kind() {
+        for engine in Engine::value_variants() {
+            let cli = engine
+                .to_possible_value()
+                .expect("engine variant should parse to clap value")
+                .get_name()
+                .to_string();
+            assert_eq!(
+                cli,
+                engine.as_toml(),
+                "CLI flag value should equal TOML kind for {engine:?}",
+            );
+        }
+    }
 
     fn args_with(model: Option<&str>, engine: Engine) -> Args {
         Args {

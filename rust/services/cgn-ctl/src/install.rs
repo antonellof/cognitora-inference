@@ -85,6 +85,7 @@ pub enum Target {
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
+#[value(rename_all = "snake_case")]
 pub enum Engine {
     Vllm,
     Sglang,
