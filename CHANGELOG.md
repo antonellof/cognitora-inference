@@ -10,6 +10,13 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-05-07
+
+First release where `cgn-ctl cluster` and `cgn-ctl model` are real
+clients instead of placeholders. Also bumps the workspace version
+back in line with the git tag history (the v0.2.0 tag shipped from a
+0.1.1 source tree; 0.2.1 reunifies them).
+
 ### Added
 - `cgn-ctl cluster nodes` now reads `/cognitora/nodes/*` from etcd and
   prints a real table of registered agents with role, model, queue
@@ -26,12 +33,16 @@ each one is called out under **Breaking** below.
   and live agent reports so operators can see drift.
 - New `cgn-ctl -c <path>` global flag for choosing the config file used
   to discover etcd endpoints.
+- New `etcd_keys::CORDON = "/cognitora/cordon/"` constant and
+  `NodeRegistry::set_cordon` helper.
 - `CHANGELOG.md` (this file) and a `## Roadmap` section in `plan.md`.
 
 ### Changed
 - `cgn-router` now subscribes to the cordon prefix on startup, applies
   any pre-existing cordons from its initial snapshot, and drops them
   on `delete` events.
+- Workspace version bumped to `0.2.1` so the published crate versions
+  match the git tag.
 
 ### Removed
 - The `ignored()` placeholder in `cgn-agent::supervisor` and its
