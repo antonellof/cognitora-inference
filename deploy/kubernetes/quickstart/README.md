@@ -99,10 +99,10 @@ optional engine sidecar in is tracked in `plan.md`.
 The manifest references `ghcr.io/antonellof/cognitora:latest` for
 ergonomics. For reproducible installs pin to a specific release —
 the chat-template fix that makes buffered chat completions return
-non-empty content shipped in **v0.2.2**, so anything older won't
+non-empty content shipped in **v0.3.0**, so anything older won't
 work for `/v1/chat/completions`:
 
 ```bash
-sed -i.bak 's|cognitora:latest|cognitora:v0.2.2|g' \
+sed -i.bak 's|cognitora:latest|cognitora:v0.3.0|g' \
   deploy/kubernetes/quickstart/cognitora-cpu.yaml
 ```
