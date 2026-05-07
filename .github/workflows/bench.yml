@@ -1,0 +1,105 @@
+name: bench
+
+# Soft perf gate.
+#
+# Runs the criterion harness in `tests/perf/` against the routing decision
+# path on every PR. The job uploads a JSON summary as an artefact and posts
+# a comment on the PR with the median for each bench so reviewers can spot
+# regressions at a glance. **It never fails the build** — that's the
+# explicit "soft" in soft perf gate; once the baseline is stable we'll add
+# a hard gate in 0.4 (`cargo-criterion --baseline main` against an S3
+# baseline).
+#
+# Why not block on `cargo bench` itself: criterion's noise floor on shared
+# GitHub-hosted runners is ~5–10% so any hard threshold under that is just
+# flake. Trend visibility is what we need first.
+
+on:
+  pull_request:
+    paths:
+      - 'rust/**'
+      - 'tests/perf/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/bench.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  perf:
+    name: cargo bench (soft gate)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+        with: { repo-token: "${{ secrets.GITHUB_TOKEN }}" }
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: bench
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev clang lld pkg-config jq
+      - name: Run benches
+        # `--bench prefix --bench routing` covers the two harnesses defined
+        # in tests/perf/Cargo.toml. We pass `--quiet` so the log stays
+        # readable; the JSON summary captures the timings.
+        run: |
+          cargo bench --no-default-features -p cgn-perf --bench prefix --bench routing -- --noplot --output-format bencher \
+            | tee bench-output.txt
+      - name: Summarise
+        id: summary
+        run: |
+          # Bencher format lines look like:
+          #   test prefix_overlap_32   ... bench:         930 ns/iter (+/- 12)
+          # Reshape into a Markdown table for the PR comment.
+          {
+            echo '| benchmark | ns/iter | noise (+/-) |'
+            echo '|---|---:|---:|'
+            grep -E '^test ' bench-output.txt \
+              | awk '{
+                  name = $2;
+                  for (i=3; i<=NF; i++) if ($i == "bench:") { val = $(i+1); unit = $(i+2); break; }
+                  noise = $(NF-1);
+                  printf("| `%s` | %s %s | %s |\n", name, val, unit, noise);
+                }'
+          } > bench-summary.md
+          echo "summary<<EOF" >>"$GITHUB_OUTPUT"
+          cat bench-summary.md >>"$GITHUB_OUTPUT"
+          echo "EOF" >>"$GITHUB_OUTPUT"
+      - name: Upload bench output
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-output
+          path: |
+            bench-output.txt
+            bench-summary.md
+            target/criterion/**
+          if-no-files-found: warn
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: bench
+          recreate: true
+          message: |
+            ### Benchmark results — soft perf gate
+
+            Runs the `routing` and `prefix` criterion harnesses on every PR.
+            **This job is not a hard gate** — numbers fluctuate ~5–10% on
+            shared runners; eyeball the trend across PRs and follow up on
+            anything that doubles a baseline.
+
+            ${{ steps.summary.outputs.summary }}
+
+            <sub>Output and full criterion HTML report attached as the
+            `bench-output` workflow artefact. SLO targets live in
+            [`docs/operations/slo.md`](../blob/main/docs/operations/slo.md).</sub>

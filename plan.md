@@ -113,18 +113,22 @@ end on bare metal.
 * ✓ **Real `cgn-metrics` federation scraper.** `[metrics].scrape_targets`
   is honoured; the union is exposed under `/federate` with a
   `cgn_target` label injected on every line.
-* **Single-node installer renderer.** `cgn-ctl install --target
-  single-node` generates a `docker-compose.yml` from the cluster spec
-  and runs `docker compose up -d`. Today the preflight checks pass
-  but the renderer hasn't landed.
+* ✓ **Single-node installer renderer.** `cgn-ctl install --target
+  single-node` writes `cognitora.toml` and `compose.yaml` into
+  `--out-dir` (defaulting to `./cognitora-single-node`). With
+  `--apply` it also runs `docker compose up -d`; without, it stays a
+  pure-text dry run for review. Engine, image tag, tensor parallelism,
+  and HF repo are CLI flags.
 * **Fleshed-out terraform modules.** At least one cloud module
   (`aws` or `hetzner`) drives a runnable end-to-end install; the
   others import from it. Today every cloud module ships as a
   near-empty `main.tf`.
-* **Soft perf gate in CI.** Add a `cargo bench --bench prefix --bench
-  routing` job that uploads a baseline as an artefact and posts the
-  diff on PRs. Hard regression gating waits for 0.4 once the baseline
-  is stable.
+* ✓ **Soft perf gate in CI.** A new `bench` workflow runs
+  `cargo bench -p cgn-perf --bench prefix --bench routing`, uploads
+  the criterion artefacts, and sticks a Markdown table on every PR.
+  It's intentionally non-blocking — the noise floor on shared runners
+  is too high for hard gating; a hard gate against an S3 baseline
+  arrives in 0.4.
 
 ### 0.4 — beat Dynamo on the routing path
 

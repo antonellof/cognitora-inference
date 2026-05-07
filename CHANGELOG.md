@@ -26,6 +26,22 @@ each one is called out under **Breaking** below.
   `cgn_metrics_scrape_errors_total`. Five unit tests cover the text
   decorator (HELP/TYPE pass-through, label injection, escape handling,
   blank-line handling, label-less metrics).
+- **Single-node installer renderer.** `cgn-ctl install --target
+  single-node` now actually generates `cognitora.toml` and
+  `compose.yaml` into `--out-dir` (default
+  `./cognitora-single-node`). With `--apply` it also runs
+  `docker compose up -d`. New flags: `--engine`
+  (`vllm`/`sglang`/`llama_cpp`/`openai_compat`), `--hf-repo`, `--tp`,
+  `--image`, `--out-dir`, `--apply`. Renderer is pure and unit-tested
+  (six tests in `cgn-ctl` covering both file outputs and per-engine
+  branches).
+- **Soft perf gate workflow.** New `.github/workflows/bench.yml`
+  runs `cargo bench -p cgn-perf --bench prefix --bench routing` on
+  every PR, uploads the criterion artefacts, and posts a Markdown
+  table sticky-comment so reviewers can eyeball regressions. Soft
+  by design: the noise floor on shared GitHub runners is ~5–10%, so
+  any hard threshold under that is just flake. Hard gating against
+  an S3 baseline lands in 0.4.
 
 ### Changed
 - **Proto:** `EmbedRequest` and `EmbedResponse` moved from
