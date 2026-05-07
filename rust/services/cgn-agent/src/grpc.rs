@@ -74,16 +74,31 @@ impl Agent for AgentSvc {
         let (tx, rx) = mpsc::channel::<Result<Token, Status>>(64);
         let engine = self.supervisor.engine.clone();
         tokio::spawn(async move {
-            let prompt = first
+            let messages: Vec<crate::engine::ChatMessage> = first
                 .messages
                 .iter()
-                .map(|m| format!("<{}>\n{}", m.role, m.content))
-                .collect::<Vec<_>>()
-                .join("\n");
+                .map(|m| crate::engine::ChatMessage {
+                    role: m.role.clone(),
+                    content: m.content.clone(),
+                })
+                .collect();
+            // Legacy plain-prompt fallback used only if the caller
+            // somehow gave us no messages (e.g. raw `/v1/completions`).
+            let prompt = if messages.is_empty() {
+                first
+                    .messages
+                    .iter()
+                    .map(|m| m.content.clone())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else {
+                String::new()
+            };
             let p = first.params.unwrap_or_default();
             let req = GenerateReq {
                 id: first.id,
                 model: first.model,
+                messages,
                 prompt,
                 max_tokens: if p.max_tokens == 0 { 256 } else { p.max_tokens },
                 temperature: p.temperature,
