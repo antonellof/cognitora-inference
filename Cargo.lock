@@ -606,6 +606,7 @@ dependencies = [
  "chrono",
  "clap",
  "clap_complete",
+ "etcd-client",
  "hex",
  "reqwest 0.12.28",
  "serde",

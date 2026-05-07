@@ -21,7 +21,7 @@ use cgn_core::{
 };
 use parking_lot::Mutex;
 use tokio::process::{Child, Command};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::engine::{spawn::render_argv, Engine, ModelSpec, OpenAiHttpEngine};
 
@@ -162,9 +162,4 @@ impl Drop for Supervisor {
             let _ = child.start_kill();
         }
     }
-}
-
-#[allow(dead_code)]
-fn ignored() {
-    error!("placeholder so unused-import lints stay quiet");
 }

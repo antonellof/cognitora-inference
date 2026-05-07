@@ -11,6 +11,7 @@ use crate::state::RoutingPolicy;
 
 const NODES_PREFIX: &str = cgn_core::etcd_keys::NODES;
 const POLICY_KEY: &str = cgn_core::etcd_keys::ROUTING;
+const CORDON_PREFIX: &str = cgn_core::etcd_keys::CORDON;
 
 pub async fn run_etcd_watcher(
     endpoints: Vec<String>,
@@ -38,6 +39,20 @@ pub async fn run_etcd_watcher(
             }
         }
     }
+    // Apply any cordon flags written by `cgn-ctl cluster cordon` before
+    // we started.
+    if let Ok(snap) = client
+        .get(CORDON_PREFIX, Some(GetOptions::new().with_prefix()))
+        .await
+    {
+        for kv in snap.kvs() {
+            if let Ok(key) = kv.key_str() {
+                if let Some(node_id) = key.strip_prefix(CORDON_PREFIX) {
+                    nodes.set_cordon(node_id, true);
+                }
+            }
+        }
+    }
 
     // Live watch.
     let (mut watcher, mut stream) = client
@@ -47,9 +62,9 @@ pub async fn run_etcd_watcher(
     let _ = watcher.request_progress().await;
 
     let policy_clone = policy.clone();
-    let nodes_clone = nodes.clone();
+    let policy_endpoints = endpoints.clone();
     tokio::spawn(async move {
-        let mut p_client = match Client::connect(&endpoints, None).await {
+        let mut p_client = match Client::connect(&policy_endpoints, None).await {
             Ok(c) => c,
             Err(e) => {
                 tracing::error!(error=?e, "policy watcher: connect failed");
@@ -70,7 +85,43 @@ pub async fn run_etcd_watcher(
                 }
             }
         }
-        let _ = nodes_clone;
+    });
+
+    // Cordon watcher. Tracks user-set drains written by
+    // `cgn-ctl cluster cordon <id>` and toggles the corresponding
+    // `NodeEntry::cordoned` flag so scoring excludes the node.
+    let nodes_for_cordon = nodes.clone();
+    let cordon_endpoints = endpoints.clone();
+    tokio::spawn(async move {
+        let mut c_client = match Client::connect(&cordon_endpoints, None).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(error=?e, "cordon watcher: connect failed");
+                return;
+            }
+        };
+        let opts = WatchOptions::new().with_prefix();
+        if let Ok((_w, mut s)) = c_client.watch(CORDON_PREFIX, Some(opts)).await {
+            while let Ok(Some(resp)) = s.message().await {
+                for ev in resp.events() {
+                    let Some(kv) = ev.kv() else { continue };
+                    let Ok(key) = kv.key_str() else { continue };
+                    let Some(node_id) = key.strip_prefix(CORDON_PREFIX) else {
+                        continue;
+                    };
+                    match ev.event_type() {
+                        EventType::Put => {
+                            tracing::info!(%node_id, "cordon set");
+                            nodes_for_cordon.set_cordon(node_id, true);
+                        }
+                        EventType::Delete => {
+                            tracing::info!(%node_id, "cordon cleared");
+                            nodes_for_cordon.set_cordon(node_id, false);
+                        }
+                    }
+                }
+            }
+        }
     });
 
     while let Ok(Some(resp)) = stream.message().await {

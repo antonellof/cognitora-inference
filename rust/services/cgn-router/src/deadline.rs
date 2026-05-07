@@ -107,6 +107,7 @@ mod tests {
             free_blocks: 0,
             total_blocks: 0,
             power_watts: 0.0,
+            cordoned: false,
             last_heartbeat: std::time::Instant::now(),
         }
     }

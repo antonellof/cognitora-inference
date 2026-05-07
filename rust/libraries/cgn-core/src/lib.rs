@@ -27,6 +27,10 @@ pub mod etcd_keys {
     pub const MODELS: &str = "/cognitora/models/";
     pub const ROUTING: &str = "/cognitora/routing/policy";
     pub const ROUTER_LEADER: &str = "/cognitora/router/leader";
+    /// User-set per-node cordon flag. The router watcher mirrors the
+    /// presence of `<CORDON>{node_id}` into `NodeEntry::cordoned`, and
+    /// scoring excludes cordoned nodes from candidate selection.
+    pub const CORDON: &str = "/cognitora/cordon/";
 }
 
 /// Default ports.
