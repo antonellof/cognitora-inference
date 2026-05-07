@@ -12,6 +12,7 @@ option go_package = "github.com/cognitora/cognitora/go/pkg/proto/cognitora/v1;co
 // by ctl on the same host.
 service Agent {
   rpc Generate(stream AgentGenerateRequest) returns (stream Token);
+  rpc Embed(EmbedRequest) returns (EmbedResponse);
   rpc LoadModel(ModelSpec) returns (Status);
   rpc UnloadModel(ModelRef) returns (Status);
   rpc KvHandoff(KvHandoffSpec) returns (Status);

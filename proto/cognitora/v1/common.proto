@@ -103,3 +103,25 @@ message BlockInfo {
   string owner_node  = 4;  // empty if local
   uint64 last_access_unix_ms = 5;
 }
+
+// ----------------------------------------------------------------------------
+// Embeddings
+// ----------------------------------------------------------------------------
+
+// Used by both Router.Embed (client-facing) and Agent.Embed (router→agent).
+// Identical shape; the Agent variant is sent only after the Router has
+// chosen a target node via the same scoring path it uses for generation.
+message EmbedRequest {
+  string         model   = 1;
+  repeated string inputs = 2;
+  string         tenant  = 3;
+}
+
+message EmbedResponse {
+  message Vector { repeated float values = 1; }
+  repeated Vector embeddings = 1;
+  uint32          tokens     = 2;
+  // Set on the Agent variant; the Router echoes it back so the gateway
+  // can attribute usage. Empty on the client-facing variant.
+  string          model      = 3;
+}

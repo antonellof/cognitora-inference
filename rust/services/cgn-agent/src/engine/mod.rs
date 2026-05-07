@@ -28,6 +28,17 @@ pub trait Engine: Send + Sync {
     /// Stream tokens for a single request into `tx`.
     async fn generate(&self, req: GenerateReq, tx: mpsc::Sender<Token>) -> Result<()>;
 
+    /// Compute embeddings for a batch of inputs. Returns one vector per
+    /// input plus the prompt-token count reported by the engine. Default
+    /// impl returns `Unimplemented` so engines that don't support
+    /// embeddings (cascade SLMs, llama.cpp without an embed model loaded)
+    /// don't have to override.
+    async fn embed(&self, _req: EmbedReq) -> Result<EmbedResp> {
+        Err(cgn_core::Error::Unavailable(
+            "engine does not support embeddings".into(),
+        ))
+    }
+
     /// Probe readiness; returns `Ok(true)` once the engine accepts traffic.
     async fn ready(&self) -> bool;
 }
@@ -51,6 +62,23 @@ pub struct GenerateReq {
     pub top_p: f32,
     pub stop: Vec<String>,
     pub stream: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct EmbedReq {
+    pub model: String,
+    pub inputs: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EmbedResp {
+    /// One vector per `inputs[i]`. Engines that fail mid-batch return an
+    /// error; partial responses are not allowed (callers can split if
+    /// they need finer granularity).
+    pub embeddings: Vec<Vec<f32>>,
+    /// Token usage reported by the engine. 0 when the engine omits the
+    /// `usage` block.
+    pub prompt_tokens: u32,
 }
 
 pub mod openai_http;

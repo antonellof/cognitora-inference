@@ -7,7 +7,9 @@ use std::sync::Arc;
 use cgn_core::{Error, Result};
 use cgn_proto::v1::{
     agent_server::{Agent, AgentServer},
-    AgentGenerateRequest, KvHandoffSpec, ModelRef, ModelSpec, NodeHealth, Status as PStatus, Token,
+    embed_response::Vector as PVector,
+    AgentGenerateRequest, EmbedRequest as PEmbedRequest, EmbedResponse as PEmbedResponse,
+    KvHandoffSpec, ModelRef, ModelSpec, NodeHealth, Status as PStatus, Token,
 };
 use futures::Stream;
 use tokio::sync::mpsc;
@@ -15,7 +17,7 @@ use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tonic::{transport::Server, Request, Response, Status, Streaming};
 use tracing::info;
 
-use crate::engine::GenerateReq;
+use crate::engine::{EmbedReq, GenerateReq};
 use crate::supervisor::Supervisor;
 
 pub async fn serve(supervisor: Arc<Supervisor>, addr: SocketAddr) -> Result<()> {
@@ -105,6 +107,34 @@ impl Agent for AgentSvc {
         });
 
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
+    }
+
+    async fn embed(&self, req: Request<PEmbedRequest>) -> Result<Response<PEmbedResponse>, Status> {
+        let body = req.into_inner();
+        if body.inputs.is_empty() {
+            return Err(Status::invalid_argument("inputs must be non-empty"));
+        }
+        let model = body.model.clone();
+        let er = EmbedReq {
+            model: body.model,
+            inputs: body.inputs,
+        };
+        match self.supervisor.engine.embed(er).await {
+            Ok(out) => {
+                let embeddings = out
+                    .embeddings
+                    .into_iter()
+                    .map(|values| PVector { values })
+                    .collect();
+                Ok(Response::new(PEmbedResponse {
+                    embeddings,
+                    tokens: out.prompt_tokens,
+                    model,
+                }))
+            }
+            Err(cgn_core::Error::Unavailable(msg)) => Err(Status::unavailable(msg)),
+            Err(e) => Err(Status::internal(format!("engine embed: {e}"))),
+        }
     }
 
     async fn load_model(&self, req: Request<ModelSpec>) -> Result<Response<PStatus>, Status> {

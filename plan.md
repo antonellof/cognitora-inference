@@ -103,14 +103,16 @@ the engine-side KV strategy lives in
 Targeted at making every `plan.md` capability claim runnable end to
 end on bare metal.
 
-* **`cgn-ctl` is a real client, not a logger.** `cluster nodes / cordon
-  / uncordon / drain` and `model load / unload / ls` were stubbed in
-  0.2.x; 0.3 finishes the wiring so they read and write the same etcd
-  key prefixes the router watches.
-* **First-class `/v1/embeddings`.** Define `Embed` on the `Agent`
-  proto, implement it in `cgn-agent` against the engine's
-  `/v1/embeddings`, and replace the synthetic vectors the router
-  currently returns with the real gRPC round-trip.
+* ✓ **`cgn-ctl` is a real client, not a logger.** Shipped in 0.2.1.
+  `cluster nodes / cordon / uncordon / drain` and `model load / unload
+  / ls` read and write the same etcd key prefixes the router watches.
+* ✓ **First-class `/v1/embeddings`.** `Agent.Embed` is on the proto,
+  implemented in `cgn-agent` against the engine's `/v1/embeddings`,
+  and the router's gateway forwards over gRPC mTLS instead of
+  synthesising vectors.
+* ✓ **Real `cgn-metrics` federation scraper.** `[metrics].scrape_targets`
+  is honoured; the union is exposed under `/federate` with a
+  `cgn_target` label injected on every line.
 * **Single-node installer renderer.** `cgn-ctl install --target
   single-node` generates a `docker-compose.yml` from the cluster spec
   and runs `docker compose up -d`. Today the preflight checks pass
@@ -119,9 +121,6 @@ end on bare metal.
   (`aws` or `hetzner`) drives a runnable end-to-end install; the
   others import from it. Today every cloud module ships as a
   near-empty `main.tf`.
-* **Real `cgn-metrics` federation.** Replace the
-  `scrape_once → debug!("placeholder")` loop with a real `reqwest →
-  prometheus::TextEncoder` re-encoding pipeline.
 * **Soft perf gate in CI.** Add a `cargo bench --bench prefix --bench
   routing` job that uploads a baseline as an artefact and posts the
   diff on PRs. Hard regression gating waits for 0.4 once the baseline

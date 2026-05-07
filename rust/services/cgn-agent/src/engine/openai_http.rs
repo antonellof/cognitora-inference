@@ -24,7 +24,7 @@ use serde::Deserialize;
 use tokio::sync::mpsc;
 use tracing::warn;
 
-use super::{Engine, GenerateReq, ModelSpec};
+use super::{EmbedReq, EmbedResp, Engine, GenerateReq, ModelSpec};
 
 /// HTTP driver for any OpenAI-compatible inference engine.
 pub struct OpenAiHttpEngine {
@@ -146,6 +146,52 @@ impl Engine for OpenAiHttpEngine {
         Ok(())
     }
 
+    async fn embed(&self, req: EmbedReq) -> Result<EmbedResp> {
+        let url = format!("{}/v1/embeddings", self.base);
+        let body = serde_json::json!({
+            "model": req.model,
+            "input": req.inputs,
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| Error::Unavailable(format!("{} embed post: {e}", self.kind)))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let txt = resp.text().await.unwrap_or_default();
+            // 404 from a server without /v1/embeddings is the most common
+            // failure mode (e.g. vLLM serving a chat-only model). Surface
+            // it as Unavailable so the router translates to 503 instead
+            // of 500.
+            let err = if status == reqwest::StatusCode::NOT_FOUND {
+                Error::Unavailable(format!(
+                    "{} returned 404 from /v1/embeddings — is the loaded model an embedding model?",
+                    self.kind
+                ))
+            } else {
+                Error::Internal(format!("{} embed status {status}: {txt}", self.kind))
+            };
+            return Err(err);
+        }
+
+        let parsed: EmbedFrame = resp
+            .json()
+            .await
+            .map_err(|e| Error::Internal(format!("{} embed decode: {e}", self.kind)))?;
+
+        let embeddings = parsed.data.into_iter().map(|d| d.embedding).collect();
+        let prompt_tokens = parsed.usage.as_ref().map(|u| u.prompt_tokens).unwrap_or(0);
+        Ok(EmbedResp {
+            embeddings,
+            prompt_tokens,
+        })
+    }
+
     async fn ready(&self) -> bool {
         // Try the standard OpenAI-style endpoints. vLLM and llama.cpp both
         // expose /health; if it's missing we fall back to /v1/models which
@@ -183,4 +229,22 @@ struct Choice {
     text: Option<String>,
     #[serde(default)]
     finish_reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct EmbedFrame {
+    data: Vec<EmbedDatum>,
+    #[serde(default)]
+    usage: Option<EmbedUsage>,
+}
+
+#[derive(Deserialize)]
+struct EmbedDatum {
+    embedding: Vec<f32>,
+}
+
+#[derive(Deserialize, Default)]
+struct EmbedUsage {
+    #[serde(default)]
+    prompt_tokens: u32,
 }

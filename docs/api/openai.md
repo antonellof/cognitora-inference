@@ -28,7 +28,7 @@ for chunk in stream:
 |--------|----------------------------|---------------|---------------------------------------------------|
 | `POST` | `/v1/chat/completions`     | implemented   | streaming + buffered                              |
 | `POST` | `/v1/completions`          | implemented   | alias of `chat/completions` for legacy SDKs       |
-| `POST` | `/v1/embeddings`           | placeholder   | returns deterministic vectors until `Agent.Embed` |
+| `POST` | `/v1/embeddings`           | implemented   | KV-aware routing → `Agent.Embed` → engine `/v1/embeddings` round-trip |
 | `GET`  | `/v1/models`               | implemented   | union of `[models.*]` config + live agents        |
 | `GET`  | `/healthz`                 | implemented   | liveness probe (admin port)                       |
 | `GET`  | `/readyz`                  | implemented   | readiness probe (admin port)                      |

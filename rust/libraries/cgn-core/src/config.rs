@@ -569,6 +569,13 @@ pub struct MetricsConfig {
     pub ipmi_fallback: bool,
     #[serde(with = "humantime_serde")]
     pub scrape_interval: Duration,
+    /// Targets `cgn-metrics` pulls every `scrape_interval`. Each entry's
+    /// metrics are tagged with `cgn_target = "<name>"` and exposed under
+    /// the federation endpoint (`/federate`) on the metrics aggregator.
+    /// Per-request timeout is fixed at 5s; a target that times out is
+    /// dropped from that scrape and surfaced in the
+    /// `cgn_metrics_scrape_errors_total` counter.
+    pub scrape_targets: Vec<ScrapeTarget>,
 }
 impl Default for MetricsConfig {
     fn default() -> Self {
@@ -579,8 +586,20 @@ impl Default for MetricsConfig {
             redfish_password: None,
             ipmi_fallback: false,
             scrape_interval: Duration::from_secs(15),
+            scrape_targets: vec![],
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScrapeTarget {
+    /// Free-form label written into the federated body's `cgn_target`
+    /// label, e.g. `"router"`, `"agent-1"`, `"kvcached-rack-a"`.
+    pub name: String,
+    /// `/metrics` URL of the target. Must be reachable from the metrics
+    /// aggregator (cgn-metrics) host; mTLS is honoured when the URL is
+    /// `https://`.
+    pub url: String,
 }
 
 // ---------------------------------------------------------------------------
