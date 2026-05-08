@@ -1,11 +1,13 @@
 # Bare-metal guide
 
-The fastest path is the one-line installer. It downloads a sha256-verified
-release tarball from GitHub, drops binaries into `/usr/local/bin` (or
-`$HOME/.cognitora/bin` if root is unavailable), and prints PATH guidance.
+The fastest path is the one-line installer (`curl -fsSL https://inference.cognitora.dev/install | sh`).
+That HTTPS URL redirects to [`deploy/installer/install.sh`](../../deploy/installer/install.sh)
+on GitHub; the script downloads a sha256-verified release tarball, drops
+binaries into `/usr/local/bin` (or `$HOME/.cognitora/bin` if root is unavailable),
+and prints PATH guidance.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/antonellof/cognitora-inference/main/deploy/installer/install.sh | sh
+curl -fsSL https://inference.cognitora.dev/install | sh
 cgn-ctl pki bootstrap                 # generates dev PKI material
 cgn-ctl install baremetal             # systemd units + config
 systemctl enable --now cognitora.target
@@ -77,7 +79,7 @@ The keys file is hot-reloaded by the router; no restart needed.
 ## Upgrade
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/antonellof/cognitora-inference/main/deploy/installer/install.sh \
+curl -fsSL https://inference.cognitora.dev/install \
   | CGN_VERSION=v0.2.0 sh
 systemctl restart cognitora.target
 ```

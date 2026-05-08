@@ -59,7 +59,7 @@ For a single model on a single GPU, the inference engine on its own is usually e
 | [**Multi-model cascade**](docs/architecture/routing.md) | SLM → Mid → LLM gating on the model's own log-probability ("did the cheap model already get this right?"). | Cuts cost on easy queries while preserving worst-case quality. |
 | [**Energy-aware scheduling**](docs/operations/observability.md) | `cgn-power` reads Redfish + IPMI + DCGM/NVML; the routing score has a power term and admission can drain hot nodes. | Lower W-per-token, fewer SLA breaches under thermal stress. |
 | [**Cross-cluster federation**](docs/architecture/protocols.md) | `cgn-router::federation` forwards across clusters; `cgn-kvcached` peers across QUIC. | Multi-region inference without Kubernetes-of-Kubernetes. |
-| [**One-line install**](deploy/installer/install.sh) | Cosign-verified release tarballs, six binaries dropped into `/usr/local/bin`. | Same artifact bare-metal / VM / container / Kubernetes. |
+| [**One-line install**](https://inference.cognitora.dev/install) ([`deploy/installer/install.sh`](deploy/installer/install.sh)) | Cosign-verified release tarballs, six binaries dropped into `/usr/local/bin`. Short URL redirects to the installer script. | Same artifact bare-metal / VM / container / Kubernetes. |
 | [**Recipes**](recipes/README.md) | Flat TOML profiles per `<model>/<engine>/<topology>` plus a 3-line `up.sh`. | Reproducible bring-up of a real model in <30 s. |
 
 <p align="center">
@@ -118,15 +118,18 @@ Pulls a signed, sha256-verified release tarball from GitHub and drops the
 binaries into `/usr/local/bin` (or `~/.cognitora/bin` if not writable):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/antonellof/cognitora-inference/main/deploy/installer/install.sh | sh
+curl -fsSL https://inference.cognitora.dev/install | sh
 ```
+
+That URL redirects to the same script as the canonical GitHub raw path:
+[`deploy/installer/install.sh`](deploy/installer/install.sh).
 
 Pin a version, choose a custom prefix, or point at a fork:
 
 ```bash
-curl -fsSL .../install.sh | CGN_VERSION=v0.1.0 sh
-curl -fsSL .../install.sh | CGN_PREFIX=$HOME/.local sh
-curl -fsSL .../install.sh | CGN_REPO=acme/cognitora-fork sh
+curl -fsSL https://inference.cognitora.dev/install | CGN_VERSION=v0.1.0 sh
+curl -fsSL https://inference.cognitora.dev/install | CGN_PREFIX=$HOME/.local sh
+curl -fsSL https://inference.cognitora.dev/install | CGN_REPO=acme/cognitora-fork sh
 ```
 
 > Cognitora targets Linux for production deployment (bare metal, Kubernetes,

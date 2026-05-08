@@ -1,6 +1,10 @@
 #!/usr/bin/env sh
 # Cognitora one-line installer (Linux x86_64 / aarch64).
 #
+# Short URL (redirects here):
+#   curl -fsSL https://inference.cognitora.dev/install | sh
+#
+# Canonical raw GitHub URL (same script):
 #   curl -fsSL https://raw.githubusercontent.com/antonellof/cognitora-inference/main/deploy/installer/install.sh | sh
 #
 # Cognitora ships prebuilt Linux binaries only — bare metal, Kubernetes,

@@ -59,7 +59,7 @@ cognitora/
 │   │   └── helm/cognitora/ templates/, values.yaml
 │   ├── terraform/
 │   │   └── {aws,gcp,azure,hetzner,baremetal}/
-│   └── installer/install.sh      sha256 + cosign verified one-liner
+│   └── installer/install.sh      public https://inference.cognitora.dev/install → sha256 + cosign verified one-liner
 │
 ├── docs/
 │   ├── ARCHITECTURE.md

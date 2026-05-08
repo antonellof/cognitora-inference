@@ -21,7 +21,8 @@ Pick one of:
 # Option A — prebuilt binaries (Linux x86_64 / aarch64).
 # Pulls a sha256-verified release tarball from GitHub. Override CGN_PREFIX
 # to install somewhere other than /usr/local/bin or ~/.cognitora/bin.
-curl -fsSL https://raw.githubusercontent.com/antonellof/cognitora-inference/main/deploy/installer/install.sh | sh
+# inference.cognitora.dev/install redirects to deploy/installer/install.sh on GitHub.
+curl -fsSL https://inference.cognitora.dev/install | sh
 
 # Option B — from source (any platform; required on macOS)
 git clone https://github.com/antonellof/cognitora-inference cognitora

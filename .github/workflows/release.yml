@@ -202,9 +202,9 @@ jobs:
             printf '## Cognitora %s\n\n' "$TAG"
             printf 'OpenAI-compatible inference platform — single command install:\n\n'
             printf '```\n'
-            printf 'curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/deploy/installer/install.sh | sh\n'
+            printf 'curl -fsSL https://inference.cognitora.dev/install | sh\n'
             printf '```\n\n'
-            printf 'Pin this version: `CGN_VERSION=%s curl -fsSL .../install.sh | sh`\n\n' "$TAG"
+            printf 'Pin this version: `CGN_VERSION=%s curl -fsSL https://inference.cognitora.dev/install | sh`\n\n' "$TAG"
             printf '### Artefacts\n\n'
             printf '| Platform | Archive |\n|----------|---------|\n'
             for f in dist/cognitora-*.tar.gz; do

@@ -243,7 +243,7 @@ This is left as the next iteration of this bench.
 
 ```bash
 # On a fresh Linux x86_64 VM with curl:
-curl -fsSL https://raw.githubusercontent.com/antonellof/cognitora-inference/main/deploy/installer/install.sh | sh
+curl -fsSL https://inference.cognitora.dev/install | sh
 
 # Pull the bench scripts (already in this repo):
 git clone https://github.com/antonellof/cognitora-inference.git

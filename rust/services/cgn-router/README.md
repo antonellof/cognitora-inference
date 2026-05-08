@@ -25,7 +25,7 @@ and cross-cluster federation.
 Most users install the whole Cognitora suite via the one-liner:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/antonellof/cognitora-inference/main/deploy/installer/install.sh | bash
+curl -fsSL https://inference.cognitora.dev/install | bash
 ```
 
 To get just this binary from crates.io:
