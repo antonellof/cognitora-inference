@@ -7,6 +7,9 @@ authoritative schema lives in
 the canonical example with every section documented inline lives at
 [`configs/cognitora.toml.example`](../../configs/cognitora.toml.example).
 
+Per-binary narrative docs (features, ports, dependencies): see
+[`docs/platform/`](../platform/README.md).
+
 ## Sections
 
 | Section            | Owner crate         | Required by                                  |

@@ -3,6 +3,8 @@
 > One-page technical overview. For repo and crate layout see
 > [`architecture/repo-layout.md`](architecture/repo-layout.md). For the
 > full configuration reference see [`reference/config.md`](reference/config.md).
+> Per-component guides for each shipped binary live under
+> [`platform/`](platform/README.md).
 
 ## 1. Topology
 
