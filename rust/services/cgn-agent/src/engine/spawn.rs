@@ -646,7 +646,9 @@ mod tests {
         assert_eq!(argv[0], "python3");
         assert_eq!(argv[1], "-m");
         assert_eq!(argv[2], "mlx_lm.server");
-        assert!(argv.windows(2).any(|w| w[0] == "--model" && w[1] == "mlx-community/Meta-Llama-3.2-3B-Instruct-4bit"));
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--model" && w[1] == "mlx-community/Meta-Llama-3.2-3B-Instruct-4bit"));
         assert!(argv.windows(2).any(|w| w[0] == "--port" && w[1] == "8090"));
     }
 
