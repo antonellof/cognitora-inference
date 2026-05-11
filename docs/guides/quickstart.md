@@ -125,20 +125,20 @@ Two ready-to-run profiles live under [`examples/`](../../examples/):
 
 | Profile                                                | Engine                       | Best for |
 |--------------------------------------------------------|------------------------------|----------|
-| [`examples/local-mac`](../../examples/local-mac)       | `openai_compat` → Ollama     | macOS laptop. No Python venv, no GGUF download — just `ollama pull phi3:mini`. |
+| [`examples/local-mac`](../../examples/local-mac)       | `llama_cpp`                  | macOS / Apple Silicon laptop. Downloads a GGUF and runs via llama.cpp with Metal acceleration. |
 | [`examples/multi-llm`](../../examples/multi-llm)       | `vllm` (GPU) or `llama_cpp` (CPU) | Linux box, server, or CI. Multi-model with a real engine. |
 
-### macOS (Ollama path)
+### macOS (llama.cpp path)
 
 ```bash
 brew install jq unzip
-ollama serve &
-ollama pull phi3:mini
-ollama pull llama3.2
 
 cargo build --release --no-default-features \
   -p cgn-router -p cgn-agent -p cgn-kvcached -p cgn-ctl
+bash scripts/install/install-engine-cpu.sh      # builds llama.cpp with Metal
 bash scripts/install/install-etcd.sh
+bash scripts/install/download-model.sh \
+  --gguf qwen2.5-0.5b-instruct-q4_k_m.gguf  Qwen/Qwen2.5-0.5B-Instruct-GGUF
 bash scripts/run/up.sh examples/local-mac
 bash examples/local-mac/demo.sh
 ```
