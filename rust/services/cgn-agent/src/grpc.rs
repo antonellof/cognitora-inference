@@ -23,7 +23,10 @@ use crate::supervisor::Supervisor;
 pub async fn serve(supervisor: Arc<Supervisor>, addr: SocketAddr) -> Result<()> {
     info!(%addr, "agent grpc listening");
 
-    let mut builder = Server::builder().timeout(std::time::Duration::from_secs(120));
+    // Long-running `Generate` streams (MLX first download/compile, huge
+    // prompts) can exceed a short tonic server timeout; 2h matches the
+    // reqwest engine client budget in `openai_http`.
+    let mut builder = Server::builder().timeout(std::time::Duration::from_secs(7200));
 
     if supervisor.cfg.security.require_mtls {
         let (Some(ca), Some(cert), Some(key)) = (

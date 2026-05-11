@@ -5,8 +5,10 @@
 //! 1. Resolves the effective [`EngineConfig`] (honoring legacy
 //!    `[agent].vllm_url` / `[agent].vllm_cmd` aliases).
 //! 2. Renders the engine argv via [`engine::spawn::render_argv`].
-//! 3. Spawns the engine as a child process with stdout/stderr piped into
-//!    structured logs (skipped when `engine.kind = "openai_compat"`).
+//! 3. Spawns the engine as a child process. Stdout/stderr **inherit** the
+//!    agent process so engine logs (e.g. `mlx_lm.server`) reach the same
+//!    destination as `cgn-agent` (typically `nohup` → `*.log` from `up.sh`).
+//!    Piped stdio without readers would deadlock the child once pipes fill.
 //! 4. Polls the engine's `/health` (or `/v1/models`) until it's ready, then
 //!    registers the node in etcd and starts accepting gRPC.
 //! 5. Restarts the engine on crash, with exponential backoff up to 30s.
@@ -82,17 +84,17 @@ impl Supervisor {
 
         let mut cmd = Command::new(&argv[0]);
         cmd.args(&argv[1..])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdin(Stdio::null())
+            // Piped stdio without a reader deadlocks the child once the kernel
+            // pipe buffer fills (mlx_lm is chatty on stderr). Inherit so lines
+            // land in the agent's log file when launched via nohup (up.sh).
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
             .kill_on_drop(true);
         let child = cmd
             .spawn()
             .map_err(|e| Error::Internal(format!("spawn engine: {e}")))?;
         *self.child.lock() = Some(child);
-
-        // Background: pipe child output to our tracing layer.
-        // Real implementation forwards stdout/stderr lines into `tracing::info!`
-        // tagged with `engine=<kind>`; omitted here for brevity.
 
         Ok(())
     }

@@ -638,7 +638,7 @@ mod tests {
     fn renders_mlx_command() {
         let argv = render_argv(
             &mlx_cfg(),
-            &spec("mlx-community/Meta-Llama-3.2-3B-Instruct-4bit", None),
+            &spec("mlx-community/Llama-3.2-3B-Instruct-4bit", None),
             NodeRoleCfg::Both,
             None,
         )
@@ -648,7 +648,7 @@ mod tests {
         assert_eq!(argv[2], "mlx_lm.server");
         assert!(argv
             .windows(2)
-            .any(|w| w[0] == "--model" && w[1] == "mlx-community/Meta-Llama-3.2-3B-Instruct-4bit"));
+            .any(|w| w[0] == "--model" && w[1] == "mlx-community/Llama-3.2-3B-Instruct-4bit"));
         assert!(argv.windows(2).any(|w| w[0] == "--port" && w[1] == "8090"));
     }
 
@@ -657,7 +657,7 @@ mod tests {
         let argv = render_argv(
             &mlx_cfg(),
             &spec(
-                "mlx-community/Meta-Llama-3.2-3B-Instruct-4bit",
+                "mlx-community/Llama-3.2-3B-Instruct-4bit",
                 Some("/models/my-mlx"),
             ),
             NodeRoleCfg::Both,

@@ -10,6 +10,17 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+### Added
+
+- **`examples/apple-mlx/download-model.sh`** — pre-downloads an MLX-LM model from Hugging Face with a real progress bar so users don't sit silent through `mlx_lm.server`'s lazy first-load.
+- **`examples/apple-mlx/demo.sh` and `verify-engine.sh`** now auto-pre-warm the model via `download-model.sh` before hitting the engine. Set `CGN_NO_AUTOPULL=1` to skip when the weights are already cached.
+
+### Fixed
+
+- **`cgn-agent` gRPC server timeout** raised from 120s to 2h so long MLX cold-starts (HF download + first compile) are not cut off mid-`Generate`.
+- **Engine subprocess stdio** now **inherits** the agent's stdout/stderr instead of anonymous pipes. Piped stdio with no reader caused `mlx_lm.server` (and other chatty engines) to **block once the pipe buffer filled**, so MLX never bound to `:8090`, `ready` stayed false, and chat hung with no output.
+- **`examples/apple-mlx/` model id** corrected from the non-existent `mlx-community/Meta-Llama-3.2-3B-Instruct-4bit` to the real `mlx-community/Llama-3.2-3B-Instruct-4bit` (HF returned 401 for the previous id, blocking pre-download).
+
 ## [0.3.1] — 2026-05-08
 
 ### Added
