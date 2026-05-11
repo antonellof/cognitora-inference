@@ -177,7 +177,7 @@ sleep 2
 # 6. Verify openai_compat did NOT fork a python/vllm child.
 if pgrep -P "$(pgrep -f "$TMP/agent.toml" | head -1)" 2>/dev/null \
      | xargs -I{} ps -o cmd= -p {} 2>/dev/null \
-     | grep -qE "vllm|llama_cpp.server"; then
+     | grep -qE "vllm|llama_cpp.server|mlx_lm.server"; then
   fail "openai_compat mode should not spawn an engine child"
 fi
 ok "openai_compat does not spawn a child"

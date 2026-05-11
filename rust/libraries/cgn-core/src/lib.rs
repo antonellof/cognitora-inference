@@ -51,6 +51,8 @@ pub mod ports {
     pub const METRICS_HTTP: u16 = 9092;
     /// vLLM HTTP (private to the agent).
     pub const VLLM_HTTP: u16 = 8000;
+    /// `mlx_lm.server` HTTP (Apple Silicon MLX-LM; private to the agent).
+    pub const MLX_LM_HTTP: u16 = 8090;
 }
 
 /// Build / version metadata.

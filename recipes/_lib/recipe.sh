@@ -94,7 +94,7 @@ _recipe_preflight() {
 }
 
 # Surface a clear error if the recipe expects an engine binary that isn't
-# installed yet (vllm / python -m sglang.launch_server / llama_cpp).
+# installed yet (vllm / python -m sglang.launch_server / llama_cpp / mlx_lm).
 _recipe_probe_engines() {
   local profile=$1
   shopt -s nullglob
@@ -112,6 +112,10 @@ _recipe_probe_engines() {
       llama_cpp)
         python -c 'import llama_cpp' >/dev/null 2>&1 \
           || warn "$(basename "$cfg") expects llama_cpp.server (pip install llama-cpp-python[server])"
+        ;;
+      mlx)
+        python3 -c 'import mlx_lm' >/dev/null 2>&1 \
+          || warn "$(basename "$cfg") expects mlx-lm (pip install mlx-lm)"
         ;;
       openai_compat|"") : ;;
       *) warn "$(basename "$cfg") declares unknown engine kind: $kind" ;;

@@ -109,6 +109,19 @@ n_ctx        = 4096
 n_threads    = 4
 n_gpu_layers = 0                  # -1 = offload everything to GPU
 
+# ---- MLX-LM (Apple Silicon only; optional alternative to openai_compat) ---
+# Spawns: python3 -m mlx_lm.server --model … --host … --port …
+# [engine]
+# kind = "mlx"
+# url  = "http://127.0.0.1:8090"
+# kv_offload = "none"
+#
+# [engine.mlx_lm]
+# binary     = "python3"
+# host       = "127.0.0.1"
+# port       = 8090
+# extra_args = []
+
 # ---- KV cache daemon -------------------------------------------------------
 
 [kv]

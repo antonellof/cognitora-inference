@@ -110,7 +110,7 @@ curl -N -sS http://127.0.0.1:8080/v1/chat/completions \
   }'
 ```
 
-## 7. Run a real engine (vLLM or llama.cpp)
+## 7. Run a real engine (vLLM, llama.cpp, MLX, or proxy)
 
 The fake engine above is fine for proving the gateway/auth/routing path,
 but for an actual model end-to-end use one of the bundled engine drivers:
@@ -118,29 +118,60 @@ but for an actual model end-to-end use one of the bundled engine drivers:
 | Engine kind     | When to pick it                                              |
 | --------------- | ------------------------------------------------------------ |
 | `vllm`          | NVIDIA GPU node. The agent spawns `vllm serve <model> …`.    |
-| `llama_cpp`     | CPU node, Apple Silicon, or GPU offload via `n_gpu_layers`.  |
+| `sglang`        | NVIDIA GPU node; RadixAttention and SGLang features.          |
+| `llama_cpp`     | CPU or GPU offload via `n_gpu_layers` (GGUF on disk).       |
+| `mlx`           | **Apple Silicon only.** Agent spawns `python3 -m mlx_lm.server` ([mlx-lm](https://github.com/ml-explore/mlx-lm)). |
 | `openai_compat` | The engine is managed by systemd / k8s; the agent only proxies. |
 
-Two ready-to-run profiles live under [`examples/`](../../examples/):
+Ready-to-run profiles under [`examples/`](../../examples/):
 
 | Profile                                                | Engine                       | Best for |
 |--------------------------------------------------------|------------------------------|----------|
-| [`examples/local-mac`](../../examples/local-mac)       | `llama_cpp`                  | macOS / Apple Silicon laptop. Downloads a GGUF and runs via llama.cpp with Metal acceleration. |
-| [`examples/multi-llm`](../../examples/multi-llm)       | `vllm` (GPU) or `llama_cpp` (CPU) | Linux box, server, or CI. Multi-model with a real engine. |
+| [`examples/local-mac`](../../examples/local-mac)       | `openai_compat` → Ollama     | macOS laptop; `ollama pull` only — no GGUF build. |
+| [`examples/apple-mlx`](../../examples/apple-mlx)        | `mlx` → `mlx_lm.server`      | macOS Apple Silicon; `pip install mlx-lm`. |
+| [`examples/multi-llm`](../../examples/multi-llm)       | `vllm` (GPU) or `llama_cpp` (CPU) | Linux box, server, or CI. |
 
-### macOS (llama.cpp path)
+### macOS (Ollama — fastest)
+
+```bash
+brew install jq unzip
+ollama serve &
+ollama pull phi3:mini
+ollama pull llama3.2
+
+cargo build --release --no-default-features \
+  -p cgn-router -p cgn-agent -p cgn-kvcached -p cgn-ctl
+bash scripts/install/install-etcd.sh
+bash scripts/run/up.sh examples/local-mac
+bash examples/local-mac/demo.sh
+```
+
+### macOS (MLX — Apple Silicon)
+
+```bash
+brew install jq unzip
+pip install mlx-lm
+
+cargo build --release --no-default-features \
+  -p cgn-router -p cgn-agent -p cgn-kvcached -p cgn-ctl
+bash scripts/install/install-etcd.sh
+bash scripts/run/up.sh examples/apple-mlx
+bash examples/apple-mlx/demo.sh
+```
+
+### macOS or Linux (llama.cpp + GGUF)
 
 ```bash
 brew install jq unzip
 
 cargo build --release --no-default-features \
   -p cgn-router -p cgn-agent -p cgn-kvcached -p cgn-ctl
-bash scripts/install/install-engine-cpu.sh      # builds llama.cpp with Metal
+bash scripts/install/install-engine-cpu.sh      # builds llama.cpp with Metal on Mac
 bash scripts/install/install-etcd.sh
 bash scripts/install/download-model.sh \
   --gguf qwen2.5-0.5b-instruct-q4_k_m.gguf  Qwen/Qwen2.5-0.5B-Instruct-GGUF
-bash scripts/run/up.sh examples/local-mac
-bash examples/local-mac/demo.sh
+bash scripts/run/up.sh examples/multi-llm
+bash examples/multi-llm/demo.sh
 ```
 
 ### Linux (vLLM or llama.cpp)
@@ -192,5 +223,5 @@ kill %1                                # the backgrounded router
 rm -rf /tmp/cognitora /tmp/pki
 
 # or, if you used scripts/run/up.sh with a profile:
-bash scripts/run/down.sh examples/local-mac      # or examples/multi-llm
+bash scripts/run/down.sh examples/local-mac      # or examples/multi-llm / examples/apple-mlx
 ```

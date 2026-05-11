@@ -10,6 +10,16 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-05-08
+
+### Added
+
+- **`engine.kind = "mlx"`** — `cgn-agent` spawns `python3 -m mlx_lm.server` ([mlx-lm](https://github.com/ml-explore/mlx-lm)) on **Apple Silicon** with OpenAI-compatible HTTP. New `[engine.mlx_lm]` config block. Example profile: `examples/apple-mlx/`.
+
+### Fixed
+
+- **`cgn-proto` build script** now reads `CARGO_MANIFEST_DIR` at runtime instead of embedding it with `env!()`, so `protoc` no longer follows a stale absolute path after moving or copying the repository.
+
 ## [0.3.0] — 2026-05-07
 
 The "make every plan.md claim runnable end-to-end" release. Five of the

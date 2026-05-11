@@ -87,8 +87,8 @@ What it does **not** do:
 > **Pin the image.** The manifest references
 > `ghcr.io/antonellof/cognitora:latest`. The chat-template fix
 > required for buffered chat completions to return non-empty content
-> shipped in **v0.3.0**; pin to `:v0.3.0` (or newer) if you want a
-> reproducible install.
+> shipped in **v0.3.0**; pin to `:v0.3.1` (or newer) if you want a
+> reproducible install with MLX and the latest patches.
 
 ## 2. Helm chart on GKE Standard with GPU
 

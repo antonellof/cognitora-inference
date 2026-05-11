@@ -276,7 +276,7 @@ impl Default for AgentConfig {
 /// Inference engine driver.
 ///
 /// Cognitora's `cgn-agent` proxies to an OpenAI-compatible HTTP server. This
-/// block describes which engine to spawn and how. Four kinds are supported:
+/// block describes which engine to spawn and how. Supported kinds:
 ///
 /// * `vllm` — the agent spawns `vllm serve <model> ...` (GPU).
 /// * `sglang` — the agent spawns `python -m sglang.launch_server ...` (GPU).
@@ -285,6 +285,9 @@ impl Default for AgentConfig {
 ///   surface as vLLM and is fully interchangeable.
 /// * `llama_cpp` — the agent spawns `python -m llama_cpp.server` or a
 ///   standalone `llama-server` binary (CPU or GPU offload).
+/// * `mlx` — the agent spawns `python -m mlx_lm.server ...` (**Apple
+///   Silicon / macOS**). See the [mlx-lm](https://github.com/ml-explore/mlx-lm)
+///   HTTP server (`mlx_lm/SERVER.md`).
 /// * `openai_compat` — the agent does not spawn anything; it just proxies
 ///   to `engine.url`. Use this when the engine is managed by
 ///   systemd / Kubernetes / a sidecar.
@@ -304,6 +307,8 @@ pub struct EngineConfig {
     pub sglang: SglangEngineConfig,
     /// llama.cpp-specific knobs (used when `kind = "llama_cpp"`).
     pub llama_cpp: LlamaCppEngineConfig,
+    /// MLX-LM server knobs (used when `kind = "mlx"`).
+    pub mlx_lm: MlxLmEngineConfig,
 }
 impl Default for EngineConfig {
     fn default() -> Self {
@@ -314,6 +319,7 @@ impl Default for EngineConfig {
             vllm: VllmEngineConfig::default(),
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
+            mlx_lm: MlxLmEngineConfig::default(),
         }
     }
 }
@@ -324,6 +330,8 @@ pub enum EngineKind {
     Vllm,
     Sglang,
     LlamaCpp,
+    /// Apple MLX (`python -m mlx_lm.server`).
+    Mlx,
     OpenaiCompat,
 }
 
@@ -341,6 +349,7 @@ pub enum EngineKind {
 /// | `vllm`        | yes    | yes    | yes       | no        | yes    |
 /// | `sglang`      | yes    | yes    | no        | yes       | no     |
 /// | `llama_cpp`   | yes    | no     | no        | no        | no     |
+/// | `mlx`         | yes    | no     | no        | no        | no     |
 /// | `openai_compat` | yes  | no     | no        | no        | no     |
 ///
 /// In disaggregated topologies (`[agent].role = "prefill"` or `"decode"`)
@@ -467,6 +476,31 @@ impl Default for LlamaCppEngineConfig {
             n_ctx: 4096,
             n_threads: 4,
             n_gpu_layers: 0,
+            extra_args: vec![],
+        }
+    }
+}
+
+/// MLX-LM HTTP server (`python -m mlx_lm.server`). Apple Silicon only.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MlxLmEngineConfig {
+    /// Python interpreter that can `import mlx_lm` (default: `python3`).
+    pub binary: String,
+    /// `--host` for `mlx_lm.server`.
+    pub host: String,
+    /// `--port` for `mlx_lm.server` (default [`crate::ports::MLX_LM_HTTP`]
+    /// avoids clashing with [`crate::ports::ROUTER_HTTP`] on one machine).
+    pub port: u16,
+    /// Extra flags after `--model … --host … --port …`.
+    pub extra_args: Vec<String>,
+}
+impl Default for MlxLmEngineConfig {
+    fn default() -> Self {
+        Self {
+            binary: "python3".into(),
+            host: "127.0.0.1".into(),
+            port: crate::ports::MLX_LM_HTTP,
             extra_args: vec![],
         }
     }

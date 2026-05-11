@@ -1,0 +1,18 @@
+[cluster]
+name           = "cognitora-mlx"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[kv]
+listen            = "127.0.0.1:7090"
+uds               = "/tmp/cognitora-mlx-kv.sock"
+ram_gib           = 1
+ssd_dir           = "/tmp/cognitora-mlx-kv-ssd"
+ssd_gib           = 1
+index_dir         = "/tmp/cognitora-mlx-kv-index"
+transport         = "quic"
+quic_listen       = "127.0.0.1:7091"
+block_size_tokens = 16

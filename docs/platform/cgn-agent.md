@@ -29,7 +29,7 @@ KV events flow to **`cgn-kvcached`** over the Unix socket configured in your pro
 | `[agent].listen_admin` | string | `127.0.0.1:9091` | Admin + `/metrics` |
 | `[agent].heartbeat` | duration | `5s` | etcd lease refresh |
 | `[agent].ready_probe_url` | string | engine `/v1/models` | Readiness gate |
-| `[engine].kind` | enum | `vllm` | `vllm`, `sglang`, `llama_cpp`, `openai_compat` |
+| `[engine].kind` | enum | `vllm` | `vllm`, `sglang`, `llama_cpp`, `mlx`, `openai_compat` |
 | `[engine].url` | string | `http://127.0.0.1:8000` | Engine HTTP base |
 | `[engine].kv_offload` | enum | `none` | Engine-side KV connector |
 

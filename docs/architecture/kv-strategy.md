@@ -67,7 +67,7 @@ Three reasons:
 
 ```toml
 [engine]
-kind       = "vllm"        # or "sglang", "llama_cpp", "openai_compat"
+kind       = "vllm"        # or "sglang", "llama_cpp", "mlx", "openai_compat"
 kv_offload = "lmcache"     # or "none" | "nixl" | "hicache" | "kvbm"
 ```
 
@@ -79,6 +79,7 @@ The compatibility matrix is:
 | `vllm`          | yes    | yes    | yes       | no        | yes    |
 | `sglang`        | yes    | yes    | no        | yes       | no     |
 | `llama_cpp`     | yes    | no     | no        | no        | no     |
+| `mlx`           | yes    | no     | no        | no        | no     |
 | `openai_compat` | yes    | no     | no        | no        | no     |
 
 Disagg topologies (`[agent].role = "prefill"` or `"decode"`)
@@ -105,7 +106,7 @@ convenience:
 | Built-in offload backend                           | KVBM (Rust + Python)                            | None — we integrate LMCache / HiCache / KVBM as alternatives             |
 | Cross-cluster prefix index                         | `kv-router` + NATS events                       | `cgn-kvcached` + `cgn-router` (single-binary, RocksDB, QUIC peer fetch)   |
 | Routing correctness                                | Radix tree of GPU-resident blocks               | Same idea, plus **sequence-chained BLAKE3 digests** so the router never confuses repeated chunks at different positions (see `cgn-core::hash::hash_seq_chunks`) |
-| Engine support                                     | vLLM, TRT-LLM, SGLang                            | vLLM, **SGLang**, **llama.cpp**, openai-compat                            |
+| Engine support                                     | vLLM, TRT-LLM, SGLang                            | vLLM, **SGLang**, **llama.cpp**, **MLX**, openai-compat                            |
 | Disaggregation                                     | Yes (1P1D, 2P2D)                                | Yes (`vllm/disagg-single-node`, `vllm/disagg-lmcache`)                    |
 | Deployment artefact                                | Kubernetes operator + CRDs                       | Flat TOML profiles + `up.sh`; optional `cgn-ctl recipe up`                |
 | Python footprint                                   | Required (frontend + most backends)              | None for the Rust binaries; engines bring their own                       |

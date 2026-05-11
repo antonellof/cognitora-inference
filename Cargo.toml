@@ -26,7 +26,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 rust-version = "1.89"
 license = "Apache-2.0"
@@ -52,16 +52,16 @@ dead_code = "allow"
 # Internal crates. `path` keeps local builds resolving against the workspace
 # checkout; `version` is what `cargo publish` writes into the published
 # manifest (the path is stripped on upload).
-cgn-proto      = { path = "rust/libraries/cgn-proto",     version = "0.3.0" }
-cgn-core       = { path = "rust/libraries/cgn-core",      version = "0.3.0" }
-cgn-tls        = { path = "rust/libraries/cgn-tls",       version = "0.3.0" }
-cgn-telemetry  = { path = "rust/libraries/cgn-telemetry", version = "0.3.0" }
-cgn-kv         = { path = "rust/libraries/cgn-kv",        version = "0.3.0", default-features = false }
-cgn-auth       = { path = "rust/libraries/cgn-auth",      version = "0.3.0" }
-cgn-ratelimit  = { path = "rust/libraries/cgn-ratelimit", version = "0.3.0" }
-cgn-k8s        = { path = "rust/libraries/cgn-k8s",       version = "0.3.0" }
-cgn-helm       = { path = "rust/libraries/cgn-helm",      version = "0.3.0" }
-cgn-power      = { path = "rust/libraries/cgn-power",     version = "0.3.0" }
+cgn-proto      = { path = "rust/libraries/cgn-proto",     version = "0.3.1" }
+cgn-core       = { path = "rust/libraries/cgn-core",      version = "0.3.1" }
+cgn-tls        = { path = "rust/libraries/cgn-tls",       version = "0.3.1" }
+cgn-telemetry  = { path = "rust/libraries/cgn-telemetry", version = "0.3.1" }
+cgn-kv         = { path = "rust/libraries/cgn-kv",        version = "0.3.1", default-features = false }
+cgn-auth       = { path = "rust/libraries/cgn-auth",      version = "0.3.1" }
+cgn-ratelimit  = { path = "rust/libraries/cgn-ratelimit", version = "0.3.1" }
+cgn-k8s        = { path = "rust/libraries/cgn-k8s",       version = "0.3.1" }
+cgn-helm       = { path = "rust/libraries/cgn-helm",      version = "0.3.1" }
+cgn-power      = { path = "rust/libraries/cgn-power",     version = "0.3.1" }
 
 # Async runtime
 tokio = { version = "1.40", features = ["full"] }

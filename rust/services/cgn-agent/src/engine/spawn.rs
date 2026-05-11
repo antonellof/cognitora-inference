@@ -13,6 +13,8 @@
 //!   --n_ctx <ctx> --n_threads <n> [--n_gpu_layers <k>] [extra ...]`.
 //!   `binary` mode: `<binary> --model <gguf> --host <h> --port <p>
 //!   [extra ...]`.
+//! * **mlx** — `python -m mlx_lm.server --model <hf_or_path> --host <h>
+//!   --port <p> [extra ...]` (Apple Silicon only).
 //! * **openai_compat** — no spawn; caller checks `should_spawn()`.
 //!
 //! KV offload mapping (driven by `engine.kv_offload` + `agent.role`):
@@ -28,7 +30,7 @@
 //! | vllm    | decode   | lmcache     | `--kv-transfer-config '{NixlConnector,kv_consumer}'`   |
 //! | vllm    | both     | kvbm        | `--kv-transfer-config '{DynamoConnector(kvbm),kv_both}'`|
 //! | sglang  | both     | hicache     | `--enable-hierarchical-cache --hicache-* ...`          |
-//! | llama_cpp / openai_compat | * | only `none` is valid                                  |
+//! | llama_cpp / mlx / openai_compat | * | only `none` is valid                          |
 //!
 //! Combinations not in the table are rejected at render time.
 
@@ -69,6 +71,7 @@ pub fn render_argv(
         EngineKind::Vllm => Ok(render_vllm(cfg, spec, role)),
         EngineKind::Sglang => Ok(render_sglang(cfg, spec)),
         EngineKind::LlamaCpp => render_llama_cpp(cfg, spec),
+        EngineKind::Mlx => Ok(render_mlx(cfg, spec)),
         EngineKind::OpenaiCompat => Err(Error::Config(
             "engine.kind = openai_compat does not spawn — caller should check should_spawn()"
                 .into(),
@@ -188,6 +191,30 @@ fn render_llama_cpp(cfg: &EngineConfig, spec: &ModelSpec) -> Result<Vec<String>>
     Ok(argv)
 }
 
+/// `mlx_lm.server` — OpenAI-compatible HTTP on `host:port` (see mlx-lm `SERVER.md`).
+fn render_mlx(cfg: &EngineConfig, spec: &ModelSpec) -> Vec<String> {
+    let model = spec
+        .path
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| spec.name.clone());
+
+    let mut argv: Vec<String> = vec![
+        cfg.mlx_lm.binary.clone(),
+        "-m".into(),
+        "mlx_lm.server".into(),
+        "--model".into(),
+        model,
+        "--host".into(),
+        cfg.mlx_lm.host.clone(),
+        "--port".into(),
+        cfg.mlx_lm.port.to_string(),
+    ];
+    argv.extend(cfg.mlx_lm.extra_args.clone());
+    argv.extend(spec.extra_args.clone());
+    argv
+}
+
 fn render_legacy(template: &[String], spec: &ModelSpec) -> Vec<String> {
     let mut argv: Vec<String> = template
         .iter()
@@ -226,12 +253,13 @@ fn validate_kv_offload(kind: EngineKind, offload: KvOffload) -> Result<()> {
         return Err(Error::Config(format!(
             "engine.kv_offload = \"{}\" is not supported with engine.kind = \"{}\". \
              Valid pairings: vllm × {{none,nixl,lmcache,kvbm}}, sglang × {{none,nixl,hicache}}, \
-             llama_cpp/openai_compat × {{none}}.",
+             llama_cpp/mlx/openai_compat × {{none}}.",
             offload.as_str(),
             match kind {
                 EngineKind::Vllm => "vllm",
                 EngineKind::Sglang => "sglang",
                 EngineKind::LlamaCpp => "llama_cpp",
+                EngineKind::Mlx => "mlx",
                 EngineKind::OpenaiCompat => "openai_compat",
             }
         )));
@@ -297,7 +325,9 @@ pub(crate) fn sglang_hicache_args(offload: KvOffload) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cgn_core::config::{LlamaCppEngineConfig, SglangEngineConfig, VllmEngineConfig};
+    use cgn_core::config::{
+        LlamaCppEngineConfig, MlxLmEngineConfig, SglangEngineConfig, VllmEngineConfig,
+    };
     use std::path::PathBuf;
 
     fn vllm_cfg() -> EngineConfig {
@@ -311,6 +341,7 @@ mod tests {
             },
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
+            mlx_lm: Default::default(),
         }
     }
 
@@ -329,6 +360,7 @@ mod tests {
                 extra_args: vec!["--enable-torch-compile".into()],
             },
             llama_cpp: LlamaCppEngineConfig::default(),
+            mlx_lm: Default::default(),
         }
     }
 
@@ -349,6 +381,19 @@ mod tests {
                 n_gpu_layers: 0,
                 extra_args: vec![],
             },
+            mlx_lm: Default::default(),
+        }
+    }
+
+    fn mlx_cfg() -> EngineConfig {
+        EngineConfig {
+            kind: EngineKind::Mlx,
+            url: "http://127.0.0.1:8090".into(),
+            kv_offload: KvOffload::None,
+            vllm: VllmEngineConfig::default(),
+            sglang: SglangEngineConfig::default(),
+            llama_cpp: LlamaCppEngineConfig::default(),
+            mlx_lm: MlxLmEngineConfig::default(),
         }
     }
 
@@ -590,6 +635,37 @@ mod tests {
     }
 
     #[test]
+    fn renders_mlx_command() {
+        let argv = render_argv(
+            &mlx_cfg(),
+            &spec("mlx-community/Meta-Llama-3.2-3B-Instruct-4bit", None),
+            NodeRoleCfg::Both,
+            None,
+        )
+        .unwrap();
+        assert_eq!(argv[0], "python3");
+        assert_eq!(argv[1], "-m");
+        assert_eq!(argv[2], "mlx_lm.server");
+        assert!(argv.windows(2).any(|w| w[0] == "--model" && w[1] == "mlx-community/Meta-Llama-3.2-3B-Instruct-4bit"));
+        assert!(argv.windows(2).any(|w| w[0] == "--port" && w[1] == "8090"));
+    }
+
+    #[test]
+    fn mlx_uses_local_path_when_present() {
+        let argv = render_argv(
+            &mlx_cfg(),
+            &spec(
+                "mlx-community/Meta-Llama-3.2-3B-Instruct-4bit",
+                Some("/models/my-mlx"),
+            ),
+            NodeRoleCfg::Both,
+            None,
+        )
+        .unwrap();
+        assert!(argv.contains(&"/models/my-mlx".to_string()));
+    }
+
+    #[test]
     fn legacy_cmd_takes_precedence() {
         let legacy = vec![
             "/bin/sleep".to_string(),
@@ -616,6 +692,7 @@ mod tests {
             vllm: VllmEngineConfig::default(),
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
+            mlx_lm: MlxLmEngineConfig::default(),
         };
         assert!(!should_spawn(&cfg));
         assert!(render_argv(&cfg, &spec("a", None), NodeRoleCfg::Both, None).is_err());

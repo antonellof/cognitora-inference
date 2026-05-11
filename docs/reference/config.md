@@ -31,7 +31,7 @@ OpenAI HTTP surface (`/v1/completions`, `/health`, `/v1/models`) plugs in.
 
 | Key                     | Type   | Default                          | Notes |
 |-------------------------|--------|----------------------------------|-------|
-| `engine.kind`           | enum   | `"vllm"`                         | One of `vllm`, `sglang`, `llama_cpp`, `openai_compat`. |
+| `engine.kind`           | enum   | `"vllm"`                         | One of `vllm`, `sglang`, `llama_cpp`, `mlx`, `openai_compat`. |
 | `engine.url`            | string | `http://127.0.0.1:8000`          | OpenAI HTTP base URL. |
 | `engine.kv_offload`     | enum   | `"none"`                         | Engine-side KV offload backend. One of `none`, `nixl`, `lmcache`, `hicache`, `kvbm`. See [Engine-side KV offload](#engine-side-kv-offload) below. |
 | `engine.vllm.binary`    | string | `"vllm"`                         | Path or PATH-name of the `vllm` CLI. |
@@ -50,6 +50,10 @@ OpenAI HTTP surface (`/v1/completions`, `/health`, `/v1/models`) plugs in.
 | `engine.llama_cpp.n_threads`  | u32    | `4`                         | CPU thread count. |
 | `engine.llama_cpp.n_gpu_layers` | i32  | `0`                         | `0` = CPU only, `-1` = all to GPU. |
 | `engine.llama_cpp.extra_args` | array  | `[]`                        | Extra flags passed to the engine. |
+| `engine.mlx_lm.binary`    | string | `"python3"`                 | Python that can `import mlx_lm`. |
+| `engine.mlx_lm.host`      | string | `"127.0.0.1"`               | `--host` for `mlx_lm.server`. |
+| `engine.mlx_lm.port`      | u16    | `8090`                      | `--port`; default avoids clashing with `ROUTER_HTTP` (8080). Must match `engine.url`. |
+| `engine.mlx_lm.extra_args` | array | `[]`                       | Appended after `--model …`. |
 
 When `kind = "openai_compat"` the agent does **not** spawn a child process;
 it only proxies to whatever is at `engine.url`. Use this with systemd /
@@ -57,7 +61,7 @@ Kubernetes / a sidecar that owns the engine lifecycle.
 
 ### Engine selection
 
-The four supported engines map to the same OpenAI HTTP surface, so they
+The supported engine kinds map to the same OpenAI HTTP surface, so they
 are fully interchangeable from the router's perspective:
 
 * **`vllm`** — `vllm serve <model> --tensor-parallel-size <N> ...`. Best
@@ -70,6 +74,9 @@ are fully interchangeable from the router's perspective:
   inside that node.
 * **`llama_cpp`** — CPU-friendly fallback (and CUDA-offload via
   `n_gpu_layers`); useful for laptops, CI, and edge deployments.
+* **`mlx`** — `python3 -m mlx_lm.server --model <hf_or_path> --host <h> --port <p> …`.
+  **Apple Silicon / macOS only** ([mlx-lm](https://github.com/ml-explore/mlx-lm)).
+  Use `kv_offload = "none"` only.
 * **`openai_compat`** — proxy-only.
 
 ### Engine-side KV offload
@@ -98,9 +105,9 @@ not install them; the recipe's `up.sh` warns when they're missing.
 ### Per-model knobs
 
 `[models."<name>"].path` is required when `engine.kind = "llama_cpp"` (the
-filesystem path to a `.gguf` file). For SGLang, `path` is optional: when
-unset SGLang resolves the model name as a HuggingFace repo id; when set,
-SGLang loads from the local directory. vLLM behaves the same way.
+filesystem path to a `.gguf` file). For SGLang or **MLX**, `path` is optional: when
+unset the spawn argv uses the model table key as the Hugging Face repo id; when set,
+it is passed to `--model` as a local directory. vLLM behaves the same way as SGLang for `path`.
 
 ### Legacy aliases
 

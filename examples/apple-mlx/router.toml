@@ -1,0 +1,25 @@
+[cluster]
+name           = "cognitora-mlx"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[router]
+listen_http  = "127.0.0.1:8080"
+listen_grpc  = "127.0.0.1:9090"
+listen_admin = "127.0.0.1:9091"
+node_id      = "router-mlx"
+
+[router.score_weights]
+kv       = 0.55
+load     = 0.25
+power    = 0.10
+capacity = 0.10
+
+[models."mlx-community/Meta-Llama-3.2-3B-Instruct-4bit"]
+tp = 1

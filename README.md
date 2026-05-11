@@ -4,7 +4,7 @@
 
 **The open-source, datacenter-scale LLM inference stack.**
 
-Run vLLM, SGLang, TensorRT-LLM, or llama.cpp as a coordinated multi-node cluster — KV-aware, disaggregation-ready, energy-aware — on bare metal, Kubernetes, or any major cloud, installed with a single curl line.
+Run vLLM, SGLang, TensorRT-LLM, llama.cpp, or **MLX** (Apple Silicon) as a coordinated multi-node cluster — KV-aware, disaggregation-ready, energy-aware — on bare metal, Kubernetes, or any major cloud, installed with a single curl line.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![CI](https://img.shields.io/badge/ci-passing-brightgreen.svg)](.github/workflows/ci.yml)
@@ -16,7 +16,7 @@ Run vLLM, SGLang, TensorRT-LLM, or llama.cpp as a coordinated multi-node cluster
 
 ## What is Cognitora?
 
-Cognitora is the **orchestration layer above inference engines**. It does not replace vLLM, SGLang, TensorRT-LLM, or llama.cpp — it turns them into a coordinated cluster. KV-aware routing, prefill/decode disaggregation, multi-tier KV offload, multi-model cascade, and energy-aware admission all work together to maximize throughput and minimize TTFT for production LLM workloads.
+Cognitora is the **orchestration layer above inference engines**. It does not replace vLLM, SGLang, TensorRT-LLM, llama.cpp, or **Apple MLX** (via mlx-lm) — it turns them into a coordinated cluster. KV-aware routing, prefill/decode disaggregation, multi-tier KV offload, multi-model cascade, and energy-aware admission all work together to maximize throughput and minimize TTFT for production LLM workloads.
 
 Every Cognitora component is a **single statically-linked Rust binary**. No Python control plane, no JVM, no operator install required. The same artifacts run as systemd units on a single host, as a Helm chart on Kubernetes, or as Terraform-deployed VMs on AWS / GCP / Azure / Hetzner.
 
@@ -25,7 +25,7 @@ Every Cognitora component is a **single statically-linked Rust binary**. No Pyth
 - You serve LLMs across **multiple GPUs or nodes** and want them to behave as one cluster.
 - You want **KV-aware routing** so repeated prefixes don't get re-prefilled.
 - You need to **independently scale prefill and decode** (disaggregated serving).
-- You want **engine choice** — vLLM today, SGLang tomorrow, llama.cpp at the edge — without rewriting the platform.
+- You want **engine choice** — vLLM today, SGLang tomorrow, llama.cpp at the edge, **MLX on Mac** — without rewriting the platform.
 - You operate **bare-metal or hybrid** infrastructure where a Kubernetes-only stack would be overkill.
 - You care about **energy / power budgets** and want them surfaced in routing decisions.
 
@@ -44,6 +44,8 @@ For a single model on a single GPU, the inference engine on its own is usually e
 | **Multi-tier KV (RAM / SSD)**  | ✅   | ✅     | ✅        | ✅           | ✅      |
 | **Multi-model cascade (SLM→LLM)** | ✅ | ✅   | ✅        | ✅           | ✅      |
 | **Energy-aware admission**     | ✅   | ✅     | ✅        | ✅           | ✅      |
+
+**Apple Silicon (MLX):** use [`engine.kind = "mlx"`](examples/apple-mlx/README.md) with [mlx-lm](https://github.com/ml-explore/mlx-lm)'s `mlx_lm.server` (OpenAI-compatible HTTP on a configurable port). Only `kv_offload = "none"` is valid for MLX.
 
 > ✅ = ships today. 🚧 = wired through the same TOML knob, awaiting an upstream-supported engine version. — = not applicable for that engine.
 

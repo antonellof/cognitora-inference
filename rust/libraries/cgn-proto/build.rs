@@ -7,7 +7,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // truth). When `cargo publish` packages this crate, cargo follows the
     // symlinks and copies the actual file content into the .crate archive,
     // so consumers downloading from crates.io get a self-contained crate.
-    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let crate_dir = PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set by Cargo"),
+    );
     let proto_dir = crate_dir.join("proto");
 
     let files = [

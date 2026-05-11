@@ -40,7 +40,7 @@ A request travels:
    429 if the global queue is full.
 5. **Forward** — the gateway opens an `Agent.Generate` gRPC stream over
    mTLS. `cgn-agent` proxies the stream to the engine subprocess
-   (`vllm`, `sglang`, `llama_cpp`, or `openai_compat` — selected by
+   (`vllm`, `sglang`, `llama_cpp`, `mlx`, or `openai_compat` — selected by
    `[engine].kind`; pluggable through the `Engine` trait).
 6. **Stream out** — tokens flow back through the gRPC stream and are
    re-encoded as OpenAI SSE chunks by `gateway::sse`.

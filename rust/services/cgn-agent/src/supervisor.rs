@@ -41,6 +41,7 @@ impl Supervisor {
             EngineKind::Vllm => "vllm",
             EngineKind::Sglang => "sglang",
             EngineKind::LlamaCpp => "llama_cpp",
+            EngineKind::Mlx => "mlx",
             EngineKind::OpenaiCompat => "openai_compat",
         };
         info!(kind = %engine_kind, url = %engine_cfg.url, "engine configured");
