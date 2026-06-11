@@ -157,8 +157,10 @@ impl Tier for RamTier {
 
     fn evict(&self, addr: &BlockAddress) {
         if let Some((_, slot)) = self.inner.remove(addr) {
-            self.used
-                .fetch_sub(slot.bytes.len() as u64, std::sync::atomic::Ordering::Relaxed);
+            self.used.fetch_sub(
+                slot.bytes.len() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
         }
     }
 

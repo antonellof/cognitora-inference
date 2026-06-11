@@ -10,7 +10,51 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-06-11
+
+The "make the KV layer live" release. The cross-node KV cache design
+(tiered store, prefix-overlap routing, peer transfer) existed as
+structure but several pipes were not connected: the router's prefix
+index was never populated, RAM capacity was tracked but not enforced,
+no eviction loop ran, cache stats were hardcoded zeros, and the agent's
+`KvHandoff` RPC was a stub. All of these are now wired.
+
 ### Added
+
+- **KV-aware routing is live.** The router now records (prefix digest →
+  node) in its in-memory `PrefixIndex` after every successful dispatch
+  (optimistic insert: the chosen node holds the prefix KV once prefill
+  completes), so follow-up requests with shared prefixes route to the
+  node that already has the cache. Both nodes of a disaggregated
+  prefill/decode pair are recorded. Entries are TTL-bounded and purged
+  when a node's etcd lease expires.
+- **`cgn-kvcached` background eviction loop** (default 1 Hz):
+  - *RAM watermark spill*: when RAM occupancy exceeds
+    `kv.ram_high_watermark` (default 0.90), the coldest blocks
+    (approximate LRU via touch timestamps) are spilled to SSD in
+    batches until under the watermark.
+  - *SSD TTL*: blocks not accessed for `kv.ssd_ttl_secs`
+    (default 86400, `0` disables) are deleted from disk and the index.
+  - New `KvConfig` fields: `ssd_ttl_secs`, `evict_interval_ms`,
+    `ram_high_watermark` — all defaulted, existing configs unchanged.
+- **Real KV cache observability.** The `Kv.Stats` RPC now reports live
+  hit / miss / eviction / spill counters and bytes pushed / pulled over
+  the QUIC transport (previously hardcoded zeros), plus an accurate
+  cold (SSD) block count via a new index scan.
+- **`Agent.KvHandoff` implemented.** The agent now bridges handoff
+  requests to the host-local `cgn-kvcached` gRPC (`Push`/`Pull` toward
+  the peer endpoint) instead of acknowledging and dropping them.
+- **`cgn-kv`**: `RamTier` tracks occupancy with an O(1) atomic counter
+  (was an O(n) sweep) and exposes `coldest(n)` LRU victim selection;
+  `Index::scan` full iteration (RocksDB iterator + in-memory fallback).
+
+### Fixed
+
+- **`Kv.Promote` actually promotes.** A block resident only on SSD is
+  now read back into RAM on promote; previously the RPC was a lookup
+  no-op.
+
+### Added (MLX / examples)
 
 - **`examples/apple-mlx/download-model.sh`** — pre-downloads an MLX-LM model from Hugging Face with a real progress bar so users don't sit silent through `mlx_lm.server`'s lazy first-load.
 - **`examples/apple-mlx/demo.sh` and `verify-engine.sh`** now auto-pre-warm the model via `download-model.sh` before hitting the engine. Set `CGN_NO_AUTOPULL=1` to skip when the weights are already cached.
