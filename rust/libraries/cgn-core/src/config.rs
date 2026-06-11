@@ -537,6 +537,14 @@ pub struct KvConfig {
     pub transport: KvTransport,
     pub quic_listen: String,
     pub block_size_tokens: u32,
+    /// SSD blocks not accessed for this many seconds are deleted by the
+    /// background eviction loop. 0 disables the TTL pass.
+    pub ssd_ttl_secs: u64,
+    /// Interval of the background eviction loop in milliseconds.
+    pub evict_interval_ms: u64,
+    /// RAM occupancy fraction above which the eviction loop spills the
+    /// coldest blocks to SSD (0.0–1.0).
+    pub ram_high_watermark: f32,
 }
 impl Default for KvConfig {
     fn default() -> Self {
@@ -550,6 +558,9 @@ impl Default for KvConfig {
             transport: KvTransport::Quic,
             quic_listen: format!("0.0.0.0:{}", crate::ports::KV_QUIC),
             block_size_tokens: 16,
+            ssd_ttl_secs: 86_400,
+            evict_interval_ms: 1_000,
+            ram_high_watermark: 0.90,
         }
     }
 }

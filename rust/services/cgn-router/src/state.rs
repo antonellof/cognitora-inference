@@ -59,8 +59,10 @@ impl SharedState {
         let endpoints = self.cfg.cluster.etcd_endpoints.clone();
         let nodes = self.nodes.clone();
         let policy = self.policy.clone();
+        let prefix = self.prefix.clone();
         tokio::spawn(async move {
-            if let Err(e) = crate::cluster::run_etcd_watcher(endpoints, nodes, policy).await {
+            if let Err(e) = crate::cluster::run_etcd_watcher(endpoints, nodes, policy, prefix).await
+            {
                 tracing::error!(error=?e, "etcd watcher exited");
             }
         });

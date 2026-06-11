@@ -99,10 +99,9 @@ impl Kv for KvSvc {
         let h = req.into_inner();
         let digest = digest_from_bytes(&h.value)?;
         let addr = cgn_kv::BlockAddress { digest, layer: 0 };
-        // Promotion currently means: ensure the block is in RAM. With only
-        // RAM + index tiers wired, this is a no-op when present and a
-        // miss otherwise.
-        let resp = match self.store.lookup(&addr) {
+        // Promotion: ensure the block is resident in RAM, reading it back
+        // from SSD when it was spilled.
+        let resp = match self.store.lookup_with_promote(&addr).await {
             Some(_) => PStatus {
                 code: 0,
                 message: "promoted".into(),
@@ -137,11 +136,18 @@ impl Kv for KvSvc {
                 }))
             }
         };
+        let n = bytes.len() as u64;
         match crate::transport::peer_push(remote, addr, bytes).await {
-            Ok(()) => Ok(Response::new(PStatus {
-                code: 0,
-                message: "pushed".into(),
-            })),
+            Ok(()) => {
+                self.store
+                    .stats
+                    .bytes_pushed
+                    .fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+                Ok(Response::new(PStatus {
+                    code: 0,
+                    message: "pushed".into(),
+                }))
+            }
             Err(e) => Ok(Response::new(PStatus {
                 code: 14,
                 message: format!("push: {e}"),
@@ -168,12 +174,17 @@ impl Kv for KvSvc {
                 message: "peer returned empty".into(),
             })),
             Ok(bytes) => {
+                let n = bytes.len() as u64;
                 if let Err(e) = self.store.put_ram(addr, bytes, "") {
                     return Ok(Response::new(PStatus {
                         code: 13,
                         message: format!("local insert: {e}"),
                     }));
                 }
+                self.store
+                    .stats
+                    .bytes_pulled
+                    .fetch_add(n, std::sync::atomic::Ordering::Relaxed);
                 Ok(Response::new(PStatus {
                     code: 0,
                     message: "pulled".into(),
@@ -187,19 +198,21 @@ impl Kv for KvSvc {
     }
 
     async fn stats(&self, _req: Request<StatsRequest>) -> Result<Response<StatsResponse>, Status> {
+        use std::sync::atomic::Ordering;
+        let s = &self.store.stats;
         Ok(Response::new(StatsResponse {
             ram_used_bytes: self.store.ram.used_bytes(),
             ram_cap_bytes: self.store.ram.capacity_bytes(),
             ssd_used_bytes: self.store.ssd.used_bytes(),
             ssd_cap_bytes: self.store.ssd.capacity(),
-            hot_blocks: 0,
+            hot_blocks: 0, // GPU tier lives in the engine, not here.
             warm_blocks: self.store.ram.block_count() as u64,
-            cold_blocks: 0,
-            hits: 0,
-            misses: 0,
-            evictions: 0,
-            bytes_pushed: 0,
-            bytes_pulled: 0,
+            cold_blocks: self.store.cold_block_count(),
+            hits: s.hits.load(Ordering::Relaxed),
+            misses: s.misses.load(Ordering::Relaxed),
+            evictions: s.evictions.load(Ordering::Relaxed) + s.spills.load(Ordering::Relaxed),
+            bytes_pushed: s.bytes_pushed.load(Ordering::Relaxed),
+            bytes_pulled: s.bytes_pulled.load(Ordering::Relaxed),
         }))
     }
 }

@@ -30,6 +30,10 @@ pub struct RoutingDecision {
     pub score: Score,
     pub overlap: f32,
     pub n_candidates: usize,
+    /// Sequence-chained prefix digests of the request, so the dispatcher
+    /// can record (digest → node) in the prefix index once the request
+    /// has actually been sent to the chosen node.
+    pub digests: Vec<[u8; 32]>,
 }
 
 /// Pick the best node for `(model, role, token_ids)`.
@@ -99,6 +103,7 @@ pub async fn pick(
         score,
         overlap,
         n_candidates,
+        digests,
     })
 }
 
@@ -143,6 +148,7 @@ pub async fn pick_pair(
         }
     }
     let (decode_node, decode_score) = best.expect("non-empty distinct");
+    let digests = prefill.digests.clone();
     Ok((
         prefill,
         RoutingDecision {
@@ -150,6 +156,7 @@ pub async fn pick_pair(
             score: decode_score,
             overlap: 0.0,
             n_candidates: distinct.len(),
+            digests,
         },
     ))
 }
@@ -162,6 +169,7 @@ pub fn decision_for_test(node: Arc<NodeEntry>, score: Score) -> RoutingDecision 
         score,
         overlap: score.kv,
         n_candidates: 1,
+        digests: vec![],
     }
 }
 

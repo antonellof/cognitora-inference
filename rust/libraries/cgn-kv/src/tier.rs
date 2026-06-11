@@ -53,6 +53,7 @@ pub trait Tier: Send + Sync {
 pub struct RamTier {
     inner: dashmap::DashMap<BlockAddress, RamSlot>,
     capacity: u64,
+    used: std::sync::atomic::AtomicU64,
 }
 
 struct RamSlot {
@@ -65,6 +66,7 @@ impl RamTier {
         Self {
             inner: dashmap::DashMap::new(),
             capacity: capacity_bytes,
+            used: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -88,6 +90,25 @@ impl RamTier {
     /// Approximate count of resident blocks.
     pub fn block_count(&self) -> usize {
         self.inner.len()
+    }
+
+    /// Return up to `n` block addresses ordered coldest-first (oldest
+    /// touch timestamp). Used by the eviction loop to pick spill
+    /// candidates when the tier is over capacity.
+    pub fn coldest(&self, n: usize) -> Vec<BlockAddress> {
+        let mut entries: Vec<(BlockAddress, u64)> = self
+            .inner
+            .iter()
+            .map(|e| {
+                (
+                    *e.key(),
+                    e.value().last.load(std::sync::atomic::Ordering::Relaxed),
+                )
+            })
+            .collect();
+        entries.sort_by_key(|(_, last)| *last);
+        entries.truncate(n);
+        entries.into_iter().map(|(a, _)| a).collect()
     }
 }
 
@@ -118,6 +139,8 @@ impl Tier for RamTier {
     }
 
     fn put(&self, addr: BlockAddress, bytes: bytes::Bytes) -> bool {
+        use std::sync::atomic::Ordering;
+        let added = bytes.len() as u64;
         let prev = self.inner.insert(
             addr,
             RamSlot {
@@ -125,18 +148,22 @@ impl Tier for RamTier {
                 last: std::sync::atomic::AtomicU64::new(Self::now()),
             },
         );
+        self.used.fetch_add(added, Ordering::Relaxed);
+        if let Some(p) = &prev {
+            self.used.fetch_sub(p.bytes.len() as u64, Ordering::Relaxed);
+        }
         prev.is_some()
     }
 
     fn evict(&self, addr: &BlockAddress) {
-        self.inner.remove(addr);
+        if let Some((_, slot)) = self.inner.remove(addr) {
+            self.used
+                .fetch_sub(slot.bytes.len() as u64, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     fn used_bytes(&self) -> u64 {
-        self.inner
-            .iter()
-            .map(|e| e.value().bytes.len() as u64)
-            .sum()
+        self.used.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn capacity_bytes(&self) -> u64 {

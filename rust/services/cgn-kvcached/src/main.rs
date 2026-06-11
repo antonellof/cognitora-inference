@@ -46,6 +46,19 @@ async fn main() -> Result<()> {
         .parse()
         .map_err(|e| Error::Config(format!("kv.quic_listen: {e}")))?;
 
+    // Background eviction: RAM watermark spill + SSD TTL, at a fixed
+    // cadence (default 1 Hz).
+    let evict_store = store.clone();
+    let high_watermark = cfg.kv.ram_high_watermark;
+    let ssd_ttl_secs = cfg.kv.ssd_ttl_secs;
+    let interval = std::time::Duration::from_millis(cfg.kv.evict_interval_ms.max(100));
+    tokio::spawn(async move {
+        loop {
+            evict_store.evict_pass(high_watermark, ssd_ttl_secs).await;
+            tokio::time::sleep(interval).await;
+        }
+    });
+
     tokio::select! {
         r = grpc::serve(store.clone(), listen, &cfg) => r,
         r = transport::serve_quic(store.clone(), quic_listen) => r,

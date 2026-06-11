@@ -178,12 +178,48 @@ impl Agent for AgentSvc {
         }))
     }
 
-    async fn kv_handoff(&self, _req: Request<KvHandoffSpec>) -> Result<Response<PStatus>, Status> {
-        // Future: bridge to cgn-kvcached over UDS to push/pull blocks.
-        Ok(Response::new(PStatus {
-            code: 0,
-            message: "ok".into(),
-        }))
+    async fn kv_handoff(&self, req: Request<KvHandoffSpec>) -> Result<Response<PStatus>, Status> {
+        use cgn_proto::v1::kv_handoff_spec::Direction;
+        use cgn_proto::v1::{kv_client::KvClient, PullSpec, PushSpec};
+
+        let spec = req.into_inner();
+        if spec.prefix_hash.len() != 32 {
+            return Err(Status::invalid_argument("prefix_hash must be 32 bytes"));
+        }
+
+        // Bridge to the host-local cgn-kvcached daemon, which owns the
+        // tiered store and drives the QUIC transfer with the peer.
+        let listen = &self.supervisor.cfg.kv.listen;
+        let local = listen.replace("0.0.0.0", "127.0.0.1");
+        let uri = format!("http://{local}");
+        let mut kv = KvClient::connect(uri)
+            .await
+            .map_err(|e| Status::unavailable(format!("kvcached connect: {e}")))?;
+
+        let status = match spec.direction() {
+            Direction::Push => kv
+                .push(PushSpec {
+                    prefix_hash: spec.prefix_hash,
+                    target_node_id: spec.peer_node_id,
+                    target_endpoint: spec.peer_endpoint,
+                    use_rdma: spec.use_rdma,
+                })
+                .await?
+                .into_inner(),
+            Direction::Pull => kv
+                .pull(PullSpec {
+                    prefix_hash: spec.prefix_hash,
+                    source_node_id: spec.peer_node_id,
+                    source_endpoint: spec.peer_endpoint,
+                    use_rdma: spec.use_rdma,
+                })
+                .await?
+                .into_inner(),
+            Direction::Unspecified => {
+                return Err(Status::invalid_argument("direction must be PUSH or PULL"))
+            }
+        };
+        Ok(Response::new(status))
     }
 
     async fn health(&self, _req: Request<()>) -> Result<Response<NodeHealth>, Status> {

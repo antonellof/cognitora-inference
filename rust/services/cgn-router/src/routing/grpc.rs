@@ -138,6 +138,13 @@ async fn forward(
         .map_err(|s| Error::Internal(format!("agent generate: {s}")))?
         .into_inner();
 
+    // Optimistic prefix announcement: the chosen node's engine will hold
+    // the KV for this prompt's prefix once the prefill completes, so
+    // record it now (TTL-bounded) for KV-aware routing of follow-ups.
+    state
+        .prefix
+        .insert_many(&decision.digests, &decision.node.node_id);
+
     while let Some(item) = response.next().await {
         match item {
             Ok(token) => {

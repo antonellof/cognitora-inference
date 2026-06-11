@@ -414,6 +414,19 @@ async fn run_to_token_stream(
         .await
         .map_err(|s| cgn_core::Error::Internal(format!("agent generate: {s}")))?
         .into_inner();
+
+    // Optimistic prefix announcement: both the prefill and decode nodes
+    // end up holding this prompt's prefix KV, so record them (TTL-bounded)
+    // for KV-aware routing of follow-up turns.
+    state
+        .prefix
+        .insert_many(&decode_decision.digests, &decode_decision.node.node_id);
+    if prefill_decision.node.node_id != decode_decision.node.node_id {
+        state
+            .prefix
+            .insert_many(&prefill_decision.digests, &prefill_decision.node.node_id);
+    }
+
     Ok(response)
 }
 

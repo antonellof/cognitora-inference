@@ -54,6 +54,16 @@ impl PrefixIndex {
         }
     }
 
+    /// Record that `node_id` holds every digest in `digests`. Used by the
+    /// router for optimistic inserts after dispatching a request: the
+    /// chosen node's engine will hold the prefix KV once it finishes the
+    /// prefill, so subsequent requests with a shared prefix route there.
+    pub fn insert_many(&self, digests: &[[u8; 32]], node_id: &str) {
+        for d in digests {
+            self.insert(*d, node_id);
+        }
+    }
+
     /// Drop a node from the index entirely (invoked on graceful drain).
     pub fn forget_node(&self, node_id: &str) {
         for mut e in self.inner.iter_mut() {

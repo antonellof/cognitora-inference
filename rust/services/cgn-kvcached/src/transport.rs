@@ -86,6 +86,10 @@ async fn handle_connection(store: Arc<Store>, conn: Connection) -> Result<()> {
                     body_len: bytes.len() as u64,
                 };
                 write_frame(&mut send, &resp).await?;
+                store
+                    .stats
+                    .bytes_pushed
+                    .fetch_add(bytes.len() as u64, std::sync::atomic::Ordering::Relaxed);
                 send.write_all(&bytes)
                     .await
                     .map_err(|e| Error::Internal(format!("quic write body: {e}")))?;
@@ -105,6 +109,10 @@ async fn handle_connection(store: Arc<Store>, conn: Connection) -> Result<()> {
                     .await
                     .map_err(|e| Error::Internal(format!("quic read body: {e}")))?;
                 let bytes = buf.freeze();
+                store
+                    .stats
+                    .bytes_pulled
+                    .fetch_add(bytes.len() as u64, std::sync::atomic::Ordering::Relaxed);
                 store.put_ram(frame.addr, bytes, "")?;
                 let ack = Frame {
                     op: Op::Ack,

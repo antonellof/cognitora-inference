@@ -17,6 +17,7 @@ pub async fn run_etcd_watcher(
     endpoints: Vec<String>,
     nodes: Arc<NodeRegistry>,
     policy: Arc<ArcSwap<RoutingPolicy>>,
+    prefix: Arc<cgn_core::prefix::PrefixIndex>,
 ) -> Result<()> {
     let mut client = Client::connect(&endpoints, None)
         .await
@@ -138,6 +139,10 @@ pub async fn run_etcd_watcher(
                 EventType::Delete => {
                     if let Some(id) = kv.key_str().ok().and_then(|s| s.strip_prefix(NODES_PREFIX)) {
                         nodes.forget(id);
+                        // Node went away (lease expired or drained): its KV
+                        // blocks are no longer routable; purge it from the
+                        // prefix index so overlap scoring stops chasing it.
+                        prefix.forget_node(id);
                     }
                 }
             }

@@ -61,6 +61,26 @@ impl Index {
         self.db.delete(key_of(addr)).map_err(rdb)
     }
 
+    /// Full scan of the index. Used by the eviction loop (TTL pass) and
+    /// stats; bounded by the number of tracked blocks, which is small
+    /// relative to their payload bytes.
+    pub fn scan(&self) -> Vec<(BlockAddress, BlockMeta)> {
+        self.db
+            .iterator(rocksdb::IteratorMode::Start)
+            .flatten()
+            .filter_map(|(k, v)| {
+                if k.len() != 36 {
+                    return None;
+                }
+                let mut digest = [0u8; 32];
+                digest.copy_from_slice(&k[..32]);
+                let layer = u32::from_le_bytes([k[32], k[33], k[34], k[35]]);
+                let meta: BlockMeta = bincode::deserialize(&v).ok()?;
+                Some((BlockAddress { digest, layer }, meta))
+            })
+            .collect()
+    }
+
     /// Approximate count (rocksdb stat).
     pub fn approximate_len(&self) -> u64 {
         self.db
