@@ -51,6 +51,8 @@ pub struct ModelSpec {
     pub max_model_len: Option<u32>,
     pub extra_args: Vec<String>,
     pub path: Option<std::path::PathBuf>,
+    /// cgn-infer layer-pipeline topology (`[models.*.pipeline]`).
+    pub pipeline: Option<cgn_core::config::PipelineTopologyConfig>,
 }
 
 #[derive(Debug, Clone)]

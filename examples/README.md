@@ -23,6 +23,7 @@ all in reverse order.
 |-----------------------------------------------|------------------------|-------------------------------------|---------------------------------------------|
 | [`local-mac/`](local-mac/README.md)           | `scripts/run/up.sh`    | `openai_compat` → Ollama            | macOS laptop. No Python venv, no GGUF download. |
 | [`apple-mlx/`](apple-mlx/README.md)            | `scripts/run/up.sh`    | `mlx` → `mlx_lm.server`             | macOS Apple Silicon. `pip install mlx-lm`; Hugging Face MLX weights. |
+| [`local-mac-native/`](local-mac-native/README.md) | `scripts/run/up.sh` | `cgn_infer` → `cgn-infer serve`     | Fully first-party stack. No Python — the engine is a workspace Rust binary on a local GGUF. |
 | [`multi-llm/`](multi-llm/README.md)           | `scripts/run/up.sh`    | `vllm` (GPU) or `llama_cpp` (CPU)   | Linux box / server / CI. Multi-model with a real engine. |
 | [`docker-ollama/`](docker-ollama/README.md)   | `docker compose up`    | `openai_compat` → Ollama            | Anywhere with Docker. Pulls the published GHCR image — no `cargo build`. |
 

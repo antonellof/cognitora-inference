@@ -33,17 +33,26 @@ For a single model on a single GPU, the inference engine on its own is usually e
 
 ## Engine support at a glance
 
-|                                | [vLLM](https://github.com/vllm-project/vllm) | [SGLang](https://github.com/sgl-project/sglang) | [llama.cpp](https://github.com/ggerganov/llama.cpp) | [TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM) | OpenAI-compat (Ollama, hosted, …) |
-|--------------------------------|:----:|:------:|:---------:|:------------:|:-------:|
-| **OpenAI HTTP gateway**        | ✅   | ✅     | ✅        | ✅           | ✅      |
-| **KV-aware routing**           | ✅   | ✅     | ✅        | ✅           | ✅      |
-| **Prefill/decode disaggregate**| ✅ (NIXL) | ✅ (NIXL) | n/a   | ✅ (NIXL)    | n/a     |
-| **KV offload — LMCache**       | ✅   | —      | —         | —            | —       |
-| **KV offload — HiCache**       | —    | ✅     | —         | —            | —       |
-| **KV offload — KVBM (Dynamo)** | ✅   | —      | —         | 🚧           | —       |
-| **Multi-tier KV (RAM / SSD)**  | ✅   | ✅     | ✅        | ✅           | ✅      |
-| **Multi-model cascade (SLM→LLM)** | ✅ | ✅   | ✅        | ✅           | ✅      |
-| **Energy-aware admission**     | ✅   | ✅     | ✅        | ✅           | ✅      |
+|                                | [vLLM](https://github.com/vllm-project/vllm) | [SGLang](https://github.com/sgl-project/sglang) | [llama.cpp](https://github.com/ggerganov/llama.cpp) | [TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM) | cgn-infer 🧪 (native) | OpenAI-compat (Ollama, hosted, …) |
+|--------------------------------|:----:|:------:|:---------:|:------------:|:---------:|:-------:|
+| **OpenAI HTTP gateway**        | ✅   | ✅     | ✅        | ✅           | ✅        | ✅      |
+| **KV-aware routing**           | ✅   | ✅     | ✅        | ✅           | ✅        | ✅      |
+| **Prefill/decode disaggregate**| ✅ (NIXL) | ✅ (NIXL) | n/a   | ✅ (NIXL)    | n/a       | n/a     |
+| **KV offload — LMCache**       | ✅   | —      | —         | —            | —         | —       |
+| **KV offload — HiCache**       | —    | ✅     | —         | —            | —         | —       |
+| **KV offload — KVBM (Dynamo)** | ✅   | —      | —         | 🚧           | —         | —       |
+| **Multi-tier KV (RAM / SSD)**  | ✅   | ✅     | ✅        | ✅           | ✅        | ✅      |
+| **Multi-model cascade (SLM→LLM)** | ✅ | ✅   | ✅        | ✅           | ✅        | ✅      |
+| **Energy-aware admission**     | ✅   | ✅     | ✅        | ✅           | ✅        | ✅      |
+
+**Native engine (cgn-infer) 🧪 experimental/preview:** Cognitora's own
+first-party inference engine — a seventh Rust binary built on
+[Candle](https://github.com/huggingface/candle) that loads local GGUF models
+via mmap and serves the OpenAI HTTP surface directly, with no external engine
+required. Use [`engine.kind = "cgn_infer"`](docs/reference/config.md). Phase 1
+supports Llama-family GGUF models with sequential request serving; only
+`kv_offload = "none"` is valid. Design and roadmap:
+[`docs/architecture/cgn-infer.md`](docs/architecture/cgn-infer.md).
 
 **Apple Silicon (MLX):** use [`engine.kind = "mlx"`](examples/apple-mlx/README.md) with [mlx-lm](https://github.com/ml-explore/mlx-lm)'s `mlx_lm.server` (OpenAI-compatible HTTP on a configurable port). Only `kv_offload = "none"` is valid for MLX.
 
@@ -99,7 +108,7 @@ What we have that Dynamo doesn't: bare-metal-first deployment with one-curl inst
 
 What Dynamo has that we don't yet: multimodal & video pipelines · ModelExpress GPU-to-GPU weight streaming · Grove NVL72 gang scheduling · AIConfigurator deployment search · in-flight request migration · zero-config DGDR deployment.
 
-## The six binaries
+## The binaries
 
 All Rust. Built from one workspace.
 
@@ -111,6 +120,7 @@ All Rust. Built from one workspace.
 | `cgn-metrics`   | Prometheus aggregator. Surfaces power telemetry from Redfish/IPMI + DCGM              |
 | `cgn-ctl`       | Admin CLI: install / cluster / model / pki / bench / key. Embeds `helm` binary        |
 | `cgn-operator`  | Kubernetes operator (kube-rs). CRDs in `deploy/kubernetes/crds/`                      |
+| `cgn-infer` 🧪  | Native inference engine (Candle, GGUF via mmap, OpenAI HTTP). Experimental/preview — see [docs/architecture/cgn-infer.md](docs/architecture/cgn-infer.md) |
 
 ## Quick start
 
@@ -335,7 +345,7 @@ cognitora/
 **Architecture**
 
 - [Top-level architecture](docs/ARCHITECTURE.md) · [Repo layout](docs/architecture/repo-layout.md)
-- Deep dives: [Routing](docs/architecture/routing.md) · [KV tiering](docs/architecture/kv-tiering.md) · [KV strategy (LMCache, HiCache, KVBM, NIXL)](docs/architecture/kv-strategy.md) · [Protocols](docs/architecture/protocols.md)
+- Deep dives: [Routing](docs/architecture/routing.md) · [KV tiering](docs/architecture/kv-tiering.md) · [KV strategy (LMCache, HiCache, KVBM, NIXL)](docs/architecture/kv-strategy.md) · [Protocols](docs/architecture/protocols.md) · [cgn-infer native engine 🧪](docs/architecture/cgn-infer.md)
 - [Security model](docs/architecture/security.md)
 - [Cognitora vs NVIDIA Dynamo (deep comparison)](docs/architecture/vs-dynamo.md)
 

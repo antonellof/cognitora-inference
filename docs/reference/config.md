@@ -31,7 +31,7 @@ OpenAI HTTP surface (`/v1/completions`, `/health`, `/v1/models`) plugs in.
 
 | Key                     | Type   | Default                          | Notes |
 |-------------------------|--------|----------------------------------|-------|
-| `engine.kind`           | enum   | `"vllm"`                         | One of `vllm`, `sglang`, `llama_cpp`, `mlx`, `openai_compat`. |
+| `engine.kind`           | enum   | `"vllm"`                         | One of `vllm`, `sglang`, `llama_cpp`, `mlx`, `cgn_infer`, `openai_compat`. |
 | `engine.url`            | string | `http://127.0.0.1:8000`          | OpenAI HTTP base URL. |
 | `engine.kv_offload`     | enum   | `"none"`                         | Engine-side KV offload backend. One of `none`, `nixl`, `lmcache`, `hicache`, `kvbm`. See [Engine-side KV offload](#engine-side-kv-offload) below. |
 | `engine.vllm.binary`    | string | `"vllm"`                         | Path or PATH-name of the `vllm` CLI. |
@@ -54,6 +54,12 @@ OpenAI HTTP surface (`/v1/completions`, `/health`, `/v1/models`) plugs in.
 | `engine.mlx_lm.host`      | string | `"127.0.0.1"`               | `--host` for `mlx_lm.server`. |
 | `engine.mlx_lm.port`      | u16    | `8090`                      | `--port`; default avoids clashing with `ROUTER_HTTP` (8080). Must match `engine.url`. |
 | `engine.mlx_lm.extra_args` | array | `[]`                       | Appended after `--model …`. |
+| `engine.cgn_infer.binary`   | string | `"cgn-infer"`              | Path or PATH-name of the `cgn-infer` binary. |
+| `engine.cgn_infer.host`     | string | `"127.0.0.1"`              | `--host` for `cgn-infer serve`. |
+| `engine.cgn_infer.port`     | u16    | `8001`                     | `--port`. Must match `engine.url`. |
+| `engine.cgn_infer.ctx`      | u32    | `4096`                     | `--ctx` context window. |
+| `engine.cgn_infer.threads`  | u32    | `4`                        | `--threads` CPU thread count. |
+| `engine.cgn_infer.extra_args` | array | `[]`                      | Appended after the auto-rendered argv. |
 
 When `kind = "openai_compat"` the agent does **not** spawn a child process;
 it only proxies to whatever is at `engine.url`. Use this with systemd /
@@ -77,6 +83,13 @@ are fully interchangeable from the router's perspective:
 * **`mlx`** — `python3 -m mlx_lm.server --model <hf_or_path> --host <h> --port <p> …`.
   **Apple Silicon / macOS only** ([mlx-lm](https://github.com/ml-explore/mlx-lm)).
   Use `kv_offload = "none"` only.
+* **`cgn_infer`** *(experimental / preview)* — `cgn-infer serve --model
+  <gguf> --host <h> --port <p> --ctx <n> --threads <n>`. Cognitora's
+  **first-party native engine** (Rust + Candle, GGUF via mmap) with
+  continuous batching (llama/qwen2 GGUFs; qwen3/gemma3/phi3/MoE serve
+  sequentially) and optional multi-node layer-pipeline mode via
+  `[models.*.pipeline]`; only `kv_offload = "none"` is valid. See
+  [`docs/architecture/cgn-infer.md`](../architecture/cgn-infer.md).
 * **`openai_compat`** — proxy-only.
 
 ### Engine-side KV offload
@@ -104,10 +117,50 @@ not install them; the recipe's `up.sh` warns when they're missing.
 
 ### Per-model knobs
 
-`[models."<name>"].path` is required when `engine.kind = "llama_cpp"` (the
-filesystem path to a `.gguf` file). For SGLang or **MLX**, `path` is optional: when
+`[models."<name>"].path` is required when `engine.kind = "llama_cpp"` or
+`"cgn_infer"` (the filesystem path to a `.gguf` file). For SGLang or **MLX**, `path` is optional: when
 unset the spawn argv uses the model table key as the Hugging Face repo id; when set,
 it is passed to `--model` as a local directory. vLLM behaves the same way as SGLang for `path`.
+
+### `[models.*.pipeline]` — cgn-infer layer pipeline
+
+With `engine.kind = "cgn_infer"`, a per-model `pipeline` block splits
+the model across processes/nodes by layer range. The agent spawns one
+`cgn-infer worker` per `spawn = true` member (before the coordinator),
+registers workers in etcd as non-servable, and restarts the whole
+pipeline if any member exits.
+
+```toml
+[models."llama3-8b"]
+path = "/models/llama3-8b.gguf"
+
+[models."llama3-8b".pipeline]
+coordinator_layers  = "0:11"    # embedding + layers [0,11) + LM head, local
+activation_encoding = "f16"     # or "int8"
+
+[[models."llama3-8b".pipeline.workers]]
+listen = "127.0.0.1:9101"       # spawned locally by this agent
+layers = "11:22"
+
+[[models."llama3-8b".pipeline.workers]]
+listen   = "10.0.0.5:9101"      # managed elsewhere (another agent / systemd)
+layers   = "22:32"
+endpoint = "http://10.0.0.5:9101"
+spawn    = false
+```
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `coordinator_layers` | string | — | Coordinator's local slice `"A:B"` (half-open, must start at 0). |
+| `activation_encoding` | string | `"f16"` | Hidden-state wire encoding: `f16` or `int8`. |
+| `workers[].listen` | string | — | Worker gRPC bind address (`host:port`). |
+| `workers[].layers` | string | — | Worker's layer slice `"A:B"`. |
+| `workers[].endpoint` | string | `http://<listen>` | URL the coordinator dials. |
+| `workers[].spawn` | bool | `true` | Spawn locally, or expect an externally managed worker. |
+
+The coordinator validates at startup that `coordinator_layers` plus
+the worker slices, in order, exactly tile the model's layer count.
+Pipeline mode is limited to `llama`/`qwen2` GGUF architectures.
 
 ### Legacy aliases
 

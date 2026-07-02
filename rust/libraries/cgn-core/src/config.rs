@@ -288,6 +288,9 @@ impl Default for AgentConfig {
 /// * `mlx` — the agent spawns `python -m mlx_lm.server ...` (**Apple
 ///   Silicon / macOS**). See the [mlx-lm](https://github.com/ml-explore/mlx-lm)
 ///   HTTP server (`mlx_lm/SERVER.md`).
+/// * `cgn_infer` — the agent spawns Cognitora's first-party native engine
+///   `cgn-infer serve --model <gguf> ...`. Same OpenAI wire contract as the
+///   llama.cpp server; the per-model `path` field must point at a GGUF.
 /// * `openai_compat` — the agent does not spawn anything; it just proxies
 ///   to `engine.url`. Use this when the engine is managed by
 ///   systemd / Kubernetes / a sidecar.
@@ -309,6 +312,8 @@ pub struct EngineConfig {
     pub llama_cpp: LlamaCppEngineConfig,
     /// MLX-LM server knobs (used when `kind = "mlx"`).
     pub mlx_lm: MlxLmEngineConfig,
+    /// cgn-infer knobs (used when `kind = "cgn_infer"`).
+    pub cgn_infer: CgnInferEngineConfig,
 }
 impl Default for EngineConfig {
     fn default() -> Self {
@@ -320,6 +325,7 @@ impl Default for EngineConfig {
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
             mlx_lm: MlxLmEngineConfig::default(),
+            cgn_infer: CgnInferEngineConfig::default(),
         }
     }
 }
@@ -332,6 +338,8 @@ pub enum EngineKind {
     LlamaCpp,
     /// Apple MLX (`python -m mlx_lm.server`).
     Mlx,
+    /// Cognitora's first-party native engine (`cgn-infer serve`).
+    CgnInfer,
     OpenaiCompat,
 }
 
@@ -350,6 +358,7 @@ pub enum EngineKind {
 /// | `sglang`      | yes    | yes    | no        | yes       | no     |
 /// | `llama_cpp`   | yes    | no     | no        | no        | no     |
 /// | `mlx`         | yes    | no     | no        | no        | no     |
+/// | `cgn_infer`   | yes    | no     | no        | no        | no     |
 /// | `openai_compat` | yes  | no     | no        | no        | no     |
 ///
 /// In disaggregated topologies (`[agent].role = "prefill"` or `"decode"`)
@@ -501,6 +510,41 @@ impl Default for MlxLmEngineConfig {
             binary: "python3".into(),
             host: "127.0.0.1".into(),
             port: crate::ports::MLX_LM_HTTP,
+            extra_args: vec![],
+        }
+    }
+}
+
+/// Cognitora's first-party native inference engine. Spawned as
+/// `cgn-infer serve --model <gguf> --host <h> --port <p> [--ctx N]
+/// [--threads N]` and speaks the same OpenAI HTTP surface as the
+/// llama.cpp server (`/v1/chat/completions`, `/v1/completions`,
+/// `/v1/models`, `/healthz`). Only `kv_offload = "none"` is valid.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CgnInferEngineConfig {
+    /// Path or PATH-name of the `cgn-infer` binary. Default: `cgn-infer`.
+    pub binary_path: String,
+    /// Host the server binds to. Mapped to `--host`.
+    pub host: String,
+    /// Port the server binds to. Mapped to `--port`.
+    pub port: u16,
+    /// Context window when [models.\*].max_model_len is unset.
+    /// Mapped to `--ctx`. `None` = engine default.
+    pub ctx: Option<u32>,
+    /// CPU thread count. Mapped to `--threads`. `None` = engine default.
+    pub threads: Option<u32>,
+    /// Arguments appended after the auto-rendered base flags.
+    pub extra_args: Vec<String>,
+}
+impl Default for CgnInferEngineConfig {
+    fn default() -> Self {
+        Self {
+            binary_path: "cgn-infer".into(),
+            host: "127.0.0.1".into(),
+            port: crate::ports::VLLM_HTTP,
+            ctx: None,
+            threads: None,
             extra_args: vec![],
         }
     }
@@ -664,6 +708,12 @@ pub struct ModelConfig {
     /// "llama_cpp"` (a `.gguf` file). Optional for `vllm` (which resolves
     /// the model name as a HuggingFace repo id).
     pub path: Option<PathBuf>,
+    /// Distributed layer-pipeline topology (`engine.kind = "cgn_infer"`
+    /// only). When set, the agent spawns one `cgn-infer worker` per
+    /// `spawn = true` member plus a coordinator wired to every worker,
+    /// registers the workers in etcd as non-servable, and restarts the
+    /// whole pipeline if any member dies.
+    pub pipeline: Option<PipelineTopologyConfig>,
 }
 impl Default for ModelConfig {
     fn default() -> Self {
@@ -675,6 +725,62 @@ impl Default for ModelConfig {
             max_model_len: None,
             extra_args: vec![],
             path: None,
+            pipeline: None,
+        }
+    }
+}
+
+/// `[models.*.pipeline]` — cgn-infer layer-pipeline topology.
+///
+/// The coordinator binds the embedding, layers
+/// `coordinator_layers = "0:B"`, and the LM head; each worker binds
+/// one contiguous slice. The slices (coordinator first, then workers
+/// in listed order) must exactly tile the model's layer count — this
+/// is validated by the coordinator at startup against each worker's
+/// `Info` response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PipelineTopologyConfig {
+    /// Coordinator's local layer slice, half-open `"A:B"`; must start
+    /// at 0.
+    pub coordinator_layers: String,
+    /// Pipeline members, in layer order after the coordinator.
+    pub workers: Vec<PipelineWorkerConfig>,
+    /// Activation wire encoding: `"f16"` (default) or `"int8"`.
+    pub activation_encoding: String,
+}
+impl Default for PipelineTopologyConfig {
+    fn default() -> Self {
+        Self {
+            coordinator_layers: String::new(),
+            workers: vec![],
+            activation_encoding: "f16".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PipelineWorkerConfig {
+    /// gRPC listen address the worker binds (`host:port`).
+    pub listen: String,
+    /// Layer slice this worker serves, half-open `"A:B"`.
+    pub layers: String,
+    /// Endpoint the coordinator dials. Defaults to
+    /// `http://<listen>` (`https://` when mTLS is configured).
+    pub endpoint: Option<String>,
+    /// Spawn this worker locally (`true`, default) or expect it to be
+    /// managed elsewhere — e.g. by the agent on another node
+    /// (`false`).
+    pub spawn: bool,
+}
+impl Default for PipelineWorkerConfig {
+    fn default() -> Self {
+        Self {
+            listen: String::new(),
+            layers: String::new(),
+            endpoint: None,
+            spawn: true,
         }
     }
 }
@@ -771,6 +877,96 @@ capacity = 0.1
         let cfg = Config::load(&p).unwrap();
         assert_eq!(cfg.cluster.name, "prod-eu");
         assert!((cfg.router.score_weights.kv - 0.6).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parses_cgn_infer_engine_block() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("c.toml");
+        std::fs::write(
+            &p,
+            r#"
+[engine]
+kind = "cgn_infer"
+url  = "http://127.0.0.1:8001"
+
+[engine.cgn_infer]
+binary_path = "/opt/cognitora/bin/cgn-infer"
+host        = "127.0.0.1"
+port        = 8001
+ctx         = 8192
+threads     = 8
+        "#,
+        )
+        .unwrap();
+        let cfg = Config::load(&p).unwrap();
+        assert_eq!(cfg.engine.kind, EngineKind::CgnInfer);
+        assert_eq!(cfg.engine.cgn_infer.binary_path, "/opt/cognitora/bin/cgn-infer");
+        assert_eq!(cfg.engine.cgn_infer.ctx, Some(8192));
+        assert_eq!(cfg.engine.cgn_infer.threads, Some(8));
+    }
+
+    #[test]
+    fn parses_pipeline_block() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("c.toml");
+        std::fs::write(
+            &p,
+            r#"
+[engine]
+kind = "cgn_infer"
+
+[models."llama3-8b"]
+path = "/models/llama3-8b.gguf"
+
+[models."llama3-8b".pipeline]
+coordinator_layers = "0:11"
+activation_encoding = "int8"
+
+[[models."llama3-8b".pipeline.workers]]
+listen = "127.0.0.1:9101"
+layers = "11:22"
+
+[[models."llama3-8b".pipeline.workers]]
+listen = "10.0.0.5:9101"
+layers = "22:32"
+endpoint = "https://worker-b:9101"
+spawn = false
+        "#,
+        )
+        .unwrap();
+        let cfg = Config::load(&p).unwrap();
+        let pipe = cfg.models["llama3-8b"].pipeline.as_ref().unwrap();
+        assert_eq!(pipe.coordinator_layers, "0:11");
+        assert_eq!(pipe.activation_encoding, "int8");
+        assert_eq!(pipe.workers.len(), 2);
+        assert_eq!(pipe.workers[0].listen, "127.0.0.1:9101");
+        assert_eq!(pipe.workers[0].layers, "11:22");
+        assert!(pipe.workers[0].spawn);
+        assert_eq!(pipe.workers[0].endpoint, None);
+        assert!(!pipe.workers[1].spawn);
+        assert_eq!(
+            pipe.workers[1].endpoint.as_deref(),
+            Some("https://worker-b:9101")
+        );
+    }
+
+    #[test]
+    fn models_without_pipeline_default_to_none() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("c.toml");
+        std::fs::write(&p, "[models.\"m\"]\npath = \"/m.gguf\"\n").unwrap();
+        let cfg = Config::load(&p).unwrap();
+        assert!(cfg.models["m"].pipeline.is_none());
+    }
+
+    #[test]
+    fn cgn_infer_defaults() {
+        let c = CgnInferEngineConfig::default();
+        assert_eq!(c.binary_path, "cgn-infer");
+        assert_eq!(c.host, "127.0.0.1");
+        assert_eq!(c.ctx, None);
+        assert_eq!(c.threads, None);
     }
 
     #[test]

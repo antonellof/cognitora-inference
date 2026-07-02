@@ -10,6 +10,65 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-07-02
+
+The "native inference engine" release. Cognitora previously only
+orchestrated external OpenAI-compatible engines (vLLM, SGLang,
+llama.cpp, MLX). It now ships its own first-party inference engine,
+`cgn-infer` — a seventh binary that loads and runs local GGUF models
+directly, making Cognitora self-sufficient rather than purely a
+control plane.
+
+### Added
+
+- **`cgn-infer` native engine (preview).** A new Rust service that runs
+  quantized GGUF models via [Candle](https://github.com/huggingface/candle):
+  - mmap GGUF loader (page-cache resident, no heap copy) with
+    embedded-tokenizer reconstruction and embedded Jinja chat-template
+    rendering (ChatML fallback).
+  - Candle `quantized_llama` runtime behind a `Runtime` trait; CPU
+    always available, `metal` / `cuda` behind cargo features
+    (`--backend auto|cpu|metal|cuda`).
+  - OpenAI-compatible axum server: `POST /v1/chat/completions`,
+    `POST /v1/completions` (buffered + SSE streaming), `GET /v1/models`,
+    `GET /healthz`.
+  - Sampling (temperature, top-k, top-p, repetition penalty) and a
+    BLAKE3 block-hash prefix cache aligned with `cgn-kvcached`.
+  - CLI: `cgn-infer serve --model <gguf> --host --port --ctx --threads`.
+- **Continuous batching.** A scheduler admits multiple sequences per
+  forward pass (chunked prefill + batched decode) over a custom
+  quantized forward pass with external per-sequence KV and block-based
+  preemption.
+- **Distributed layer-pipeline inference.** New
+  `proto/cognitora/v1/infer.proto` activation-streaming gRPC service,
+  coordinator / worker roles (`--role`, `--layers A:B`), workers load
+  only their layer slice, f16 activation transport (optional int8),
+  mTLS consistent with the rest of the platform. `cgn-agent`
+  orchestrates topology from a `[models.*.pipeline]` TOML block;
+  workers register non-servable in etcd and the pipeline restarts as a
+  unit on member failure.
+- **More architectures.** Dispatch on GGUF architecture metadata:
+  batched llama / qwen2; sequential qwen3 / gemma3 / phi3 / MoE.
+- **Platform integration.** `EngineKind::CgnInfer` (`kind = "cgn_infer"`)
+  with `CgnInferEngineConfig` in `cgn-core`, `render_argv` + supervisor
+  support in `cgn-agent` (reusing the existing OpenAI HTTP driver and
+  `/v1/models` readiness). `kv_offload` is restricted to `none`.
+- **Ships in the standard artefacts.** `cgn-infer` is now built into the
+  release tarballs, the `install.sh` binary set, and the single
+  multi-binary Docker image alongside the original six binaries.
+- **Recipe + example.** `recipes/llama3-8b/cgn-infer/single-node/` and
+  `examples/local-mac-native/`.
+- **Docs.** New `docs/architecture/cgn-infer.md`; engine matrix rows in
+  the README and `docs/reference/config.md` (marked preview).
+
+### Notes
+
+- `cgn-infer` is a **preview**: Phase-1 architecture coverage is
+  Llama-family GGUF, batching granularity and pipeline decode
+  sequentiality carry documented limits inherited from Candle's
+  quantized path, and end-to-end generation has not been exercised in
+  CI (no model weights available there).
+
 ## [0.4.0] — 2026-06-11
 
 The "make the KV layer live" release. The cross-node KV cache design

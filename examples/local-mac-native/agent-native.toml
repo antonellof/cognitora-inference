@@ -1,0 +1,40 @@
+# Agent spawns: cgn-infer serve --model <gguf> --host … --port … --ctx … --threads …
+# Cognitora's first-party native engine — no Python required.
+# engine.url must match http://<host>:<port>.
+#
+# Set LLAMA_GGUF=/abs/path/to/model.gguf, or replace the placeholder in
+# [models."llama-3.2-3b-instruct"].path.
+
+[cluster]
+name           = "cognitora-mac-native"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7080"
+role     = "both"
+node_id  = "agent-native"
+kv_uds   = "/tmp/cognitora-mac-native-kv.sock"
+
+[engine]
+kind       = "cgn_infer"
+url        = "http://127.0.0.1:8001"
+kv_offload = "none"        # cgn_infer only supports "none"
+
+[engine.cgn_infer]
+binary_path = "cgn-infer"
+host        = "127.0.0.1"
+port        = 8001
+ctx         = 4096
+threads     = 8
+
+[models."llama-3.2-3b-instruct"]
+tp            = 1
+max_model_len = 4096
+path          = "${LLAMA_GGUF}"
