@@ -159,6 +159,7 @@ async fn publish_one(
         "total_blocks": 0u32,
         "power_watts": gpu.power_watts,
         "ready": ready,
+        "servable": true,
         "version": env!("CARGO_PKG_VERSION"),
     });
     let key = format!(
@@ -171,6 +172,48 @@ async fn publish_one(
         .put(key, value.to_string(), Some(opts))
         .await
         .map_err(|e| Error::Etcd(format!("put: {e}")))?;
+
+    publish_pipeline_workers(client, supervisor, lease_id, ready).await
+}
+
+/// Register locally spawned cgn-infer pipeline workers as
+/// **non-servable** nodes: they appear in cluster state (for
+/// visibility and whole-pipeline health) but carry no `model` and
+/// `servable = false`, so the router never targets them — only the
+/// coordinator (the main node entry above) receives traffic.
+async fn publish_pipeline_workers(
+    client: &mut etcd_client::Client,
+    supervisor: &Supervisor,
+    lease_id: i64,
+    ready: bool,
+) -> Result<()> {
+    use cgn_core::Error;
+    let Some((model_name, model)) = supervisor.cfg.models.iter().next() else {
+        return Ok(());
+    };
+    let Some(pipeline) = &model.pipeline else {
+        return Ok(());
+    };
+    for (i, w) in pipeline.workers.iter().enumerate().filter(|(_, w)| w.spawn) {
+        let worker_id = format!("{}-pipeline-worker-{i}", supervisor.cfg.agent.node_id);
+        let value = serde_json::json!({
+            "node_id": worker_id,
+            "address": format!("http://{}", w.listen),
+            "role": "pipeline_worker",
+            "model": serde_json::Value::Null,
+            "pipeline_model": model_name,
+            "layers": w.layers,
+            "ready": ready,
+            "servable": false,
+            "version": env!("CARGO_PKG_VERSION"),
+        });
+        let key = format!("{}{}", cgn_core::etcd_keys::NODES, worker_id);
+        let opts = etcd_client::PutOptions::new().with_lease(lease_id);
+        client
+            .put(key, value.to_string(), Some(opts))
+            .await
+            .map_err(|e| Error::Etcd(format!("put worker: {e}")))?;
+    }
     Ok(())
 }
 

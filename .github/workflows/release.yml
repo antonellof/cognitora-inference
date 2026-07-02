@@ -74,7 +74,7 @@ jobs:
           fi
 
       - name: Build binaries
-        # Build all six binaries we ship. `--no-default-features` mirrors
+        # Build all seven binaries we ship. `--no-default-features` mirrors
         # the local dev build and avoids dragging in optional features
         # (redis-backend, etc.) that are not needed for the standard
         # release. Must stay in sync with `BINS` in deploy/installer/install.sh.
@@ -86,7 +86,8 @@ jobs:
             -p cgn-kvcached \
             -p cgn-metrics \
             -p cgn-ctl \
-            -p cgn-operator
+            -p cgn-operator \
+            -p cgn-infer
 
       - name: Pack archive
         id: pack
@@ -97,7 +98,7 @@ jobs:
           STAGING="cognitora-${TAG}-${{ matrix.platform }}"
           mkdir -p "dist/${STAGING}"
 
-          BINS=(cgn-router cgn-agent cgn-kvcached cgn-metrics cgn-ctl cgn-operator)
+          BINS=(cgn-router cgn-agent cgn-kvcached cgn-metrics cgn-ctl cgn-operator cgn-infer)
           missing=()
           for b in "${BINS[@]}"; do
             src="target/${{ matrix.target }}/release/${b}"
@@ -252,7 +253,7 @@ jobs:
           fail_on_unmatched_files: true
 
   # ---------------------------------------------------------------------------
-  # Multi-arch container image. Single image with all six binaries in
+  # Multi-arch container image. Single image with all seven binaries in
   # /usr/local/bin/. Pods choose which one to run via `command:`; the
   # Helm chart already does this.
   # ---------------------------------------------------------------------------

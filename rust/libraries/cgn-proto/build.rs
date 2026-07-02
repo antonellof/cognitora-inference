@@ -19,6 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "cognitora/v1/kv.proto",
         "cognitora/v1/control.proto",
         "cognitora/v1/metrics.proto",
+        "cognitora/v1/infer.proto",
     ];
     let full: Vec<_> = files.iter().map(|f| proto_dir.join(f)).collect();
 

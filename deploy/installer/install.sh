@@ -46,7 +46,7 @@ CGN_BASE_URL="${CGN_BASE_URL:-}"
 COSIGN_PUBKEY_URL="${CGN_COSIGN_PUBKEY:-https://raw.githubusercontent.com/${CGN_REPO}/main/SECURITY/cosign.pub}"
 
 # Binaries we ship. Anything missing from the tarball is silently skipped.
-BINS="cgn-router cgn-agent cgn-kvcached cgn-ctl cgn-metrics cgn-operator"
+BINS="cgn-router cgn-agent cgn-kvcached cgn-ctl cgn-metrics cgn-operator cgn-infer"
 
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 log()   { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
@@ -75,7 +75,7 @@ case "${OS}/${ARCH}" in
   Linux/arm64)         PLATFORM="linux-arm64"  ;;
   Darwin/*)
     fatal "macOS prebuilt binaries are not shipped. Build from source: \
-'cargo build --release --no-default-features -p cgn-router -p cgn-agent -p cgn-kvcached -p cgn-metrics -p cgn-ctl -p cgn-operator'"
+'cargo build --release --no-default-features -p cgn-router -p cgn-agent -p cgn-kvcached -p cgn-metrics -p cgn-ctl -p cgn-operator -p cgn-infer'"
     ;;
   *) fatal "unsupported platform: ${OS}/${ARCH}" ;;
 esac

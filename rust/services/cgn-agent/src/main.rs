@@ -53,6 +53,7 @@ async fn main() -> Result<()> {
     tokio::select! {
         r = grpc::serve(supervisor.clone(), listen) => r,
         r = health::loop_emit(supervisor.clone()) => r,
+        r = supervisor.clone().supervise() => r,
         _ = shutdown() => {
             info!("agent shutting down");
             supervisor.shutdown().await;

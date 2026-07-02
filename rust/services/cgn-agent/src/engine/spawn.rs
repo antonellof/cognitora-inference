@@ -15,6 +15,8 @@
 //!   [extra ...]`.
 //! * **mlx** — `python -m mlx_lm.server --model <hf_or_path> --host <h>
 //!   --port <p> [extra ...]` (Apple Silicon only).
+//! * **cgn_infer** — `cgn-infer serve --model <gguf> --host <h> --port <p>
+//!   [--ctx N] [--threads N] [extra ...]` (Cognitora's first-party engine).
 //! * **openai_compat** — no spawn; caller checks `should_spawn()`.
 //!
 //! KV offload mapping (driven by `engine.kv_offload` + `agent.role`):
@@ -30,7 +32,7 @@
 //! | vllm    | decode   | lmcache     | `--kv-transfer-config '{NixlConnector,kv_consumer}'`   |
 //! | vllm    | both     | kvbm        | `--kv-transfer-config '{DynamoConnector(kvbm),kv_both}'`|
 //! | sglang  | both     | hicache     | `--enable-hierarchical-cache --hicache-* ...`          |
-//! | llama_cpp / mlx / openai_compat | * | only `none` is valid                          |
+//! | llama_cpp / mlx / cgn_infer / openai_compat | * | only `none` is valid              |
 //!
 //! Combinations not in the table are rejected at render time.
 
@@ -72,6 +74,7 @@ pub fn render_argv(
         EngineKind::Sglang => Ok(render_sglang(cfg, spec)),
         EngineKind::LlamaCpp => render_llama_cpp(cfg, spec),
         EngineKind::Mlx => Ok(render_mlx(cfg, spec)),
+        EngineKind::CgnInfer => render_cgn_infer(cfg, spec),
         EngineKind::OpenaiCompat => Err(Error::Config(
             "engine.kind = openai_compat does not spawn — caller should check should_spawn()"
                 .into(),
@@ -215,6 +218,121 @@ fn render_mlx(cfg: &EngineConfig, spec: &ModelSpec) -> Vec<String> {
     argv
 }
 
+/// `cgn-infer serve` — Cognitora's first-party engine. Same OpenAI wire
+/// contract as the llama.cpp server; readiness is probed via `/v1/models`
+/// like every other engine. With a `[models.*.pipeline]` block the argv
+/// becomes the pipeline **coordinator** (`--role coordinator --layers A:B
+/// --workers <ep,...>`); the worker argvs come from
+/// [`render_pipeline_workers`].
+fn render_cgn_infer(cfg: &EngineConfig, spec: &ModelSpec) -> Result<Vec<String>> {
+    let path = cgn_infer_model_path(spec)?;
+
+    let mut argv: Vec<String> = vec![
+        cfg.cgn_infer.binary_path.clone(),
+        "serve".into(),
+        "--model".into(),
+        path,
+        "--host".into(),
+        cfg.cgn_infer.host.clone(),
+        "--port".into(),
+        cfg.cgn_infer.port.to_string(),
+    ];
+    if let Some(ctx) = spec.max_model_len.or(cfg.cgn_infer.ctx) {
+        argv.push("--ctx".into());
+        argv.push(ctx.to_string());
+    }
+    if let Some(threads) = cfg.cgn_infer.threads {
+        argv.push("--threads".into());
+        argv.push(threads.to_string());
+    }
+    if let Some(pipe) = &spec.pipeline {
+        if pipe.coordinator_layers.is_empty() || pipe.workers.is_empty() {
+            return Err(Error::Config(format!(
+                "[models.\"{}\"].pipeline requires coordinator_layers and at least one worker",
+                spec.name
+            )));
+        }
+        argv.push("--role".into());
+        argv.push("coordinator".into());
+        argv.push("--layers".into());
+        argv.push(pipe.coordinator_layers.clone());
+        let endpoints: Vec<String> = pipe
+            .workers
+            .iter()
+            .map(|w| {
+                w.endpoint
+                    .clone()
+                    .unwrap_or_else(|| format!("http://{}", w.listen))
+            })
+            .collect();
+        argv.push("--workers".into());
+        argv.push(endpoints.join(","));
+        argv.push("--activation-encoding".into());
+        argv.push(pipe.activation_encoding.clone());
+    }
+    argv.extend(cfg.cgn_infer.extra_args.clone());
+    argv.extend(spec.extra_args.clone());
+    Ok(argv)
+}
+
+fn cgn_infer_model_path(spec: &ModelSpec) -> Result<String> {
+    Ok(spec
+        .path
+        .as_ref()
+        .ok_or_else(|| {
+            Error::Config(format!(
+                "engine.kind = cgn_infer requires [models.\"{}\"].path = <gguf>",
+                spec.name
+            ))
+        })?
+        .display()
+        .to_string())
+}
+
+/// Argvs for the locally spawned (`spawn = true`) pipeline workers of a
+/// `[models.*.pipeline]` block: `cgn-infer worker --model <gguf>
+/// --layers A:B --listen <addr>`. Returns an empty vec when the model
+/// has no pipeline. Workers are spawned before the coordinator (the
+/// coordinator dials them at startup).
+pub fn render_pipeline_workers(cfg: &EngineConfig, spec: &ModelSpec) -> Result<Vec<Vec<String>>> {
+    let Some(pipe) = &spec.pipeline else {
+        return Ok(vec![]);
+    };
+    if cfg.kind != EngineKind::CgnInfer {
+        return Err(Error::Config(
+            "[models.*.pipeline] requires engine.kind = \"cgn_infer\"".into(),
+        ));
+    }
+    let path = cgn_infer_model_path(spec)?;
+    let mut out = Vec::new();
+    for w in pipe.workers.iter().filter(|w| w.spawn) {
+        if w.listen.is_empty() || w.layers.is_empty() {
+            return Err(Error::Config(format!(
+                "[models.\"{}\"].pipeline.workers entries need listen and layers",
+                spec.name
+            )));
+        }
+        let mut argv = vec![
+            cfg.cgn_infer.binary_path.clone(),
+            "worker".into(),
+            "--model".into(),
+            path.clone(),
+            "--layers".into(),
+            w.layers.clone(),
+            "--listen".into(),
+            w.listen.clone(),
+            "--activation-encoding".into(),
+            pipe.activation_encoding.clone(),
+        ];
+        if let Some(threads) = cfg.cgn_infer.threads {
+            argv.push("--threads".into());
+            argv.push(threads.to_string());
+        }
+        out.push(argv);
+    }
+    Ok(out)
+}
+
 fn render_legacy(template: &[String], spec: &ModelSpec) -> Vec<String> {
     let mut argv: Vec<String> = template
         .iter()
@@ -253,13 +371,14 @@ fn validate_kv_offload(kind: EngineKind, offload: KvOffload) -> Result<()> {
         return Err(Error::Config(format!(
             "engine.kv_offload = \"{}\" is not supported with engine.kind = \"{}\". \
              Valid pairings: vllm × {{none,nixl,lmcache,kvbm}}, sglang × {{none,nixl,hicache}}, \
-             llama_cpp/mlx/openai_compat × {{none}}.",
+             llama_cpp/mlx/cgn_infer/openai_compat × {{none}}.",
             offload.as_str(),
             match kind {
                 EngineKind::Vllm => "vllm",
                 EngineKind::Sglang => "sglang",
                 EngineKind::LlamaCpp => "llama_cpp",
                 EngineKind::Mlx => "mlx",
+                EngineKind::CgnInfer => "cgn_infer",
                 EngineKind::OpenaiCompat => "openai_compat",
             }
         )));
@@ -326,7 +445,8 @@ pub(crate) fn sglang_hicache_args(offload: KvOffload) -> Vec<String> {
 mod tests {
     use super::*;
     use cgn_core::config::{
-        LlamaCppEngineConfig, MlxLmEngineConfig, SglangEngineConfig, VllmEngineConfig,
+        CgnInferEngineConfig, LlamaCppEngineConfig, MlxLmEngineConfig, SglangEngineConfig,
+        VllmEngineConfig,
     };
     use std::path::PathBuf;
 
@@ -342,6 +462,7 @@ mod tests {
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
             mlx_lm: Default::default(),
+            cgn_infer: Default::default(),
         }
     }
 
@@ -361,6 +482,7 @@ mod tests {
             },
             llama_cpp: LlamaCppEngineConfig::default(),
             mlx_lm: Default::default(),
+            cgn_infer: Default::default(),
         }
     }
 
@@ -382,6 +504,7 @@ mod tests {
                 extra_args: vec![],
             },
             mlx_lm: Default::default(),
+            cgn_infer: Default::default(),
         }
     }
 
@@ -394,6 +517,27 @@ mod tests {
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
             mlx_lm: MlxLmEngineConfig::default(),
+            cgn_infer: Default::default(),
+        }
+    }
+
+    fn cgn_infer_cfg() -> EngineConfig {
+        EngineConfig {
+            kind: EngineKind::CgnInfer,
+            url: "http://127.0.0.1:8001".into(),
+            kv_offload: KvOffload::None,
+            vllm: VllmEngineConfig::default(),
+            sglang: SglangEngineConfig::default(),
+            llama_cpp: LlamaCppEngineConfig::default(),
+            mlx_lm: Default::default(),
+            cgn_infer: CgnInferEngineConfig {
+                binary_path: "cgn-infer".into(),
+                host: "127.0.0.1".into(),
+                port: 8001,
+                ctx: Some(4096),
+                threads: Some(8),
+                extra_args: vec![],
+            },
         }
     }
 
@@ -404,7 +548,32 @@ mod tests {
             max_model_len: Some(2048),
             extra_args: vec![],
             path: path.map(PathBuf::from),
+            pipeline: None,
         }
+    }
+
+    fn pipeline_spec() -> ModelSpec {
+        use cgn_core::config::{PipelineTopologyConfig, PipelineWorkerConfig};
+        let mut s = spec("llama3-8b", Some("/models/llama3-8b.gguf"));
+        s.pipeline = Some(PipelineTopologyConfig {
+            coordinator_layers: "0:11".into(),
+            workers: vec![
+                PipelineWorkerConfig {
+                    listen: "127.0.0.1:9101".into(),
+                    layers: "11:22".into(),
+                    endpoint: None,
+                    spawn: true,
+                },
+                PipelineWorkerConfig {
+                    listen: "10.0.0.5:9101".into(),
+                    layers: "22:32".into(),
+                    endpoint: Some("https://worker-b:9101".into()),
+                    spawn: false,
+                },
+            ],
+            activation_encoding: "f16".into(),
+        });
+        s
     }
 
     #[test]
@@ -668,6 +837,149 @@ mod tests {
     }
 
     #[test]
+    fn renders_cgn_infer_command() {
+        let argv = render_argv(
+            &cgn_infer_cfg(),
+            &spec("Meta-Llama-3.1-8B-Instruct", Some("/models/llama3-8b.gguf")),
+            NodeRoleCfg::Both,
+            None,
+        )
+        .unwrap();
+        assert_eq!(argv[0], "cgn-infer");
+        assert_eq!(argv[1], "serve");
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--model" && w[1] == "/models/llama3-8b.gguf"));
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--host" && w[1] == "127.0.0.1"));
+        assert!(argv.windows(2).any(|w| w[0] == "--port" && w[1] == "8001"));
+        // spec.max_model_len (2048) takes precedence over cfg ctx (4096).
+        assert!(argv.windows(2).any(|w| w[0] == "--ctx" && w[1] == "2048"));
+        assert!(argv.windows(2).any(|w| w[0] == "--threads" && w[1] == "8"));
+    }
+
+    #[test]
+    fn cgn_infer_falls_back_to_cfg_ctx() {
+        let mut s = spec("m", Some("/models/m.gguf"));
+        s.max_model_len = None;
+        let argv = render_argv(&cgn_infer_cfg(), &s, NodeRoleCfg::Both, None).unwrap();
+        assert!(argv.windows(2).any(|w| w[0] == "--ctx" && w[1] == "4096"));
+    }
+
+    #[test]
+    fn cgn_infer_omits_optional_flags_when_unset() {
+        let mut cfg = cgn_infer_cfg();
+        cfg.cgn_infer.ctx = None;
+        cfg.cgn_infer.threads = None;
+        let mut s = spec("m", Some("/models/m.gguf"));
+        s.max_model_len = None;
+        let argv = render_argv(&cfg, &s, NodeRoleCfg::Both, None).unwrap();
+        assert!(!argv.iter().any(|a| a == "--ctx"));
+        assert!(!argv.iter().any(|a| a == "--threads"));
+    }
+
+    #[test]
+    fn cgn_infer_requires_path() {
+        let err = render_argv(
+            &cgn_infer_cfg(),
+            &spec("Meta-Llama-3.1-8B-Instruct", None),
+            NodeRoleCfg::Both,
+            None,
+        )
+        .unwrap_err();
+        assert!(format!("{err:?}").contains("path"));
+    }
+
+    #[test]
+    fn pipeline_renders_coordinator_argv() {
+        let argv = render_argv(&cgn_infer_cfg(), &pipeline_spec(), NodeRoleCfg::Both, None).unwrap();
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--role" && w[1] == "coordinator"));
+        assert!(argv.windows(2).any(|w| w[0] == "--layers" && w[1] == "0:11"));
+        let i = argv.iter().position(|a| a == "--workers").unwrap();
+        // Explicit endpoint wins; otherwise http://<listen>.
+        assert_eq!(argv[i + 1], "http://127.0.0.1:9101,https://worker-b:9101");
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--activation-encoding" && w[1] == "f16"));
+    }
+
+    #[test]
+    fn pipeline_renders_spawned_worker_argvs_only() {
+        let argvs = render_pipeline_workers(&cgn_infer_cfg(), &pipeline_spec()).unwrap();
+        // Second worker has spawn = false (managed remotely).
+        assert_eq!(argvs.len(), 1);
+        let w = &argvs[0];
+        assert_eq!(w[0], "cgn-infer");
+        assert_eq!(w[1], "worker");
+        assert!(w
+            .windows(2)
+            .any(|x| x[0] == "--model" && x[1] == "/models/llama3-8b.gguf"));
+        assert!(w.windows(2).any(|x| x[0] == "--layers" && x[1] == "11:22"));
+        assert!(w
+            .windows(2)
+            .any(|x| x[0] == "--listen" && x[1] == "127.0.0.1:9101"));
+        assert!(w.windows(2).any(|x| x[0] == "--threads" && x[1] == "8"));
+    }
+
+    #[test]
+    fn no_pipeline_means_no_worker_argvs() {
+        let argvs =
+            render_pipeline_workers(&cgn_infer_cfg(), &spec("m", Some("/m.gguf"))).unwrap();
+        assert!(argvs.is_empty());
+        let argv =
+            render_argv(&cgn_infer_cfg(), &spec("m", Some("/m.gguf")), NodeRoleCfg::Both, None)
+                .unwrap();
+        assert!(!argv.iter().any(|a| a == "--role"));
+    }
+
+    #[test]
+    fn pipeline_rejects_wrong_engine_kind() {
+        let mut s = pipeline_spec();
+        s.path = Some(PathBuf::from("/m.gguf"));
+        let err = render_pipeline_workers(&llama_cfg(), &s).unwrap_err();
+        assert!(format!("{err:?}").contains("cgn_infer"));
+    }
+
+    #[test]
+    fn pipeline_rejects_incomplete_topology() {
+        let mut s = pipeline_spec();
+        s.pipeline.as_mut().unwrap().coordinator_layers.clear();
+        let err = render_argv(&cgn_infer_cfg(), &s, NodeRoleCfg::Both, None).unwrap_err();
+        assert!(format!("{err:?}").contains("coordinator_layers"));
+
+        let mut s = pipeline_spec();
+        s.pipeline.as_mut().unwrap().workers[0].listen.clear();
+        let err = render_pipeline_workers(&cgn_infer_cfg(), &s).unwrap_err();
+        assert!(format!("{err:?}").contains("listen"));
+    }
+
+    #[test]
+    fn rejects_non_none_kv_offload_on_cgn_infer() {
+        for offload in [
+            KvOffload::Nixl,
+            KvOffload::Lmcache,
+            KvOffload::Hicache,
+            KvOffload::Kvbm,
+        ] {
+            let mut cfg = cgn_infer_cfg();
+            cfg.kv_offload = offload;
+            let err = render_argv(
+                &cfg,
+                &spec("m", Some("/models/m.gguf")),
+                NodeRoleCfg::Both,
+                None,
+            )
+            .unwrap_err();
+            let msg = format!("{err:?}");
+            assert!(msg.contains("kv_offload"));
+            assert!(msg.contains("cgn_infer"));
+        }
+    }
+
+    #[test]
     fn legacy_cmd_takes_precedence() {
         let legacy = vec![
             "/bin/sleep".to_string(),
@@ -695,6 +1007,7 @@ mod tests {
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
             mlx_lm: MlxLmEngineConfig::default(),
+            cgn_infer: Default::default(),
         };
         assert!(!should_spawn(&cfg));
         assert!(render_argv(&cfg, &spec("a", None), NodeRoleCfg::Both, None).is_err());

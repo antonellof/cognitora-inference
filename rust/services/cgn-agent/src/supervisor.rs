@@ -4,14 +4,21 @@
 //!
 //! 1. Resolves the effective [`EngineConfig`] (honoring legacy
 //!    `[agent].vllm_url` / `[agent].vllm_cmd` aliases).
-//! 2. Renders the engine argv via [`engine::spawn::render_argv`].
-//! 3. Spawns the engine as a child process. Stdout/stderr **inherit** the
-//!    agent process so engine logs (e.g. `mlx_lm.server`) reach the same
-//!    destination as `cgn-agent` (typically `nohup` → `*.log` from `up.sh`).
-//!    Piped stdio without readers would deadlock the child once pipes fill.
-//! 4. Polls the engine's `/health` (or `/v1/models`) until it's ready, then
-//!    registers the node in etcd and starts accepting gRPC.
-//! 5. Restarts the engine on crash, with exponential backoff up to 30s.
+//! 2. Renders the engine argv via [`engine::spawn::render_argv`]. For a
+//!    cgn-infer `[models.*.pipeline]` topology this is a whole process
+//!    *group*: one `cgn-infer worker` per local member (spawned first)
+//!    plus the coordinator.
+//! 3. Spawns the engine process(es). Stdout/stderr **inherit** the agent
+//!    process so engine logs (e.g. `mlx_lm.server`) reach the same
+//!    destination as `cgn-agent` (typically `nohup` → `*.log` from
+//!    `up.sh`). Piped stdio without readers would deadlock the child once
+//!    pipes fill.
+//! 4. Polls the engine's `/health` (or `/v1/models`) until it's ready,
+//!    then registers the node in etcd and starts accepting gRPC.
+//! 5. Restarts the engine on crash with exponential backoff up to 30s —
+//!    for pipelines the **whole group** is killed and respawned when any
+//!    member dies, since surviving members hold KV state that is
+//!    inconsistent with a fresh peer.
 
 use std::process::Stdio;
 use std::sync::Arc;
@@ -25,7 +32,10 @@ use parking_lot::Mutex;
 use tokio::process::{Child, Command};
 use tracing::{info, warn};
 
-use crate::engine::{spawn::render_argv, Engine, ModelSpec, OpenAiHttpEngine};
+use crate::engine::{
+    spawn::{render_argv, render_pipeline_workers},
+    Engine, ModelSpec, OpenAiHttpEngine,
+};
 
 pub struct Supervisor {
     pub cfg: Config,
@@ -33,7 +43,8 @@ pub struct Supervisor {
     /// Effective engine config (legacy `[agent].vllm_*` merged into a real
     /// [`EngineConfig`]).
     pub engine_cfg: EngineConfig,
-    child: Mutex<Option<Child>>,
+    /// Engine process group: pipeline workers first, coordinator last.
+    children: Mutex<Vec<Child>>,
 }
 
 impl Supervisor {
@@ -44,6 +55,7 @@ impl Supervisor {
             EngineKind::Sglang => "sglang",
             EngineKind::LlamaCpp => "llama_cpp",
             EngineKind::Mlx => "mlx",
+            EngineKind::CgnInfer => "cgn_infer",
             EngineKind::OpenaiCompat => "openai_compat",
         };
         info!(kind = %engine_kind, url = %engine_cfg.url, "engine configured");
@@ -54,10 +66,22 @@ impl Supervisor {
             cfg,
             engine_cfg,
             engine,
-            child: Mutex::new(None),
+            children: Mutex::new(Vec::new()),
         };
         s.spawn_engine_for_default_model().await?;
         Ok(s)
+    }
+
+    fn default_model_spec(&self) -> Option<ModelSpec> {
+        let (name, m) = self.cfg.models.iter().next()?;
+        Some(ModelSpec {
+            name: name.clone(),
+            tp: m.tp,
+            max_model_len: m.max_model_len,
+            extra_args: m.extra_args.clone(),
+            path: m.path.clone(),
+            pipeline: m.pipeline.clone(),
+        })
     }
 
     async fn spawn_engine_for_default_model(&self) -> Result<()> {
@@ -65,50 +89,72 @@ impl Supervisor {
             info!("engine.kind = openai_compat — agent will not spawn a child process");
             return Ok(());
         }
-        let Some((name, m)) = self.cfg.models.iter().next() else {
+        let Some(spec) = self.default_model_spec() else {
             warn!("no [models.*] declared; engine will not be spawned by agent");
             return Ok(());
         };
-        let spec = ModelSpec {
-            name: name.clone(),
-            tp: m.tp,
-            max_model_len: m.max_model_len,
-            extra_args: m.extra_args.clone(),
-            path: m.path.clone(),
-        };
 
-        let legacy = self.cfg.agent.vllm_cmd.as_deref();
+        let legacy = self.cfg.agent.vllm_cmd.clone();
         let role = self.cfg.agent.role;
-        let argv = render_argv(&self.engine_cfg, &spec, role, legacy)?;
-        info!(argv = ?argv, kind = %self.engine.name(), "spawning engine");
 
-        let mut cmd = Command::new(&argv[0]);
-        cmd.args(&argv[1..])
-            .stdin(Stdio::null())
-            // Piped stdio without a reader deadlocks the child once the kernel
-            // pipe buffer fills (mlx_lm is chatty on stderr). Inherit so lines
-            // land in the agent's log file when launched via nohup (up.sh).
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .kill_on_drop(true);
-        let child = cmd
-            .spawn()
-            .map_err(|e| Error::Internal(format!("spawn engine: {e}")))?;
-        *self.child.lock() = Some(child);
+        // Pipeline workers first: the coordinator dials them at startup.
+        let mut argvs = render_pipeline_workers(&self.engine_cfg, &spec)?;
+        argvs.push(render_argv(&self.engine_cfg, &spec, role, legacy.as_deref())?);
 
+        let mut children = Vec::with_capacity(argvs.len());
+        for argv in &argvs {
+            info!(argv = ?argv, kind = %self.engine.name(), "spawning engine process");
+            children.push(spawn_child(argv)?);
+        }
+        *self.children.lock() = children;
         Ok(())
     }
 
-    pub async fn shutdown(&self) {
-        // Take ownership of the child handle in a tight scope so the
-        // parking_lot guard isn't held across the await below (which would
-        // make the surrounding future !Send and break the gRPC trait).
-        let child = self.child.lock().take();
-        if let Some(mut child) = child {
-            info!("terminating engine child");
+    /// Watch the engine process group; if any member exits, kill the
+    /// rest and respawn the whole group with exponential backoff.
+    /// Runs forever (select against shutdown in `main`).
+    pub async fn supervise(self: Arc<Self>) -> Result<()> {
+        let mut backoff = Duration::from_secs(1);
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let died = {
+                let mut children = self.children.lock();
+                if children.is_empty() {
+                    continue; // nothing spawned (openai_compat / no models)
+                }
+                children
+                    .iter_mut()
+                    .any(|c| matches!(c.try_wait(), Ok(Some(_)) | Err(_)))
+            };
+            if !died {
+                backoff = Duration::from_secs(1);
+                continue;
+            }
+            warn!("engine process exited; restarting the whole group");
+            self.kill_children().await;
+            tokio::time::sleep(backoff).await;
+            backoff = (backoff * 2).min(Duration::from_secs(30));
+            if let Err(e) = self.spawn_engine_for_default_model().await {
+                warn!(error = ?e, "engine respawn failed; will retry");
+            }
+        }
+    }
+
+    async fn kill_children(&self) {
+        // Take ownership of the handles in a tight scope so the
+        // parking_lot guard isn't held across the awaits below (which
+        // would make the surrounding future !Send and break the gRPC
+        // trait).
+        let children = std::mem::take(&mut *self.children.lock());
+        for mut child in children {
             let _ = child.start_kill();
             let _ = tokio::time::timeout(Duration::from_secs(30), child.wait()).await;
         }
+    }
+
+    pub async fn shutdown(&self) {
+        info!("terminating engine process group");
+        self.kill_children().await;
     }
 
     /// Probe `engine.ready()` until it returns true or we timeout.
@@ -126,6 +172,20 @@ impl Supervisor {
             delay = (delay * 2).min(Duration::from_secs(2));
         }
     }
+}
+
+fn spawn_child(argv: &[String]) -> Result<Child> {
+    let mut cmd = Command::new(&argv[0]);
+    cmd.args(&argv[1..])
+        .stdin(Stdio::null())
+        // Piped stdio without a reader deadlocks the child once the kernel
+        // pipe buffer fills (mlx_lm is chatty on stderr). Inherit so lines
+        // land in the agent's log file when launched via nohup (up.sh).
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true);
+    cmd.spawn()
+        .map_err(|e| Error::Internal(format!("spawn engine: {e}")))
 }
 
 /// Resolve the effective [`EngineConfig`] for the running agent.
@@ -161,7 +221,7 @@ fn resolve_engine_config(cfg: &Config) -> EngineConfig {
 
 impl Drop for Supervisor {
     fn drop(&mut self) {
-        if let Some(mut child) = self.child.lock().take() {
+        for mut child in self.children.lock().drain(..) {
             let _ = child.start_kill();
         }
     }

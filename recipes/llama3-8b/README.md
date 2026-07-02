@@ -9,6 +9,7 @@ across vLLM, SGLang, and llama.cpp.
 | [vllm/disagg-single-node](vllm/disagg-single-node)  | 2    | vLLM      | Prefill on GPU 0, decode on GPU 1, NIXL/KV handoff          |
 | [sglang/agg](sglang/agg)                            | 1    | SGLang    | RadixAttention prefix cache, single GPU                     |
 | [llama-cpp/cpu](llama-cpp/cpu)                      | 0    | llama.cpp | CPU-only fallback for laptops / dev loops                   |
+| [cgn-infer/single-node](cgn-infer/single-node)      | 0/1  | cgn-infer | Cognitora's native engine — no Python, GGUF via mmap        |
 
 ## Prerequisites
 
@@ -16,6 +17,7 @@ across vLLM, SGLang, and llama.cpp.
 - For vLLM:    `pip install vllm`
 - For SGLang:  `pip install "sglang[all]"` (and a CUDA-capable GPU)
 - For llama.cpp: `pip install "llama-cpp-python[server]"` and a GGUF file
+- For cgn-infer: `cargo build --release -p cgn-infer` and a GGUF file (no Python)
 - `huggingface-cli login` for gated repos (Llama-3 requires a HF token)
 
 ## One-liner

@@ -1,0 +1,80 @@
+// InferPipeline: activation streaming for cgn-infer's distributed
+// layer-pipeline mode.
+//
+// A coordinator holds the embedding, its own layer slice, and the LM
+// head; each worker holds a contiguous layer slice of the same GGUF
+// (workers mmap the full file but bind only their slice). Per forward
+// step the coordinator streams the hidden states after its local
+// layers through each worker in pipeline order and finishes locally.
+//
+// Reachable over gRPC mTLS (certs from [security] like every other
+// cross-node Cognitora surface) or plaintext for localhost dev.
+syntax = "proto3";
+
+package cognitora.v1;
+
+option go_package = "github.com/cognitora/cognitora/go/pkg/proto/cognitora/v1;cognitorav1";
+
+service InferPipeline {
+  // Long-lived bidirectional activation stream. Each request carries
+  // the hidden states for one forward step of one sequence; the
+  // matching response carries the transformed hidden states after
+  // this worker's layer slice. Requests are processed in order.
+  rpc Forward(stream ActivationChunk) returns (stream ActivationChunk);
+
+  // Worker identity / readiness, used by the coordinator to validate
+  // that the pipeline tiles the model's layers exactly.
+  rpc Info(WorkerInfoRequest) returns (WorkerInfo);
+
+  // Drop all KV state held for a sequence.
+  rpc ResetSequence(ResetSequenceRequest) returns (ResetSequenceResponse);
+}
+
+// Activation tensor encodings on the wire.
+enum ActivationEncoding {
+  ACTIVATION_ENCODING_UNSPECIFIED = 0;
+  // IEEE 754 half floats, little-endian, row-major (seq_len × hidden).
+  ACTIVATION_ENCODING_F16 = 1;
+  // Symmetric per-tensor int8: value = data[i] * scale.
+  ACTIVATION_ENCODING_INT8 = 2;
+}
+
+message ActivationChunk {
+  // Correlates a response with its request on the stream.
+  uint64 request_id = 1;
+  // Sequence the KV state belongs to (coordinator-assigned).
+  uint64 seq_id = 2;
+  // Positions already in this worker's KV for seq_id. 0 (re)starts
+  // the sequence.
+  uint32 index_pos = 3;
+  // Tensor shape: (1, seq_len, hidden).
+  uint32 seq_len = 4;
+  uint32 hidden = 5;
+  ActivationEncoding encoding = 6;
+  bytes data = 7;
+  // Dequantization scale for INT8 (unused for F16).
+  float int8_scale = 8;
+  // Set on responses when the step failed; data is empty.
+  string error = 9;
+}
+
+message WorkerInfoRequest {}
+
+message WorkerInfo {
+  // GGUF `general.name` of the loaded model.
+  string model = 1;
+  // GGUF `general.architecture`.
+  string architecture = 2;
+  // Half-open layer slice [layer_start, layer_end) this worker binds.
+  uint32 layer_start = 3;
+  uint32 layer_end = 4;
+  // Total layer count of the model.
+  uint32 total_layers = 5;
+  bool ready = 6;
+}
+
+message ResetSequenceRequest {
+  uint64 seq_id = 1;
+}
+
+message ResetSequenceResponse {}
