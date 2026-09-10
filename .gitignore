@@ -43,3 +43,4 @@ deploy/kubernetes/helm/*.tgz
 
 # Docker
 .docker/
+__pycache__/
