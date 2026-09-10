@@ -80,6 +80,7 @@ The compatibility matrix is:
 | `sglang`        | yes    | yes    | no        | yes       | no     |
 | `llama_cpp`     | yes    | no     | no        | no        | no     |
 | `mlx`           | yes    | no     | no        | no        | no     |
+| `tensorrt_llm`  | yes    | no     | no        | no        | no     |
 | `openai_compat` | yes    | no     | no        | no        | no     |
 
 Disagg topologies (`[agent].role = "prefill"` or `"decode"`)

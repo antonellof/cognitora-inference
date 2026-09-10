@@ -18,7 +18,11 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use tracing::info;
 
 #[derive(Parser, Debug)]
-#[command(name = "cgn-infer", version, about = "Cognitora native inference engine")]
+#[command(
+    name = "cgn-infer",
+    version,
+    about = "Cognitora native inference engine"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,

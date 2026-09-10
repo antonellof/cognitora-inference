@@ -224,20 +224,27 @@ impl Agent for AgentSvc {
 
     async fn health(&self, _req: Request<()>) -> Result<Response<NodeHealth>, Status> {
         let ready = self.supervisor.engine.ready().await;
+        let stats = crate::telemetry::scrape(
+            self.supervisor.engine.name(),
+            &self.supervisor.engine_cfg.url,
+        )
+        .await
+        .unwrap_or_default();
+        let gpu = crate::health::read_nvml_blocking().unwrap_or_default();
         Ok(Response::new(NodeHealth {
             node_id: self.supervisor.cfg.agent.node_id.clone(),
             ready,
-            queue_depth: 0,
+            queue_depth: stats.queue_depth,
             max_queue: 1024,
-            free_kv_blocks: 0,
-            gpu_util_pct: 0.0,
-            gpu_mem_used_pct: 0.0,
-            gpu_temp_c: 0.0,
-            rack_watts: 0.0,
+            free_kv_blocks: stats.free_blocks,
+            gpu_util_pct: gpu.util_pct,
+            gpu_mem_used_pct: gpu.mem_used_pct,
+            gpu_temp_c: gpu.temp_c,
+            rack_watts: gpu.power_watts,
             rack_watt_limit: 0.0,
             last_seen_unix_ms: chrono::Utc::now().timestamp_millis() as u64,
-            loaded_models: vec![],
-            role: 0,
+            loaded_models: self.supervisor.cfg.models.keys().cloned().collect(),
+            role: crate::health::role_to_int(&self.supervisor.cfg.agent.role),
         }))
     }
 

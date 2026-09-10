@@ -49,8 +49,8 @@ pub struct GgufModel {
 
 impl GgufModel {
     pub fn open(path: &Path) -> Result<Self> {
-        let file = File::open(path)
-            .map_err(|e| Error::Config(format!("open {}: {e}", path.display())))?;
+        let file =
+            File::open(path).map_err(|e| Error::Config(format!("open {}: {e}", path.display())))?;
         // SAFETY: read-only private mapping of a regular file. The file
         // is expected not to be truncated while the server runs (same
         // contract llama.cpp and ds4 rely on).

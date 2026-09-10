@@ -25,14 +25,14 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
+use candle_core::{Device, Tensor};
 use cgn_core::{Error, Result};
 use cgn_proto::v1::infer_pipeline_client::InferPipelineClient;
 use cgn_proto::v1::infer_pipeline_server::{InferPipeline, InferPipelineServer};
 use cgn_proto::v1::{
-    ActivationChunk, ActivationEncoding, ResetSequenceRequest, ResetSequenceResponse,
-    WorkerInfo, WorkerInfoRequest,
+    ActivationChunk, ActivationEncoding, ResetSequenceRequest, ResetSequenceResponse, WorkerInfo,
+    WorkerInfoRequest,
 };
-use candle_core::{Device, Tensor};
 use futures::Stream;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -119,7 +119,9 @@ pub fn decode_activation(
             data.iter().map(|&b| b as i8 as f32 * int8_scale).collect()
         }
         ActivationEncoding::Unspecified => {
-            return Err(Error::InvalidArgument("unspecified activation encoding".into()))
+            return Err(Error::InvalidArgument(
+                "unspecified activation encoding".into(),
+            ))
         }
     };
     Tensor::from_vec(values, (1, seq_len, hidden), device)
@@ -164,12 +166,19 @@ pub struct WorkerService {
 }
 
 impl WorkerService {
-    fn step(state: &Mutex<WorkerState>, chunk: &ActivationChunk, enc_out: Encoding) -> Result<ActivationChunk> {
+    fn step(
+        state: &Mutex<WorkerState>,
+        chunk: &ActivationChunk,
+        enc_out: Encoding,
+    ) -> Result<ActivationChunk> {
         let mut st = state.lock().expect("worker state poisoned");
         let device = st.model.device().clone();
         let hidden = decode_activation(
             &chunk.data,
-            chunk.encoding.try_into().unwrap_or(ActivationEncoding::Unspecified),
+            chunk
+                .encoding
+                .try_into()
+                .unwrap_or(ActivationEncoding::Unspecified),
             chunk.int8_scale,
             chunk.seq_len as usize,
             chunk.hidden as usize,
@@ -541,9 +550,11 @@ impl PipelinedModel {
         for w in &mut self.workers {
             let mut client = w.client.clone();
             let endpoint = w.endpoint.clone();
-            let res = self
-                .handle
-                .block_on(async move { client.reset_sequence(ResetSequenceRequest { seq_id: seq }).await });
+            let res = self.handle.block_on(async move {
+                client
+                    .reset_sequence(ResetSequenceRequest { seq_id: seq })
+                    .await
+            });
             if let Err(e) = res {
                 warn!(endpoint, error = %e, "reset_sequence failed");
             }
@@ -643,8 +654,12 @@ mod tests {
     #[test]
     fn f16_roundtrip() {
         let dev = Device::Cpu;
-        let t = Tensor::from_vec(vec![0.5f32, -1.25, 3.0, 0.0, 100.0, -0.001], (1, 2, 3), &dev)
-            .unwrap();
+        let t = Tensor::from_vec(
+            vec![0.5f32, -1.25, 3.0, 0.0, 100.0, -0.001],
+            (1, 2, 3),
+            &dev,
+        )
+        .unwrap();
         let (bytes, scale) = encode_activation(&t, Encoding::F16).unwrap();
         assert_eq!(bytes.len(), 12);
         let back = decode_activation(&bytes, ActivationEncoding::F16, scale, 2, 3, &dev).unwrap();
@@ -685,8 +700,7 @@ mod tests {
         assert!(decode_activation(&[0u8; 3], ActivationEncoding::F16, 0.0, 1, 2, &dev).is_err());
         assert!(decode_activation(&[0u8; 3], ActivationEncoding::Int8, 1.0, 1, 2, &dev).is_err());
         assert!(
-            decode_activation(&[0u8; 4], ActivationEncoding::Unspecified, 0.0, 1, 2, &dev)
-                .is_err()
+            decode_activation(&[0u8; 4], ActivationEncoding::Unspecified, 0.0, 1, 2, &dev).is_err()
         );
     }
 }

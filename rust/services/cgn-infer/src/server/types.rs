@@ -230,10 +230,8 @@ mod tests {
 
     #[test]
     fn parses_minimal_chat_request() {
-        let req: ChatCompletionRequest = serde_json::from_str(
-            r#"{"messages":[{"role":"user","content":"hi"}]}"#,
-        )
-        .unwrap();
+        let req: ChatCompletionRequest =
+            serde_json::from_str(r#"{"messages":[{"role":"user","content":"hi"}]}"#).unwrap();
         assert_eq!(req.messages.len(), 1);
         assert_eq!(req.max_tokens, 512);
         assert!(!req.stream);
@@ -266,21 +264,18 @@ mod tests {
 
     #[test]
     fn prompt_accepts_string_or_array() {
-        let one: CompletionRequest =
-            serde_json::from_str(r#"{"prompt":"hello"}"#).unwrap();
+        let one: CompletionRequest = serde_json::from_str(r#"{"prompt":"hello"}"#).unwrap();
         assert_eq!(one.prompt.into_string(), "hello");
-        let many: CompletionRequest =
-            serde_json::from_str(r#"{"prompt":["a","b"]}"#).unwrap();
+        let many: CompletionRequest = serde_json::from_str(r#"{"prompt":["a","b"]}"#).unwrap();
         assert_eq!(many.prompt.into_string(), "ab");
     }
 
     #[test]
     fn null_optionals_are_tolerated() {
         // Clients (incl. cgn-agent) send explicit nulls for unset knobs.
-        let req: CompletionRequest = serde_json::from_str(
-            r#"{"prompt":"p","temperature":null,"top_p":null,"stop":null}"#,
-        )
-        .unwrap();
+        let req: CompletionRequest =
+            serde_json::from_str(r#"{"prompt":"p","temperature":null,"top_p":null,"stop":null}"#)
+                .unwrap();
         assert!(req.temperature.is_none());
         assert!(req.stop.is_none());
     }

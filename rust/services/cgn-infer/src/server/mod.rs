@@ -19,8 +19,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use cgn_core::{Error, Result};
 use futures::Stream;
-use tokio::sync::mpsc;
 use futures::StreamExt as _;
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::info;
 
@@ -159,7 +159,13 @@ async fn chat_completions(
         prompt,
         max_tokens: req.max_tokens,
         stop: req.stop.map(StopField::into_vec).unwrap_or_default(),
-        params: sampling_params(req.temperature, req.top_p, req.top_k, req.repetition_penalty, req.seed),
+        params: sampling_params(
+            req.temperature,
+            req.top_p,
+            req.top_k,
+            req.repetition_penalty,
+            req.seed,
+        ),
     };
     let model = state.engine.model_id.clone();
     let id = format!("chatcmpl-{}", uuid::Uuid::new_v4().simple());
@@ -200,7 +206,13 @@ async fn completions(
         prompt: req.prompt.into_string(),
         max_tokens: req.max_tokens,
         stop: req.stop.map(StopField::into_vec).unwrap_or_default(),
-        params: sampling_params(req.temperature, req.top_p, req.top_k, req.repetition_penalty, req.seed),
+        params: sampling_params(
+            req.temperature,
+            req.top_p,
+            req.top_k,
+            req.repetition_penalty,
+            req.seed,
+        ),
     };
     let model = state.engine.model_id.clone();
     let id = format!("cmpl-{}", uuid::Uuid::new_v4().simple());

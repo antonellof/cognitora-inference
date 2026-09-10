@@ -134,7 +134,10 @@ impl Engine {
             },
         );
 
-        let model_id = cfg.model_id.clone().unwrap_or_else(|| metadata.name.clone());
+        let model_id = cfg
+            .model_id
+            .clone()
+            .unwrap_or_else(|| metadata.name.clone());
         info!(model_id = %model_id, "engine ready");
         Ok(Self {
             scheduler,
@@ -152,7 +155,11 @@ impl Engine {
 
     /// Submit a generation request; [`StreamEvent`]s arrive on `tx` as
     /// the scheduler produces tokens.
-    pub async fn generate(&self, req: GenerateRequest, tx: mpsc::Sender<StreamEvent>) -> Result<()> {
+    pub async fn generate(
+        &self,
+        req: GenerateRequest,
+        tx: mpsc::Sender<StreamEvent>,
+    ) -> Result<()> {
         let encoding = self
             .tokenizer
             .encode(req.prompt.as_str(), true)

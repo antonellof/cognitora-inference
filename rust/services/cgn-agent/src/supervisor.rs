@@ -55,6 +55,7 @@ impl Supervisor {
             EngineKind::Sglang => "sglang",
             EngineKind::LlamaCpp => "llama_cpp",
             EngineKind::Mlx => "mlx",
+            EngineKind::TensorrtLlm => "tensorrt_llm",
             EngineKind::CgnInfer => "cgn_infer",
             EngineKind::OpenaiCompat => "openai_compat",
         };
@@ -99,7 +100,12 @@ impl Supervisor {
 
         // Pipeline workers first: the coordinator dials them at startup.
         let mut argvs = render_pipeline_workers(&self.engine_cfg, &spec)?;
-        argvs.push(render_argv(&self.engine_cfg, &spec, role, legacy.as_deref())?);
+        argvs.push(render_argv(
+            &self.engine_cfg,
+            &spec,
+            role,
+            legacy.as_deref(),
+        )?);
 
         let mut children = Vec::with_capacity(argvs.len());
         for argv in &argvs {

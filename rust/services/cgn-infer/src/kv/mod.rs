@@ -206,7 +206,13 @@ mod tests {
         let prompt = toks(64);
         c.record(&prompt);
         let m = c.match_prefix(&prompt);
-        assert_eq!(m, PrefixMatch { tokens: 64, blocks: 4 });
+        assert_eq!(
+            m,
+            PrefixMatch {
+                tokens: 64,
+                blocks: 4
+            }
+        );
     }
 
     #[test]
@@ -217,7 +223,13 @@ mod tests {
         let mut other = toks(32);
         other.extend([9999u32; 32]);
         let m = c.match_prefix(&other);
-        assert_eq!(m, PrefixMatch { tokens: 32, blocks: 2 });
+        assert_eq!(
+            m,
+            PrefixMatch {
+                tokens: 32,
+                blocks: 2
+            }
+        );
     }
 
     #[test]
@@ -234,7 +246,13 @@ mod tests {
         let mut c = PrefixCache::new();
         c.record(&toks(20)); // one full block + 4-token tail
         let m = c.match_prefix(&toks(20));
-        assert_eq!(m, PrefixMatch { tokens: 16, blocks: 1 });
+        assert_eq!(
+            m,
+            PrefixMatch {
+                tokens: 16,
+                blocks: 1
+            }
+        );
     }
 
     #[test]

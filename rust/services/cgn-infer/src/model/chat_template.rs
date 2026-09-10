@@ -26,19 +26,26 @@ pub struct ChatTemplate {
 impl ChatTemplate {
     /// Compile the embedded template, or the ChatML fallback if the
     /// GGUF has none.
-    pub fn new(template: Option<String>, bos_token: Option<String>, eos_token: Option<String>) -> Result<Self> {
+    pub fn new(
+        template: Option<String>,
+        bos_token: Option<String>,
+        eos_token: Option<String>,
+    ) -> Result<Self> {
         let source = template.unwrap_or_else(|| CHATML_FALLBACK.to_string());
         let mut env = minijinja::Environment::new();
         env.add_global("bos_token", bos_token.unwrap_or_default());
         env.add_global("eos_token", eos_token.unwrap_or_default());
         // `raise_exception` appears in most HF templates for
         // unsupported role orders.
-        env.add_function("raise_exception", |msg: String| -> std::result::Result<String, minijinja::Error> {
-            Err(minijinja::Error::new(
-                minijinja::ErrorKind::InvalidOperation,
-                msg,
-            ))
-        });
+        env.add_function(
+            "raise_exception",
+            |msg: String| -> std::result::Result<String, minijinja::Error> {
+                Err(minijinja::Error::new(
+                    minijinja::ErrorKind::InvalidOperation,
+                    msg,
+                ))
+            },
+        );
         env.add_template_owned("chat".to_string(), source)
             .map_err(|e| Error::Config(format!("chat template: {e}")))?;
         Ok(Self { env })
@@ -91,12 +98,8 @@ mod tests {
     #[test]
     fn llama3_style_template_renders() {
         let tmpl = "{{ bos_token }}{% for message in messages %}<|start_header_id|>{{ message['role'] }}<|end_header_id|>\n\n{{ message['content'] }}<|eot_id|>{% endfor %}{% if add_generation_prompt %}<|start_header_id|>assistant<|end_header_id|>\n\n{% endif %}";
-        let t = ChatTemplate::new(
-            Some(tmpl.into()),
-            Some("<|begin_of_text|>".into()),
-            None,
-        )
-        .unwrap();
+        let t =
+            ChatTemplate::new(Some(tmpl.into()), Some("<|begin_of_text|>".into()), None).unwrap();
         let out = t.render(&msgs()).unwrap();
         assert!(out.starts_with("<|begin_of_text|><|start_header_id|>system<|end_header_id|>"));
         assert!(out.contains("Hi!<|eot_id|>"));

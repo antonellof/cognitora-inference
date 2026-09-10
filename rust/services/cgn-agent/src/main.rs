@@ -15,6 +15,7 @@ mod engine;
 mod grpc;
 mod health;
 mod supervisor;
+mod telemetry;
 
 use std::path::PathBuf;
 

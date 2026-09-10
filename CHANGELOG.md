@@ -10,6 +10,57 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-10
+
+The "make the routing score true" release. Every term of the KV-aware
+routing score is now fed by real signals, the energy-aware autoscaling
+loop is closed end-to-end, the SLM→LLM cascade covers streaming
+traffic, and TensorRT-LLM joins the spawn-managed engine roster.
+
+### Added
+- **Engine telemetry scraper** (`cgn-agent::telemetry`) — polls the
+  engine's Prometheus `/metrics` (vLLM `num_requests_waiting/running`,
+  `gpu_cache_usage_perc`; SGLang `num_queue_reqs/num_running_reqs`,
+  `token_usage`) and feeds real `queue_depth` / `free_blocks` /
+  `total_blocks` into the etcd heartbeat and the `Agent.Health` RPC.
+  The router's `load` and `capacity` score terms were previously inert
+  (hardcoded zeros); they now differentiate workers. Engines without a
+  metrics endpoint honestly report zeros (`total_blocks == 0` means
+  "capacity unknown").
+- **Closed autoscaler loop** (`cgn-operator::autoscaler`) — the
+  operator now consumes the router's energy-aware drain hints from
+  `/cognitora/autoscaler/<node>` and translates them into cordon flags,
+  which the router's watcher already honors. Cordons set by the
+  autoscaler are tagged and never clobber manual `cgn-ctl` cordons;
+  capacity is restored automatically when the drain hint clears.
+- **Streaming cascade** — `stream_run_cascade` runs early cascade
+  steps buffered (confidence gating needs complete output), emits an
+  accepted cheap answer as SSE chunks, and streams the final model
+  live token-by-token when every early step escalates. The cascade now
+  applies to real (streaming) traffic, not just buffered requests.
+- **Gateway dispatch retry / failover** — dispatch failures (agent
+  unreachable, gRPC setup error) are retried against the next-best
+  node with the failed node excluded, up to 3 attempts, strictly
+  before the first token so retries are invisible to clients.
+  `routing::pick_excluding` supports node exclusion; failed nodes no
+  longer accrue optimistic prefix claims.
+- **TensorRT-LLM engine driver** (`engine.kind = "tensorrt_llm"`) —
+  the agent spawns `trtllm-serve <model> --host … --port … --tp_size …`
+  and supervises it like any other engine. `[engine.tensorrt_llm]`
+  carries binary/host/port/extra_args.
+- **Prefix-index truth maintenance** — periodic GC of expired entries
+  (30 s), plus pressure-aware pruning: when a node's heartbeat reports
+  <5 % free KV blocks, its older optimistic prefix claims are dropped
+  (the engine is LRU-evicting, so they are the ones most likely gone).
+
+### Changed
+- `Agent.Health` RPC now returns real GPU (NVML) and engine stats and
+  the node's loaded models/role instead of zeros.
+- Docs honesty pass: IPMI/DCGM, gossip discovery, and RDMA are marked
+  as roadmap items rather than shipped features; the Dynamo comparison
+  (`docs/architecture/vs-dynamo.md`) is updated to Dynamo 1.x reality
+  (etcd/NATS optional there) and to Cognitora's new 0.6 capabilities.
+
 ## [0.5.0] — 2026-07-02
 
 The "native inference engine" release. Cognitora previously only

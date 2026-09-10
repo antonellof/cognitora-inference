@@ -288,6 +288,11 @@ impl Default for AgentConfig {
 /// * `mlx` — the agent spawns `python -m mlx_lm.server ...` (**Apple
 ///   Silicon / macOS**). See the [mlx-lm](https://github.com/ml-explore/mlx-lm)
 ///   HTTP server (`mlx_lm/SERVER.md`).
+/// * `tensorrt_llm` — the agent spawns `trtllm-serve <model> --host <h>
+///   --port <p> ...` (NVIDIA TensorRT-LLM's OpenAI-compatible server).
+///   Requires the `tensorrt_llm` Python package on the host. KV offload
+///   dials are not injected (TRT-LLM manages its own KV connectors);
+///   only `kv_offload = "none"` is valid.
 /// * `cgn_infer` — the agent spawns Cognitora's first-party native engine
 ///   `cgn-infer serve --model <gguf> ...`. Same OpenAI wire contract as the
 ///   llama.cpp server; the per-model `path` field must point at a GGUF.
@@ -312,6 +317,8 @@ pub struct EngineConfig {
     pub llama_cpp: LlamaCppEngineConfig,
     /// MLX-LM server knobs (used when `kind = "mlx"`).
     pub mlx_lm: MlxLmEngineConfig,
+    /// TensorRT-LLM knobs (used when `kind = "tensorrt_llm"`).
+    pub tensorrt_llm: TensorrtLlmEngineConfig,
     /// cgn-infer knobs (used when `kind = "cgn_infer"`).
     pub cgn_infer: CgnInferEngineConfig,
 }
@@ -325,6 +332,7 @@ impl Default for EngineConfig {
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
             mlx_lm: MlxLmEngineConfig::default(),
+            tensorrt_llm: TensorrtLlmEngineConfig::default(),
             cgn_infer: CgnInferEngineConfig::default(),
         }
     }
@@ -338,6 +346,8 @@ pub enum EngineKind {
     LlamaCpp,
     /// Apple MLX (`python -m mlx_lm.server`).
     Mlx,
+    /// NVIDIA TensorRT-LLM (`trtllm-serve`, OpenAI-compatible).
+    TensorrtLlm,
     /// Cognitora's first-party native engine (`cgn-infer serve`).
     CgnInfer,
     OpenaiCompat,
@@ -358,6 +368,7 @@ pub enum EngineKind {
 /// | `sglang`      | yes    | yes    | no        | yes       | no     |
 /// | `llama_cpp`   | yes    | no     | no        | no        | no     |
 /// | `mlx`         | yes    | no     | no        | no        | no     |
+/// | `tensorrt_llm`| yes    | no     | no        | no        | no     |
 /// | `cgn_infer`   | yes    | no     | no        | no        | no     |
 /// | `openai_compat` | yes  | no     | no        | no        | no     |
 ///
@@ -510,6 +521,35 @@ impl Default for MlxLmEngineConfig {
             binary: "python3".into(),
             host: "127.0.0.1".into(),
             port: crate::ports::MLX_LM_HTTP,
+            extra_args: vec![],
+        }
+    }
+}
+
+/// NVIDIA TensorRT-LLM's OpenAI-compatible server (`trtllm-serve`).
+/// Spawned as `trtllm-serve <model> --host <h> --port <p> [extra ...]`.
+/// `engine.url` must point at `http://<host>:<port>`. The model is the
+/// HuggingFace repo id or a local checkpoint/engine directory
+/// (`[models.*].path` wins when set).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TensorrtLlmEngineConfig {
+    /// Path or PATH-name of the `trtllm-serve` CLI. Default: `trtllm-serve`.
+    pub binary: String,
+    /// Host the server binds to. Mapped to `--host`.
+    pub host: String,
+    /// Port the server binds to. Mapped to `--port`.
+    pub port: u16,
+    /// Arguments appended after the auto-rendered base flags (e.g.
+    /// `["--backend", "pytorch"]`).
+    pub extra_args: Vec<String>,
+}
+impl Default for TensorrtLlmEngineConfig {
+    fn default() -> Self {
+        Self {
+            binary: "trtllm-serve".into(),
+            host: "127.0.0.1".into(),
+            port: crate::ports::VLLM_HTTP,
             extra_args: vec![],
         }
     }
@@ -901,7 +941,10 @@ threads     = 8
         .unwrap();
         let cfg = Config::load(&p).unwrap();
         assert_eq!(cfg.engine.kind, EngineKind::CgnInfer);
-        assert_eq!(cfg.engine.cgn_infer.binary_path, "/opt/cognitora/bin/cgn-infer");
+        assert_eq!(
+            cfg.engine.cgn_infer.binary_path,
+            "/opt/cognitora/bin/cgn-infer"
+        );
         assert_eq!(cfg.engine.cgn_infer.ctx, Some(8192));
         assert_eq!(cfg.engine.cgn_infer.threads, Some(8));
     }

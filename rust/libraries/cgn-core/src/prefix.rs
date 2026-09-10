@@ -73,6 +73,43 @@ impl PrefixIndex {
         self.inner.retain(|_, v| !v.read().is_empty());
     }
 
+    /// Drop a node's entries that were last confirmed more than
+    /// `older_than` ago, keeping only its freshest claims.
+    ///
+    /// Used when a node's heartbeat reports KV-cache pressure (free
+    /// blocks near zero): the engine is evicting LRU blocks, so our
+    /// older optimistic claims for that node are the ones most likely
+    /// to be stale. This keeps the index *truth-adjacent* without an
+    /// engine KV-event feed (which is tracked as follow-up work).
+    pub fn forget_node_stale(&self, node_id: &str, older_than: Duration) {
+        let now = Instant::now();
+        for mut e in self.inner.iter_mut() {
+            e.value_mut()
+                .write()
+                .retain(|n| n.node_id != node_id || now.duration_since(n.last_seen) < older_than);
+        }
+        self.inner.retain(|_, v| !v.read().is_empty());
+    }
+
+    /// Garbage-collect expired entries across the whole index. `lookup`
+    /// and `overlap` already filter by TTL on read; this reclaims the
+    /// memory. Intended to be called periodically (the router runs it
+    /// every 30 s).
+    pub fn gc(&self) {
+        let now = Instant::now();
+        for mut e in self.inner.iter_mut() {
+            e.value_mut()
+                .write()
+                .retain(|n| now.duration_since(n.last_seen) < self.ttl);
+        }
+        self.inner.retain(|_, v| !v.read().is_empty());
+    }
+
+    /// Configured entry TTL.
+    pub fn ttl(&self) -> Duration {
+        self.ttl
+    }
+
     /// Look up the live nodes that currently hold `digest`.
     pub fn lookup(&self, digest: &[u8; 32]) -> Vec<String> {
         let Some(entry) = self.inner.get(digest) else {
@@ -242,6 +279,31 @@ mod tests {
         assert_eq!(lp.get("n1").copied(), Some(3));
         assert_eq!(lp.get("n2").copied(), Some(1));
         assert!(!lp.contains_key("n3"));
+    }
+
+    #[test]
+    fn forget_node_stale_keeps_fresh_entries() {
+        let ix = PrefixIndex::new(Duration::from_secs(60));
+        ix.insert(d(1), "n1");
+        ix.insert(d(2), "n2");
+        // Everything was inserted "now", so a zero-age cutoff removes
+        // only n1's entries (nothing is younger than zero).
+        ix.forget_node_stale("n1", Duration::from_secs(0));
+        assert!(ix.lookup(&d(1)).is_empty());
+        assert_eq!(ix.lookup(&d(2)), vec!["n2".to_string()]);
+        // A generous cutoff keeps fresh entries.
+        ix.insert(d(3), "n3");
+        ix.forget_node_stale("n3", Duration::from_secs(60));
+        assert_eq!(ix.lookup(&d(3)), vec!["n3".to_string()]);
+    }
+
+    #[test]
+    fn gc_reclaims_expired_entries() {
+        let ix = PrefixIndex::new(Duration::from_millis(0));
+        ix.insert(d(1), "n1");
+        // TTL of zero → everything is expired immediately.
+        ix.gc();
+        assert!(ix.is_empty());
     }
 
     #[test]

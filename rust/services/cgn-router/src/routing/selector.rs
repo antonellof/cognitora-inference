@@ -43,10 +43,30 @@ pub async fn pick(
     role: NodeRole,
     token_ids: &[u32],
 ) -> Result<RoutingDecision> {
-    let candidates = state.nodes.nodes_for(role, Some(model));
+    pick_excluding(state, model, role, token_ids, &[]).await
+}
+
+/// Like [`pick`], but never returns a node whose id is in `exclude`.
+/// Used by the gateway's dispatch-retry path: a node that just failed
+/// to accept a request is excluded from the immediate re-pick.
+pub async fn pick_excluding(
+    state: &SharedState,
+    model: &str,
+    role: NodeRole,
+    token_ids: &[u32],
+    exclude: &[String],
+) -> Result<RoutingDecision> {
+    let mut candidates = state.nodes.nodes_for(role, Some(model));
+    candidates.retain(|n| !exclude.iter().any(|x| x == &n.node_id));
     if candidates.is_empty() {
         return Err(Error::Unavailable(format!(
-            "no live node serving model {model} for role {role:?}"
+            "no live node serving model {model} for role {role:?}\
+             {}",
+            if exclude.is_empty() {
+                String::new()
+            } else {
+                format!(" (excluded after failed dispatch: {exclude:?})")
+            }
         )));
     }
     let n_candidates = candidates.len();
@@ -116,8 +136,9 @@ pub async fn pick_pair(
     prefill_role: NodeRole,
     decode_role: NodeRole,
     token_ids: &[u32],
+    exclude: &[String],
 ) -> Result<(RoutingDecision, RoutingDecision)> {
-    let prefill = pick(state, model, prefill_role, token_ids).await?;
+    let prefill = pick_excluding(state, model, prefill_role, token_ids, exclude).await?;
 
     // Decode node: re-pick filtering out the prefill node when possible.
     // We avoid the same node id; if the only eligible decode node is the
@@ -125,7 +146,7 @@ pub async fn pick_pair(
     let candidates = state.nodes.nodes_for(decode_role, Some(model));
     let distinct: Vec<_> = candidates
         .iter()
-        .filter(|n| n.node_id != prefill.node.node_id)
+        .filter(|n| n.node_id != prefill.node.node_id && !exclude.iter().any(|x| x == &n.node_id))
         .cloned()
         .collect();
     if distinct.is_empty() {
