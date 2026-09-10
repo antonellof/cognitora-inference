@@ -14,6 +14,15 @@ message Message {
   string role    = 1;  // "system" | "user" | "assistant" | "tool"
   string content = 2;
   string name    = 3;  // optional, used for tool messages
+  // Raw OpenAI content value when the client sent an array of content
+  // parts (multimodal: text + image_url + ...). JSON-encoded verbatim;
+  // takes precedence over `content` when non-empty. The gateway never
+  // interprets the parts — the engine's chat template does.
+  string content_json = 4;
+  // Raw OpenAI `tool_calls` array on assistant messages (JSON verbatim).
+  string tool_calls_json = 5;
+  // OpenAI `tool_call_id` on tool-role messages.
+  string tool_call_id = 6;
 }
 
 // Sampling parameters forwarded to vLLM.
@@ -39,6 +48,10 @@ message Token {
   float  logprob     = 4;
   string finish      = 5;  // "" while streaming; "stop"/"length"/... at end
   bytes  prefix_hash = 6;  // optional, set on first chunk for caching
+  // Raw OpenAI streaming `delta.tool_calls` array (JSON verbatim), set
+  // when the engine emits tool-call deltas. Forwarded unchanged from
+  // engine SSE → agent → router → client.
+  string tool_calls_json = 7;
 }
 
 // ----------------------------------------------------------------------------

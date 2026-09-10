@@ -34,6 +34,14 @@ message AgentGenerateRequest {
   repeated bytes blocks       = 7;
   string         traceparent  = 8;
   string         tracestate   = 9;
+  // OpenAI extension passthrough (tools / tool_choice / response_format),
+  // JSON object verbatim. Empty = none.
+  string         extensions_json = 10;
+  // Sequence-chained BLAKE3 prefix digests (32 bytes each) computed by
+  // the router for this prompt. After a successful generation the agent
+  // publishes these to etcd as *confirmed* KV claims, replacing the
+  // router's optimistic guess with completion-confirmed truth.
+  repeated bytes digests      = 11;
 }
 
 message KvHandoffSpec {

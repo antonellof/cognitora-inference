@@ -6,15 +6,23 @@ metadata:
 data:
   cognitora.toml: |
     [cluster]
-    name = {{ .Values.cluster.name | quote }}
-    data_dir = "/var/lib/cognitora"
+    name           = {{ .Values.cluster.name | quote }}
+    state_backend  = "etcd"
+    etcd_endpoints = {{ .Values.cluster.etcdEndpoints | toJson }}
 
     [security]
+    {{- if .Values.security.require_mtls }}
     require_mtls   = true
     ca_file        = "/etc/cognitora/pki/ca.crt"
     cert_file      = "/etc/cognitora/pki/leaf.crt"
     key_file       = "/etc/cognitora/pki/leaf.key"
     client_ca_file = "/etc/cognitora/pki/ca.crt"
+    {{- else }}
+    # mTLS disabled — internal gRPC is plaintext. Enable with
+    # `--set security.require_mtls=true --set pki.existingSecret=<secret>`
+    # after bootstrapping certs with `cgn-ctl pki bootstrap`.
+    require_mtls = false
+    {{- end }}
 
     [auth]
     enabled = {{ .Values.auth.enabled }}
@@ -22,7 +30,7 @@ data:
     [router]
     listen_http  = "0.0.0.0:{{ .Values.router.service.httpPort }}"
     listen_grpc  = "0.0.0.0:{{ .Values.router.service.grpcPort }}"
-    listen_admin = "127.0.0.1:9091"
+    listen_admin = "0.0.0.0:9091"
 
     [router.score_weights]
     kv       = {{ .Values.router.scoreWeights.kv }}
@@ -42,16 +50,26 @@ data:
 
     [router.cascade]
     enabled              = {{ .Values.router.cascade.enabled }}
-    confidence_threshold = {{ .Values.router.cascade.confidenceThreshold }}
+    confidence_threshold = {{ printf "%.4f" (float64 .Values.router.cascade.confidenceThreshold) }}
 
     [router.disagg]
     enabled               = {{ .Values.router.disagg.enabled }}
     colocate_below_tokens = {{ .Values.router.disagg.colocateBelowTokens }}
 
     [agent]
-    listen_grpc  = "0.0.0.0:7071"
-    listen_admin = "127.0.0.1:9091"
-    engine       = {{ .Values.agent.engine | quote }}
+    listen = "0.0.0.0:7071"
+
+    {{- if .Values.agent.engine.enabled }}
+    # Engine runs as a sidecar container in the agent pod; the agent
+    # proxies to it over localhost and never spawns a process.
+    [engine]
+    kind = "openai_compat"
+    url  = "http://127.0.0.1:{{ .Values.agent.engine.port }}"
+    {{- else }}
+    [engine]
+    kind = {{ .Values.agent.engine.kind | quote }}
+    url  = {{ .Values.agent.engine.url | quote }}
+    {{- end }}
 
     [kv]
     listen_grpc = "0.0.0.0:7072"
@@ -60,5 +78,5 @@ data:
     ssd_gib     = {{ .Values.kvcached.ssdGib }}
 
     [metrics]
-    listen_admin    = "0.0.0.0:9092"
+    listen          = "0.0.0.0:9092"
     scrape_interval = {{ .Values.metrics.scrapeInterval | quote }}

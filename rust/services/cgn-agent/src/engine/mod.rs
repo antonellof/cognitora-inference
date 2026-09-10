@@ -60,6 +60,13 @@ pub struct ModelSpec {
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    /// Raw OpenAI content-parts array (multimodal), JSON verbatim.
+    /// Takes precedence over `content` when non-empty.
+    pub content_json: String,
+    /// Raw OpenAI `tool_calls` array on assistant messages.
+    pub tool_calls_json: String,
+    /// OpenAI `tool_call_id` on tool-role messages.
+    pub tool_call_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +86,10 @@ pub struct GenerateReq {
     pub top_p: f32,
     pub stop: Vec<String>,
     pub stream: bool,
+    /// OpenAI extension passthrough (`tools` / `tool_choice` /
+    /// `response_format`), JSON object verbatim. Merged into the
+    /// engine's chat-completions body. Empty = none.
+    pub extensions_json: String,
 }
 
 #[derive(Debug, Clone)]

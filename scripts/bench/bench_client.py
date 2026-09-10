@@ -253,11 +253,36 @@ def main() -> int:
                     help="If > 0, generate a synthetic prompt of approximately this many tokens.")
     ap.add_argument("--shared-prefix", action="store_true",
                     help="Reuse the same prompt N times (engine prefix-cache demo).")
+    ap.add_argument("--prompts-file", default=None,
+                    help="JSONL file with one prompt per line (objects with a "
+                         "'prompt' key, JSON strings, or raw text). Overrides "
+                         "--prompt-tokens/--shared-prefix; prompts are cycled "
+                         "if the file has fewer than --n lines.")
     ap.add_argument("--timeout", type=float, default=180.0)
     ap.add_argument("--warmup", type=int, default=2)
     args = ap.parse_args()
 
-    if args.prompt_tokens > 0:
+    if args.prompts_file:
+        base = []
+        with open(args.prompts_file, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    base.append(line)
+                    continue
+                if isinstance(obj, dict):
+                    base.append(str(obj.get("prompt", "")))
+                else:
+                    base.append(str(obj))
+        base = [p for p in base if p]
+        if not base:
+            print(f"[bench] no prompts in {args.prompts_file}", file=sys.stderr)
+            return 2
+    elif args.prompt_tokens > 0:
         base = [make_long_prompt(args.prompt_tokens)]
     else:
         base = [
@@ -269,7 +294,7 @@ def main() -> int:
             "Why is TTFT important for chat UX?",
         ]
 
-    if args.shared_prefix:
+    if args.shared_prefix and not args.prompts_file:
         prompts = [base[0]] * args.n
     else:
         prompts = [base[i % len(base)] for i in range(args.n)]

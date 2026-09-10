@@ -45,11 +45,42 @@ spec:
                 nodeSelector:
                   type: object
                   additionalProperties: { type: string }
+                slo:
+                  type: object
+                  description: >-
+                    Reactive SLA planner (0.7). When maxQueuePerReplica is
+                    set, the operator scales decode replicas from live
+                    queue-depth heartbeats.
+                  properties:
+                    maxQueuePerReplica:
+                      type: integer
+                      minimum: 1
+                      description: >-
+                        Scale up when average queued requests per ready
+                        replica exceeds this. Unset disables planning.
+                    minReplicas:
+                      type: integer
+                      minimum: 0
+                      default: 1
+                    maxReplicas:
+                      type: integer
+                      minimum: 0
+                      description: Defaults to the current replica count.
+                    scaleCooldownSecs:
+                      type: integer
+                      minimum: 0
+                      default: 120
             status:
               type: object
               properties:
                 phase: { type: string }
                 readyReplicas: { type: integer }
+                desiredReplicas:
+                  type: integer
+                  description: Replica count last decided by the SLA planner.
+                lastScaleTime:
+                  type: string
+                  description: RFC 3339 time of the planner's last scale.
               x-kubernetes-preserve-unknown-fields: true
       subresources:
         status: {}

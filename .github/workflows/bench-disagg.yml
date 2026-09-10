@@ -1,0 +1,65 @@
+name: bench-disagg
+
+# GPU disaggregation benchmark. Manual-only (workflow_dispatch) so it
+# never blocks CI: it needs a self-hosted runner with 2 GPUs and a vLLM
+# install with NIXL support. See scripts/bench/disagg/README.md for the
+# runner prerequisites.
+
+on:
+  workflow_dispatch:
+    inputs:
+      compare:
+        description: "Also run the aggregated recipe for a disagg-vs-agg delta"
+        type: boolean
+        default: true
+      n:
+        description: "Requests per scenario"
+        default: "32"
+      concurrency:
+        description: "In-flight concurrency"
+        default: "8"
+      max_tokens:
+        description: "max_tokens per request"
+        default: "128"
+      prompt_tokens:
+        description: "Shared-prefix length in tokens"
+        default: "512"
+      shared_frac:
+        description: "Fraction of prompts sharing the common prefix"
+        default: "0.6"
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    name: disagg bench (self-hosted GPU)
+    runs-on: [self-hosted, gpu]
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run harness
+        env:
+          N: ${{ inputs.n }}
+          CONC: ${{ inputs.concurrency }}
+          MAX_TOKENS: ${{ inputs.max_tokens }}
+          PROMPT_TOKENS: ${{ inputs.prompt_tokens }}
+          SHARED_FRAC: ${{ inputs.shared_frac }}
+          OUT_DIR: ${{ github.workspace }}/bench-disagg-results
+        run: |
+          if [ "${{ inputs.compare }}" = "true" ]; then
+            bash scripts/bench/disagg/run.sh --compare
+          else
+            bash scripts/bench/disagg/run.sh
+          fi
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-disagg-results
+          path: |
+            bench-disagg-results/results.json
+            bench-disagg-results/results.jsonl
+            bench-disagg-results/summary.md
+            bench-disagg-results/workload.jsonl
+          if-no-files-found: error

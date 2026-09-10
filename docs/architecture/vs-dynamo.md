@@ -32,7 +32,8 @@ backends, and the cross-cluster index" deep dive, see
   LMCache, SGLang HiCache, and KVBM as alternatives behind one TOML
   knob, plus its own `cgn-kvcached` cross-cluster index on top.
 * **Pick Dynamo if** you want NVIDIA-aligned reference deployments,
-  multimodal / video pipelines, or NVL72 gang scheduling.
+  video pipelines / disaggregated multimodal, or NVL72 gang
+  scheduling.
 * **Pick Cognitora if** you want pure-binary deployment, bare-metal /
   hybrid topologies, energy-aware admission, llama.cpp at the edge,
   or cross-cluster federation.
@@ -117,6 +118,7 @@ sits above all of them**.
 | Capability | Cognitora | Dynamo |
 |------------|-----------|--------|
 | Autoscaler | closed loop — router writes energy-aware drain hints, `cgn-operator` cordons / restores capacity | Planner (SLA/TCO-driven, predictive) |
+| SLA planner | reactive — ModelPool SLOs (`maxQueuePerReplica`, min/max replicas, cooldown) scale decode replicas from live queue depth | predictive (SLA/TCO Planner) |
 | Workload simulator | not yet | AIConfigurator (search 10K configs) |
 | Topology-aware gang scheduling | basic (cgn-operator + node selectors) | Grove (NVL72-aware) |
 | Federation (cross-cluster) | `cgn-router::federation` + `cgn-kvcached` QUIC peer fetch | not shipped |
@@ -128,8 +130,10 @@ sits above all of them**.
 | Modality | Cognitora | Dynamo |
 |----------|-----------|--------|
 | Text LLM | yes | yes |
-| Tool calling | yes (passthrough through the engine) | yes (built-in agent toolkit) |
-| Multimodal (images, audio) | not yet | yes (E/P/D pipeline + embedding cache) |
+| Tool calling | yes — `tools` / `tool_choice` passthrough, streaming tool-call deltas, buffered aggregation | yes (built-in agent toolkit) |
+| Structured output | yes — `response_format` passthrough (engine guided decoding) | yes (engine-side) |
+| Multimodal (images) | yes — OpenAI content-parts passthrough; text-only prefix hashing | yes (E/P/D pipeline + embedding cache) |
+| Multimodal (audio) / disaggregated multimodal | not yet | yes |
 | Video generation | not yet | yes (FastVideo, SGLang Diffusion) |
 | Speculative decoding | yes (engine-side, passthrough) | yes (engine-side, passthrough) |
 | LoRA / adapters | yes (engine-side, passthrough) | yes (engine-side + multi-LoRA scheduling) |
@@ -188,9 +192,11 @@ Differentiators where Cognitora is currently ahead:
 
 Areas where Dynamo is currently ahead:
 
-1. **Multimodal & video pipelines.** Dynamo ships disaggregated
-   encode/prefill/decode for images and native FastVideo + SGLang
-   Diffusion integration. We are text-only today.
+1. **Disaggregated multimodal & video pipelines.** Dynamo ships
+   disaggregated encode/prefill/decode for images and native
+   FastVideo + SGLang Diffusion integration. We pass image inputs
+   through to the engine (0.7) but don't disaggregate the encode
+   stage, and we have no video story.
 2. **KVBM as a built-in tiered block manager.** Dynamo's KVBM owns
    GPU + Host + Disk + Remote pools natively. We integrate KVBM as
    one of several offload backends, but we don't ship our own
@@ -232,7 +238,7 @@ operator-visible behaviour is comparable:
 | Situation | Pick |
 |-----------|------|
 | You're on NVIDIA hardware, Kubernetes-only, and want vendor-aligned reference deployments | **Dynamo** |
-| You need multimodal or video pipelines today | **Dynamo** |
+| You need video pipelines or disaggregated multimodal serving today | **Dynamo** |
 | You need NVL72 topology-aware gang scheduling | **Dynamo** |
 | You want bare-metal or hybrid (some bare-metal, some cloud) topologies | **Cognitora** |
 | You want to mix engines in one cluster (e.g. SGLang for chat, llama.cpp at the edge, OpenAI passthrough for fallback) | **Cognitora** |

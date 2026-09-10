@@ -66,6 +66,43 @@ jobs:
           sudo apt-get install -y libssl-dev clang lld pkg-config
       - run: cargo test --workspace --no-fail-fast
 
+  e2e-multinode:
+    name: e2e multi-node (etcd)
+    runs-on: ubuntu-24.04
+    needs: build
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+        with: { repo-token: "${{ secrets.GITHUB_TOKEN }}" }
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev clang lld pkg-config
+      - name: Install etcd + etcdctl
+        run: |
+          ETCD_VER=v3.5.15
+          curl -fsSL "https://github.com/etcd-io/etcd/releases/download/${ETCD_VER}/etcd-${ETCD_VER}-linux-amd64.tar.gz" \
+            | tar xz -C /tmp
+          sudo install /tmp/etcd-${ETCD_VER}-linux-amd64/etcd /tmp/etcd-${ETCD_VER}-linux-amd64/etcdctl /usr/local/bin/
+      - name: Start etcd
+        run: |
+          etcd --data-dir /tmp/etcd-e2e \
+            --listen-client-urls http://127.0.0.1:2379 \
+            --advertise-client-urls http://127.0.0.1:2379 \
+            --logger zap --log-level error &
+          for _ in $(seq 1 30); do
+            etcdctl --endpoints=127.0.0.1:2379 endpoint health >/dev/null 2>&1 && exit 0
+            sleep 0.5
+          done
+          echo "etcd did not become healthy" >&2
+          exit 1
+      - name: Build cgn-router + cgn-agent
+        run: cargo build --release --no-default-features -p cgn-router -p cgn-agent
+      - name: Multi-node KV routing smoke
+        run: CGN_E2E_MULTINODE=1 CGN_SKIP_BUILD=1 ./tests/e2e/multi_node_kv.sh
+
   helm-lint:
     name: helm lint
     runs-on: ubuntu-24.04
@@ -84,6 +121,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y shellcheck
           shellcheck \
             deploy/installer/install.sh \
+            scripts/bench/disagg/run.sh \
             scripts/e2e-gpu.sh \
             tests/e2e/single_node.sh \
             tests/e2e/multi_node_kv.sh

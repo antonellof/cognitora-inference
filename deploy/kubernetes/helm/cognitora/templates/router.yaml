@@ -39,14 +39,18 @@ spec:
           resources: {{- toYaml .Values.router.resources | nindent 12 }}
           volumeMounts:
             - { name: config, mountPath: /etc/cognitora }
+            {{- if .Values.security.require_mtls }}
             - { name: pki,    mountPath: /etc/cognitora/pki, readOnly: true }
+            {{- end }}
       volumes:
         - name: config
           configMap:
             name: {{ include "cognitora.fullname" . }}-config
+        {{- if .Values.security.require_mtls }}
         - name: pki
           secret:
             secretName: {{ default (printf "%s-pki" (include "cognitora.fullname" .)) .Values.pki.existingSecret }}
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service

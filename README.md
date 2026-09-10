@@ -86,15 +86,16 @@ NVIDIA Dynamo is the closest peer in this space. We agree on most fundamentals (
 | **Positioning** | Engine-agnostic orchestration above vLLM / SGLang / llama.cpp / TRT-LLM / MLX | Engine-agnostic orchestration above vLLM / SGLang / TRT-LLM |
 | **Runtime artefact** | Six single-file binaries — no Python control plane, JVM, or operator runtime | Rust core + Python frontend / extensibility layer |
 | **First-class engines** | vLLM · SGLang · llama.cpp · MLX (Apple Silicon) · TensorRT-LLM (`trtllm-serve`) · OpenAI-compat | vLLM · SGLang · TRT-LLM |
-| **KV routing signal** | Sequence-chained BLAKE3 digests + longest-prefix overlap (positionally correct), fed by live engine telemetry (queue depth + KV occupancy) | RadixTree on chained block hashes, fed by engine KV events |
+| **KV routing signal** | Sequence-chained BLAKE3 digests + longest-prefix overlap (positionally correct), fed by live engine telemetry **and** completion-confirmed claims (lease-bound, pressure-evicted) | RadixTree on chained block hashes, fed by engine KV events |
 | **KV offload backends** | `none / nixl / lmcache / hicache / kvbm` — selected per recipe via one TOML knob, auto-rendered into the engine argv | KVBM (built-in) + LMCache + FlexKV (separate launch scripts per backend) |
 | **Multi-tier KV** | RAM + SSD + cross-cluster QUIC peer fetch (cgn-kvcached) | Full G1–G4 (KVBM owns GPU + Host + SSD + remote pools) |
 | **Cross-cluster federation** | QUIC peer fetch + cgn-router federation | Single cluster |
 | **Disaggregated prefill/decode** | Recipe-level (`vllm/disagg-*`, NIXL) | Recipe-level (1P1D, 2P2D, NIXL) |
-| **Autoscaling** | Closed loop: energy-aware drain hints → operator cordons/restores capacity | Planner (SLA/TCO-driven) + AIConfigurator |
+| **Autoscaling** | Closed loop: energy-aware drain hints → operator cordons/restores capacity; SLA planner scales decode replicas from queue-depth SLOs | Planner (SLA/TCO-driven) + AIConfigurator |
 | **Request retry / failover** | Pre-token dispatch retry against next-best node | In-flight request migration (token-state replay) |
 | **Multi-model cascade (SLM→LLM)** | First-class (confidence gating, buffered **and** streaming) | — |
-| **Multimodal / video** | Not yet | Yes — image E/P/D, FastVideo, SGLang Diffusion |
+| **Tool calling / structured output** | Yes — passthrough to engine (vLLM/SGLang tool parsing + guided decoding), streaming included | Yes — engine-level |
+| **Multimodal / video** | Image inputs (OpenAI content parts, passthrough); video pipelines not yet | Yes — image E/P/D, FastVideo, SGLang Diffusion |
 | **Topology-aware gang scheduling** | Basic (cgn-operator + node selectors) | Grove (NVL72-aware) |
 | **Energy / power telemetry** | Yes — Redfish + NVML in the routing score (IPMI/DCGM on the roadmap) | No routing-level power term |
 | **Service discovery** | etcd (optional; single-node needs nothing) | K8s-native / etcd / file backends |
@@ -106,7 +107,7 @@ The full deep-dive is in [`docs/architecture/vs-dynamo.md`](docs/architecture/vs
 
 What we have that Dynamo doesn't: bare-metal-first deployment with one-curl install · llama.cpp + MLX + OpenAI-compat as first-class engines · energy-aware scheduling wired into routing and autoscaling · positionally-correct KV digests · cross-cluster QUIC peer fetch · multi-model SLM→LLM cascade (streaming included) · single-binary runtime with no Python control plane.
 
-What Dynamo has that we don't yet: multimodal & video pipelines · ModelExpress GPU-to-GPU weight streaming · Grove NVL72 gang scheduling · AIConfigurator deployment search · in-flight request migration · zero-config DGDR deployment.
+What Dynamo has that we don't yet: video pipelines & multimodal E/P/D disaggregation · ModelExpress GPU-to-GPU weight streaming · Grove NVL72 gang scheduling · AIConfigurator deployment search · in-flight request migration · zero-config DGDR deployment.
 
 ## The binaries
 

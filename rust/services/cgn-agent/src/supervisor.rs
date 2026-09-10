@@ -45,6 +45,10 @@ pub struct Supervisor {
     pub engine_cfg: EngineConfig,
     /// Engine process group: pipeline workers first, coordinator last.
     children: Mutex<Vec<Child>>,
+    /// Prefix digests confirmed by completed generations, waiting to be
+    /// published to etcd as truth-fed KV claims. Filled by the gRPC
+    /// `Generate` handler, drained by the health/heartbeat loop.
+    pub kv_confirmed: Mutex<Vec<Vec<u8>>>,
 }
 
 impl Supervisor {
@@ -68,6 +72,7 @@ impl Supervisor {
             engine_cfg,
             engine,
             children: Mutex::new(Vec::new()),
+            kv_confirmed: Mutex::new(Vec::new()),
         };
         s.spawn_engine_for_default_model().await?;
         Ok(s)

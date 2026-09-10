@@ -64,6 +64,16 @@ impl PrefixIndex {
         }
     }
 
+    /// Drop a single node's claim on a single digest. Used by the
+    /// router watcher when an agent deletes a confirmed KV key from
+    /// etcd (the engine evicted those blocks).
+    pub fn forget_claim(&self, digest: &[u8; 32], node_id: &str) {
+        if let Some(entry) = self.inner.get(digest) {
+            entry.write().retain(|n| n.node_id != node_id);
+        }
+        self.inner.remove_if(digest, |_, v| v.read().is_empty());
+    }
+
     /// Drop a node from the index entirely (invoked on graceful drain).
     pub fn forget_node(&self, node_id: &str) {
         for mut e in self.inner.iter_mut() {
@@ -295,6 +305,18 @@ mod tests {
         ix.insert(d(3), "n3");
         ix.forget_node_stale("n3", Duration::from_secs(60));
         assert_eq!(ix.lookup(&d(3)), vec!["n3".to_string()]);
+    }
+
+    #[test]
+    fn forget_claim_removes_only_target_node() {
+        let ix = PrefixIndex::new(Duration::from_secs(60));
+        ix.insert(d(1), "n1");
+        ix.insert(d(1), "n2");
+        ix.forget_claim(&d(1), "n1");
+        assert_eq!(ix.lookup(&d(1)), vec!["n2".to_string()]);
+        // Removing the last claim purges the digest entry entirely.
+        ix.forget_claim(&d(1), "n2");
+        assert!(ix.lookup(&d(1)).is_empty());
     }
 
     #[test]

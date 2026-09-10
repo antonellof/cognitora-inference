@@ -129,6 +129,8 @@ async fn forward(
         blocks: vec![],
         traceparent: req.traceparent,
         tracestate: req.tracestate,
+        extensions_json: req.extensions_json,
+        digests: decision.digests.iter().map(|d| d.to_vec()).collect(),
     };
 
     let req_stream = futures::stream::iter(vec![agent_req]);

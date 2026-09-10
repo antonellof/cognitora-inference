@@ -10,6 +10,66 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-09-10
+
+The "OpenAI parity + truth-fed routing" release. Tool calling,
+structured output, and multimodal image inputs now pass through the
+full router→agent→engine path verbatim; the prefix index gains a
+completion-confirmed feed so KV-overlap scoring reflects what engines
+actually cached; the operator grows a reactive SLA planner; multi-node
+e2e runs in default CI; and the Helm chart is turnkey.
+
+### Added
+- **Tool calling & structured output passthrough** — `tools`,
+  `tool_choice`, and `response_format` on `/v1/chat/completions` are
+  forwarded verbatim to the engine (vLLM/SGLang implement tool parsing
+  and guided decoding), via a new `extensions_json` field on the
+  Generate protos. Streaming `delta.tool_calls` fragments flow back
+  through the `Token` proto (`tool_calls_json`); buffered responses
+  aggregate fragments per index into complete `tool_calls` with a
+  proper `finish_reason`. Assistant `tool_calls` and tool-role
+  `tool_call_id` messages round-trip. Cascade is bypassed for tool
+  requests (tool formats are not portable across cascade models).
+- **Multimodal image passthrough** — OpenAI content-parts arrays
+  (`type: image_url`, …) are accepted on messages and carried verbatim
+  to the engine (`content_json` on the `Message` proto). Prefix
+  hashing uses only the text parts, so images don't pollute KV-overlap
+  scoring.
+- **Confirmed KV prefix feed** — after a generation completes, the
+  agent publishes the request's prefix digests as lease-bound etcd
+  keys under `/cognitora/kv/<node>/<digest>`; the router watcher
+  mirrors PUT/DELETE into the `PrefixIndex`
+  (`PrefixIndex::forget_claim`). Claims are confirmed-by-completion,
+  die with the node's heartbeat lease, and the agent prunes its oldest
+  claims under KV-cache pressure (<5 % free blocks) and beyond a
+  4096-key cap — the overlap score now tracks engine truth instead of
+  router optimism.
+- **SLA planner-lite** (`cgn-operator::planner`) — `ModelPool` SLOs
+  (`maxQueuePerReplica`, `minReplicas`, `maxReplicas`,
+  `scaleCooldownSecs`) drive reactive scaling of `decode_replicas`
+  from live queue depths, with cooldown and status reporting
+  (`desiredReplicas`, `lastScaleTime`).
+- **Multi-node e2e in default CI** — `tests/e2e/multi_node_kv.sh`
+  rewritten around a stub OpenAI engine (`tests/e2e/stub_engine.py`):
+  4 phases including a real 2-agent prefix-affinity assertion, wired
+  into the default GitHub Actions run (`e2e-multinode` job).
+- **GPU disaggregation bench harness** (`scripts/bench/disagg/` +
+  `bench-disagg.yml` workflow_dispatch) — reproducible prefill/decode
+  split benchmarks for GPU hosts; numbers to follow once run on GPU
+  hardware.
+- **Turnkey Helm** — chart deploys a working cluster out of the box:
+  engine sidecar block (`agent.engine.*`), `cluster.etcdEndpoints`,
+  mTLS off by default for first contact (`security.require_mtls`),
+  `hostNetwork` opt-in, chart README.
+
+### Changed
+- `Message` proto gains `content_json`, `tool_calls_json`,
+  `tool_call_id`; `Token` gains `tool_calls_json`; `GenerateRequest` /
+  `AgentGenerateRequest` gain `extensions_json`, and the agent request
+  carries the router's prefix `digests` for confirmed-claim publishing.
+  All additions are append-only field numbers — wire-compatible with
+  0.6 clients.
+
 ## [0.6.0] — 2026-09-10
 
 The "make the routing score true" release. Every term of the KV-aware

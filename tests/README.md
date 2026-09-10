@@ -23,7 +23,7 @@ spin up real daemons against stub engines.
 |---------------------------------|-------------------------------------------------------------------------|-------|
 | [`e2e/multi_engine.sh`](e2e/multi_engine.sh)   | Plugin layer (vllm/llama_cpp/openai_compat argv), auth (401/200), rate-limit (429), agent registration. | ~3 s |
 | [`e2e/single_node.sh`](e2e/single_node.sh)     | Full single-host bring-up: router + agent + fake engine, OpenAI surface, gRPC handoff. | ~10 s |
-| [`e2e/multi_node_kv.sh`](e2e/multi_node_kv.sh) | Cross-node KV transport (QUIC handoff), prefill/decode disagg path. Skips when no second host (`REQUIRE_MULTINODE=0`). | ~15 s |
+| [`e2e/multi_node_kv.sh`](e2e/multi_node_kv.sh) | Multi-node control plane: etcd node discovery, KV-aware routing dispatch across 4 seeded nodes, cordon watch propagation, plus a real data path — 2 `cgn-agent`s (openai_compat, [`e2e/stub_engine.py`](e2e/stub_engine.py)) self-register in etcd, serve a routed 200, and prove KV prefix-affinity. Needs a reachable etcd. | ~25 s |
 
 Run any of them from the repo root:
 
@@ -35,6 +35,18 @@ cargo build --release --no-default-features \
 
 For a tight dev loop, set `CGN_SKIP_BUILD=1` to skip the workspace
 re-build between runs (the script will warn if a binary is missing).
+
+### Gating for `multi_node_kv.sh`
+
+The multi-node smoke runs by default whenever etcd is reachable on
+`$COGNITORA_ETCD` (default `127.0.0.1:2379`):
+
+| Situation                                   | Behaviour                          |
+|---------------------------------------------|------------------------------------|
+| Local run, etcd reachable                   | Runs, non-zero exit on failure     |
+| Local run, no etcd                          | Clean `SKIPPED` message, exit 0    |
+| `CI=true` or `CGN_E2E_MULTINODE=1`, no etcd | Hard failure (etcd was expected)   |
+| `CGN_E2E_MULTINODE=0`                       | Always skipped (explicit opt-out)  |
 
 ## End-to-end with a real LLM
 

@@ -18,9 +18,13 @@ spec:
         app.kubernetes.io/component: agent
     spec:
       serviceAccountName: {{ include "cognitora.fullname" . }}
-      nodeSelector: {{- toYaml .Values.agent.nodeSelector | nindent 8 }}
-      tolerations: {{- toYaml .Values.agent.tolerations | nindent 8 }}
-      hostNetwork: true
+      {{- with .Values.agent.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      hostNetwork: {{ .Values.agent.hostNetwork }}
       containers:
         - name: cgn-agent
           image: {{ include "cognitora.image" . }}
@@ -35,14 +39,48 @@ spec:
           resources: {{- toYaml .Values.agent.resources | nindent 12 }}
           volumeMounts:
             - { name: config, mountPath: /etc/cognitora }
+            {{- if .Values.security.require_mtls }}
             - { name: pki,    mountPath: /etc/cognitora/pki, readOnly: true }
+            {{- end }}
             - { name: socks,  mountPath: /run/cognitora }
+        {{- if .Values.agent.engine.enabled }}
+        # Inference engine sidecar. Owns the engine process; the agent
+        # proxies to it on http://127.0.0.1:{{ .Values.agent.engine.port }}
+        # ([engine] kind = "openai_compat" in the rendered config).
+        - name: engine
+          image: {{ required "agent.engine.image is required when agent.engine.enabled=true" .Values.agent.engine.image }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          {{- with .Values.agent.engine.command }}
+          command: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.agent.engine.args }}
+          args: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.agent.engine.env }}
+          env: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - { name: engine, containerPort: {{ .Values.agent.engine.port }} }
+          {{- if .Values.agent.engine.readinessPath }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.agent.engine.readinessPath }}
+              port: engine
+            periodSeconds: 5
+            failureThreshold: 60   # engines warm slowly while loading weights
+          {{- end }}
+          {{- with .Values.agent.engine.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- end }}
       volumes:
         - name: config
           configMap: { name: {{ include "cognitora.fullname" . }}-config }
+        {{- if .Values.security.require_mtls }}
         - name: pki
           secret:
             secretName: {{ default (printf "%s-pki" (include "cognitora.fullname" .)) .Values.pki.existingSecret }}
+        {{- end }}
         - name: socks
           emptyDir: {}
 {{- end }}

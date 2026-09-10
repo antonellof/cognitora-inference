@@ -77,12 +77,8 @@ impl Engine for OpenAiHttpEngine {
             format!("{}/v1/completions", self.base)
         };
 
-        let body = if chat_mode {
-            let messages: Vec<_> = req
-                .messages
-                .iter()
-                .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
-                .collect();
+        let mut body = if chat_mode {
+            let messages: Vec<_> = req.messages.iter().map(message_json).collect();
             serde_json::json!({
                 "model":       req.model,
                 "messages":    messages,
@@ -103,6 +99,22 @@ impl Engine for OpenAiHttpEngine {
                 "stream":      true,
             })
         };
+
+        // Merge OpenAI extensions (tools / tool_choice / response_format)
+        // into the body verbatim — the engine implements them (vLLM and
+        // SGLang both support tool parsing and guided decoding).
+        if !req.extensions_json.is_empty() {
+            match serde_json::from_str::<serde_json::Value>(&req.extensions_json) {
+                Ok(serde_json::Value::Object(ext)) => {
+                    if let Some(obj) = body.as_object_mut() {
+                        for (k, v) in ext {
+                            obj.insert(k, v);
+                        }
+                    }
+                }
+                _ => warn!(engine = self.kind, "ignoring unparsable extensions_json"),
+            }
+        }
 
         let resp = self
             .client
@@ -142,6 +154,7 @@ impl Engine for OpenAiHttpEngine {
                             logprob: 0.0,
                             finish: "stop".into(),
                             prefix_hash: vec![],
+                            tool_calls_json: String::new(),
                         })
                         .await;
                     return Ok(());
@@ -158,10 +171,17 @@ impl Engine for OpenAiHttpEngine {
                                 .and_then(|d| d.content.clone())
                                 .or(choice.text)
                                 .unwrap_or_default();
+                            // Tool-call deltas pass through as raw JSON.
+                            let tool_calls_json = choice
+                                .delta
+                                .as_ref()
+                                .and_then(|d| d.tool_calls.as_ref())
+                                .map(|v| v.to_string())
+                                .unwrap_or_default();
                             // Skip empty deltas (chat streams emit a
                             // role-only frame as the first chunk).
                             let finish = choice.finish_reason.unwrap_or_default();
-                            if text.is_empty() && finish.is_empty() {
+                            if text.is_empty() && finish.is_empty() && tool_calls_json.is_empty() {
                                 continue;
                             }
                             let token = Token {
@@ -171,6 +191,7 @@ impl Engine for OpenAiHttpEngine {
                                 logprob: 0.0,
                                 finish,
                                 prefix_hash: vec![],
+                                tool_calls_json,
                             };
                             if tx.send(token).await.is_err() {
                                 return Ok(()); // client gone
@@ -261,6 +282,27 @@ fn find_subseq(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|w| w == needle)
 }
 
+/// Render one chat message as OpenAI JSON, restoring multimodal content
+/// parts and tool-call fields carried through the proto verbatim.
+fn message_json(m: &super::ChatMessage) -> serde_json::Value {
+    let content: serde_json::Value = if !m.content_json.is_empty() {
+        serde_json::from_str(&m.content_json)
+            .unwrap_or_else(|_| serde_json::Value::String(m.content.clone()))
+    } else {
+        serde_json::Value::String(m.content.clone())
+    };
+    let mut msg = serde_json::json!({ "role": m.role, "content": content });
+    if !m.tool_calls_json.is_empty() {
+        if let Ok(tc) = serde_json::from_str::<serde_json::Value>(&m.tool_calls_json) {
+            msg["tool_calls"] = tc;
+        }
+    }
+    if !m.tool_call_id.is_empty() {
+        msg["tool_call_id"] = m.tool_call_id.clone().into();
+    }
+    msg
+}
+
 #[derive(Deserialize)]
 struct StreamFrame {
     choices: Vec<Choice>,
@@ -287,6 +329,9 @@ struct Choice {
 struct ChatDelta {
     #[serde(default)]
     content: Option<String>,
+    /// Streaming tool-call fragments; kept as raw JSON and forwarded.
+    #[serde(default)]
+    tool_calls: Option<serde_json::Value>,
     // role is sent on the first chunk only; we don't currently use it.
     #[serde(default, rename = "role")]
     _role: Option<String>,
@@ -346,6 +391,41 @@ mod tests {
         let c = &f.choices[0];
         let d = c.delta.as_ref().unwrap();
         assert_eq!(d.content, None);
+    }
+
+    #[test]
+    fn parses_tool_call_delta() {
+        let payload = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}"#;
+        let f: StreamFrame = serde_json::from_str(payload).unwrap();
+        let d = f.choices[0].delta.as_ref().unwrap();
+        assert!(d.content.is_none());
+        let tc = d.tool_calls.as_ref().unwrap();
+        assert_eq!(tc[0]["function"]["name"], "get_weather");
+    }
+
+    #[test]
+    fn message_json_restores_multimodal_and_tool_fields() {
+        let m = crate::engine::ChatMessage {
+            role: "user".into(),
+            content: String::new(),
+            content_json: r#"[{"type":"text","text":"what is this?"},{"type":"image_url","image_url":{"url":"https://x/y.png"}}]"#.into(),
+            tool_calls_json: String::new(),
+            tool_call_id: String::new(),
+        };
+        let v = message_json(&m);
+        assert!(v["content"].is_array());
+        assert_eq!(v["content"][1]["type"], "image_url");
+
+        let t = crate::engine::ChatMessage {
+            role: "tool".into(),
+            content: "72F".into(),
+            content_json: String::new(),
+            tool_calls_json: String::new(),
+            tool_call_id: "call_1".into(),
+        };
+        let v = message_json(&t);
+        assert_eq!(v["content"], "72F");
+        assert_eq!(v["tool_call_id"], "call_1");
     }
 
     #[test]

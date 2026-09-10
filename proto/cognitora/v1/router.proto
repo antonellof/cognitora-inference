@@ -29,6 +29,10 @@ message GenerateRequest {
   string         tracestate   = 9;
   // Per-request soft latency budget; influences admission control.
   uint32         deadline_ms  = 10;
+  // OpenAI extension passthrough: JSON object with optional keys
+  // `tools`, `tool_choice`, `response_format`. Forwarded verbatim to
+  // the engine's chat-completions request. Empty = none supplied.
+  string         extensions_json = 11;
 }
 
 // EmbedRequest / EmbedResponse moved to common.proto so Agent and Router

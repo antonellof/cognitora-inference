@@ -14,6 +14,7 @@
 
 mod autoscaler;
 mod controllers;
+mod planner;
 mod reconcile;
 mod render;
 
@@ -52,8 +53,11 @@ async fn main() -> Result<()> {
     tokio::try_join!(
         controllers::inference_cluster::run(client.clone(), cli.namespace.clone()),
         controllers::model_pool::run(client.clone(), cli.namespace.clone()),
-        controllers::routing_policy::run(client, cli.namespace),
-        autoscaler::run(cfg.cluster.etcd_endpoints),
+        controllers::routing_policy::run(client.clone(), cli.namespace.clone()),
+        autoscaler::run(cfg.cluster.etcd_endpoints.clone()),
+        // SLA planner-lite (0.7): scales ModelPool decode replicas from
+        // live queue-depth heartbeats when the pool declares an `slo`.
+        planner::run(client, cli.namespace, cfg.cluster.etcd_endpoints),
     )?;
     Ok(())
 }

@@ -76,6 +76,7 @@ impl Agent for AgentSvc {
 
         let (tx, rx) = mpsc::channel::<Result<Token, Status>>(64);
         let engine = self.supervisor.engine.clone();
+        let supervisor = self.supervisor.clone();
         tokio::spawn(async move {
             let messages: Vec<crate::engine::ChatMessage> = first
                 .messages
@@ -83,6 +84,9 @@ impl Agent for AgentSvc {
                 .map(|m| crate::engine::ChatMessage {
                     role: m.role.clone(),
                     content: m.content.clone(),
+                    content_json: m.content_json.clone(),
+                    tool_calls_json: m.tool_calls_json.clone(),
+                    tool_call_id: m.tool_call_id.clone(),
                 })
                 .collect();
             // Legacy plain-prompt fallback used only if the caller
@@ -98,6 +102,7 @@ impl Agent for AgentSvc {
                 String::new()
             };
             let p = first.params.unwrap_or_default();
+            let confirmed_digests = first.digests.clone();
             let req = GenerateReq {
                 id: first.id,
                 model: first.model,
@@ -108,6 +113,7 @@ impl Agent for AgentSvc {
                 top_p: p.top_p,
                 stop: p.stop,
                 stream: true,
+                extensions_json: first.extensions_json,
             };
             let (e_tx, mut e_rx) = mpsc::channel::<Token>(64);
             let gen = engine.generate(req, e_tx);
@@ -119,8 +125,19 @@ impl Agent for AgentSvc {
                 }
             };
             let (_, gen_res) = tokio::join!(pump, gen);
-            if let Err(e) = gen_res {
-                let _ = tx.send(Err(Status::from(e))).await;
+            match gen_res {
+                Ok(()) => {
+                    // Generation completed → the engine now holds the KV
+                    // for this prompt's prefix. Queue the router-supplied
+                    // digests as *confirmed* claims; the health loop
+                    // publishes them to etcd under the heartbeat lease.
+                    if !confirmed_digests.is_empty() {
+                        supervisor.kv_confirmed.lock().extend(confirmed_digests);
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(Err(Status::from(e))).await;
+                }
             }
         });
 

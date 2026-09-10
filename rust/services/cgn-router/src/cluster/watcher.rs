@@ -12,6 +12,22 @@ use crate::state::RoutingPolicy;
 const NODES_PREFIX: &str = cgn_core::etcd_keys::NODES;
 const POLICY_KEY: &str = cgn_core::etcd_keys::ROUTING;
 const CORDON_PREFIX: &str = cgn_core::etcd_keys::CORDON;
+const KV_CONFIRMED_PREFIX: &str = cgn_core::etcd_keys::KV_CONFIRMED;
+
+/// Parse a confirmed-KV etcd key `<KV_CONFIRMED>{node_id}/{digest_hex}`
+/// into its node id and 32-byte digest.
+fn parse_kv_confirmed_key(key: &str) -> Option<(&str, [u8; 32])> {
+    let rest = key.strip_prefix(KV_CONFIRMED_PREFIX)?;
+    let (node_id, hex) = rest.rsplit_once('/')?;
+    if node_id.is_empty() || hex.len() != 64 {
+        return None;
+    }
+    let mut digest = [0u8; 32];
+    for (i, byte) in digest.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(hex.get(i * 2..i * 2 + 2)?, 16).ok()?;
+    }
+    Some((node_id, digest))
+}
 
 pub async fn run_etcd_watcher(
     endpoints: Vec<String>,
@@ -125,6 +141,52 @@ pub async fn run_etcd_watcher(
         }
     });
 
+    // Confirmed-KV watcher. Agents publish lease-bound claims for prefix
+    // digests *after* a generation completes; mirroring PUT/DELETE into
+    // the PrefixIndex turns the overlap score into a truth-fed signal
+    // (claims die with the node's lease and are pruned by the agent
+    // under cache pressure).
+    let prefix_for_kv = prefix.clone();
+    let kv_endpoints = endpoints.clone();
+    tokio::spawn(async move {
+        let mut k_client = match Client::connect(&kv_endpoints, None).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(error=?e, "kv-confirmed watcher: connect failed");
+                return;
+            }
+        };
+        // Initial snapshot so a restarted router inherits live claims.
+        if let Ok(snap) = k_client
+            .get(KV_CONFIRMED_PREFIX, Some(GetOptions::new().with_prefix()))
+            .await
+        {
+            for kv in snap.kvs() {
+                if let Some((node_id, digest)) = kv.key_str().ok().and_then(parse_kv_confirmed_key)
+                {
+                    prefix_for_kv.insert(digest, node_id);
+                }
+            }
+        }
+        let opts = WatchOptions::new().with_prefix();
+        if let Ok((_w, mut s)) = k_client.watch(KV_CONFIRMED_PREFIX, Some(opts)).await {
+            while let Ok(Some(resp)) = s.message().await {
+                for ev in resp.events() {
+                    let Some(kv) = ev.kv() else { continue };
+                    let Some((node_id, digest)) =
+                        kv.key_str().ok().and_then(parse_kv_confirmed_key)
+                    else {
+                        continue;
+                    };
+                    match ev.event_type() {
+                        EventType::Put => prefix_for_kv.insert(digest, node_id),
+                        EventType::Delete => prefix_for_kv.forget_claim(&digest, node_id),
+                    }
+                }
+            }
+        }
+    });
+
     while let Ok(Some(resp)) = stream.message().await {
         for ev in resp.events() {
             let Some(kv) = ev.kv() else { continue };
@@ -158,4 +220,27 @@ pub async fn run_etcd_watcher(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_kv_confirmed_key;
+
+    #[test]
+    fn parses_valid_kv_confirmed_key() {
+        let hex = "ab".repeat(32);
+        let key = format!("{}node-a/{hex}", super::KV_CONFIRMED_PREFIX);
+        let (node, digest) = parse_kv_confirmed_key(&key).unwrap();
+        assert_eq!(node, "node-a");
+        assert_eq!(digest, [0xab; 32]);
+    }
+
+    #[test]
+    fn rejects_malformed_keys() {
+        assert!(parse_kv_confirmed_key("/other/x").is_none());
+        let short = format!("{}node-a/abcd", super::KV_CONFIRMED_PREFIX);
+        assert!(parse_kv_confirmed_key(&short).is_none());
+        let no_slash = format!("{}{}", super::KV_CONFIRMED_PREFIX, "ff".repeat(32));
+        assert!(parse_kv_confirmed_key(&no_slash).is_none());
+    }
 }

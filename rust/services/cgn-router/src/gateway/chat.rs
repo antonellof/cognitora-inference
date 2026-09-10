@@ -56,7 +56,14 @@ pub async fn completions(
         let state_clone = state.clone();
         let metric_model = model.clone();
         let started_for_metric = started;
-        let casc = Cascade::from_config(&state.cfg, &model, &[]);
+        // Tool-calling / structured-output requests bypass the cascade:
+        // different cascade models emit incompatible tool-call formats,
+        // and guided decoding must run on the model the client asked for.
+        let casc = if proto_req.extensions_json.is_empty() {
+            Cascade::from_config(&state.cfg, &model, &[])
+        } else {
+            None
+        };
         tokio::spawn(async move {
             let outcome = match casc {
                 Some(c) => {
@@ -99,13 +106,18 @@ pub async fn completions(
     }
 
     // Buffered path: the cascade evaluates the complete response's
-    // confidence before deciding whether to escalate.
-    let casc = Cascade::from_config(&state.cfg, &model, &[]);
+    // confidence before deciding whether to escalate. Tool/structured
+    // requests skip the cascade (see the streaming path for why).
+    let casc = if proto_req.extensions_json.is_empty() {
+        Cascade::from_config(&state.cfg, &model, &[])
+    } else {
+        None
+    };
     let result = match casc {
         Some(c) => buffered_with_cascade(state.clone(), proto_req, c).await,
         None => buffered_run(state.clone(), proto_req)
             .await
-            .map(|(text, n, finish)| (text, n, finish, model.clone())),
+            .map(|(text, n, finish, tool_calls)| (text, n, finish, tool_calls, model.clone())),
     };
 
     let dt = started.elapsed().as_secs_f64();
@@ -114,7 +126,7 @@ pub async fn completions(
         .observe(dt);
 
     match result {
-        Ok((text, completion_tokens, finish, used_model)) => {
+        Ok((text, completion_tokens, finish, tool_calls, used_model)) => {
             CHAT_REQUESTS.with_label_values(&[&used_model, "200"]).inc();
             CHAT_COMPLETION_TOKENS
                 .with_label_values(&[&used_model])
@@ -128,8 +140,10 @@ pub async fn completions(
                     index: 0,
                     message: ChatMessage {
                         role: "assistant".into(),
-                        content: text,
+                        content: super::types::ContentSpec::Text(text),
                         name: None,
+                        tool_calls,
+                        tool_call_id: None,
                     },
                     finish_reason: finish,
                 }],
@@ -156,7 +170,7 @@ async fn buffered_with_cascade(
     state: Arc<SharedState>,
     proto: GenerateRequest,
     casc: Cascade,
-) -> cgn_core::Result<(String, u32, String, String)> {
+) -> cgn_core::Result<(String, u32, String, Option<serde_json::Value>, String)> {
     let result = casc
         .run(|model| {
             let state = state.clone();
@@ -164,7 +178,7 @@ async fn buffered_with_cascade(
             step_proto.model = model.to_string();
             async move {
                 match buffered_run(state, step_proto).await {
-                    Ok((text, n, finish)) => StepOutcome {
+                    Ok((text, n, finish, _tool_calls)) => StepOutcome {
                         logprob: heuristic_logprob(n),
                         text,
                         tokens: n,
@@ -189,20 +203,57 @@ async fn buffered_with_cascade(
         result.outcome.text,
         result.outcome.tokens,
         result.outcome.finish,
+        // Cascade requests never carry tools (the gateway bypasses the
+        // cascade when extensions are present), so no tool calls here.
+        None,
         result.model_used,
     ))
 }
 
 fn build_proto_request(r: &ChatRequest) -> GenerateRequest {
+    use super::types::ContentSpec;
     let messages: Vec<PMessage> = r
         .messages
         .iter()
-        .map(|m| PMessage {
-            role: m.role.clone(),
-            content: m.content.clone(),
-            name: m.name.clone().unwrap_or_default(),
+        .map(|m| {
+            let (content, content_json) = match &m.content {
+                ContentSpec::Text(s) => (s.clone(), String::new()),
+                // Multimodal content parts: keep the raw JSON for the
+                // engine and a text-only view for prefix hashing.
+                ContentSpec::Parts(v) => (String::new(), v.to_string()),
+            };
+            PMessage {
+                role: m.role.clone(),
+                content,
+                name: m.name.clone().unwrap_or_default(),
+                content_json,
+                tool_calls_json: m
+                    .tool_calls
+                    .as_ref()
+                    .map(|v| v.to_string())
+                    .unwrap_or_default(),
+                tool_call_id: m.tool_call_id.clone().unwrap_or_default(),
+            }
         })
         .collect();
+
+    // Tool / structured-output passthrough. Bundled as one JSON object
+    // so the wire protocol stays stable as OpenAI grows the surface.
+    let mut ext = serde_json::Map::new();
+    if let Some(t) = &r.tools {
+        ext.insert("tools".into(), t.clone());
+    }
+    if let Some(t) = &r.tool_choice {
+        ext.insert("tool_choice".into(), t.clone());
+    }
+    if let Some(t) = &r.response_format {
+        ext.insert("response_format".into(), t.clone());
+    }
+    let extensions_json = if ext.is_empty() {
+        String::new()
+    } else {
+        serde_json::Value::Object(ext).to_string()
+    };
 
     let stops = r
         .stop
@@ -233,6 +284,7 @@ fn build_proto_request(r: &ChatRequest) -> GenerateRequest {
         traceparent: String::new(),
         tracestate: String::new(),
         deadline_ms: 0,
+        extensions_json,
     }
 }
 
@@ -262,6 +314,7 @@ fn chunk_json(
             delta: ChatDelta {
                 role: role.map(str::to_string),
                 content: content.map(str::to_string),
+                tool_calls: None,
             },
             finish_reason: finish.map(str::to_string),
         }],
@@ -313,7 +366,7 @@ async fn stream_run_cascade(
         }
 
         match buffered_run(state.clone(), step_proto).await {
-            Ok((text, tokens, finish)) => {
+            Ok((text, tokens, finish, _tool_calls)) => {
                 let outcome = StepOutcome {
                     logprob: heuristic_logprob(tokens),
                     text,
@@ -405,6 +458,12 @@ async fn stream_tokens(
                             } else {
                                 Some(t.text.clone())
                             },
+                            // Tool-call deltas pass through verbatim.
+                            tool_calls: if t.tool_calls_json.is_empty() {
+                                None
+                            } else {
+                                serde_json::from_str(&t.tool_calls_json).ok()
+                            },
                         },
                         finish_reason: if t.finish.is_empty() {
                             None
@@ -441,20 +500,29 @@ async fn stream_tokens(
     Ok(())
 }
 
-/// Non-streaming path: collect all tokens and return them as a single body.
+/// Non-streaming path: collect all tokens and return them as a single
+/// body. Tool-call deltas are aggregated OpenAI-style: entries with the
+/// same `index` are merged, with `function.arguments` fragments
+/// concatenated in arrival order.
 async fn buffered_run(
     state: Arc<SharedState>,
     proto: GenerateRequest,
-) -> cgn_core::Result<(String, u32, String)> {
+) -> cgn_core::Result<(String, u32, String, Option<serde_json::Value>)> {
     let mut stream = run_to_token_stream(state, proto).await?;
     let mut text = String::new();
     let mut count = 0u32;
     let mut finish = "stop".to_string();
+    let mut tool_agg = ToolCallAggregator::default();
     while let Some(item) = stream.next().await {
         match item {
             Ok(t) => {
                 text.push_str(&t.text);
                 count += 1;
+                if !t.tool_calls_json.is_empty() {
+                    if let Ok(v) = serde_json::from_str(&t.tool_calls_json) {
+                        tool_agg.push(&v);
+                    }
+                }
                 if !t.finish.is_empty() {
                     finish = t.finish;
                 }
@@ -465,7 +533,55 @@ async fn buffered_run(
         }
     }
     info!(tokens = count, "chat completion finished");
-    Ok((text, count, finish))
+    Ok((text, count, finish, tool_agg.finish()))
+}
+
+/// Merges streaming `delta.tool_calls` fragments into the final
+/// `message.tool_calls` array, keyed by each fragment's `index`.
+#[derive(Default)]
+struct ToolCallAggregator {
+    calls: std::collections::BTreeMap<u64, serde_json::Value>,
+}
+
+impl ToolCallAggregator {
+    fn push(&mut self, delta: &serde_json::Value) {
+        let Some(entries) = delta.as_array() else {
+            return;
+        };
+        for e in entries {
+            let idx = e.get("index").and_then(|i| i.as_u64()).unwrap_or(0);
+            let slot = self.calls.entry(idx).or_insert_with(|| {
+                serde_json::json!({
+                    "id": "",
+                    "type": "function",
+                    "function": { "name": "", "arguments": "" }
+                })
+            });
+            if let Some(id) = e.get("id").and_then(|v| v.as_str()) {
+                slot["id"] = id.into();
+            }
+            if let Some(t) = e.get("type").and_then(|v| v.as_str()) {
+                slot["type"] = t.into();
+            }
+            if let Some(f) = e.get("function") {
+                if let Some(name) = f.get("name").and_then(|v| v.as_str()) {
+                    slot["function"]["name"] = name.into();
+                }
+                if let Some(args) = f.get("arguments").and_then(|v| v.as_str()) {
+                    let existing = slot["function"]["arguments"].as_str().unwrap_or("");
+                    slot["function"]["arguments"] = format!("{existing}{args}").into();
+                }
+            }
+        }
+    }
+
+    fn finish(self) -> Option<serde_json::Value> {
+        if self.calls.is_empty() {
+            None
+        } else {
+            Some(serde_json::Value::Array(self.calls.into_values().collect()))
+        }
+    }
 }
 
 /// Maximum dispatch attempts per request. The first failure excludes
@@ -610,6 +726,10 @@ async fn dispatch_once(
         blocks: prefill_blocks,
         traceparent: req.traceparent.clone(),
         tracestate: req.tracestate.clone(),
+        extensions_json: req.extensions_json.clone(),
+        // The agent publishes these as *confirmed* KV claims to etcd
+        // after the generation completes successfully.
+        digests: decode_decision.digests.iter().map(|d| d.to_vec()).collect(),
     };
     let req_stream = futures::stream::iter(vec![agent_req]);
     let response = client
@@ -660,6 +780,8 @@ async fn run_prefill(
         blocks: vec![],
         traceparent: req.traceparent.clone(),
         tracestate: req.tracestate.clone(),
+        extensions_json: req.extensions_json.clone(),
+        digests: vec![],
     };
     let req_stream = futures::stream::iter(vec![prefill_req]);
     let mut stream = client
@@ -681,7 +803,24 @@ fn join_messages(msgs: &[PMessage]) -> String {
         out.push('<');
         out.push_str(&m.role);
         out.push_str(">\n");
-        out.push_str(&m.content);
+        if !m.content_json.is_empty() {
+            // Multimodal content: hash only the textual parts. Image
+            // bytes don't affect prompt-prefix KV reuse in the engines
+            // we route to, and hashing megabyte-scale data URLs would
+            // be pure overhead.
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&m.content_json) {
+                if let Some(parts) = v.as_array() {
+                    for p in parts {
+                        if let Some(t) = p.get("text").and_then(|t| t.as_str()) {
+                            out.push_str(t);
+                            out.push('\n');
+                        }
+                    }
+                }
+            }
+        } else {
+            out.push_str(&m.content);
+        }
         out.push('\n');
     }
     out

@@ -1,4 +1,9 @@
 # Default values for cognitora.
+#
+# The defaults below are chosen so a plain `helm install cognitora .`
+# produces a running stack on any cluster (CPU nodes, no PKI, no auth).
+# Production hardening — mTLS, GPU scheduling, auth — is opt-in and
+# documented inline next to each knob.
 
 global:
   image:
@@ -10,24 +15,49 @@ global:
 
 cluster:
   name: default
+  # etcd endpoints for cluster state. Leave empty to run without etcd
+  # (single-router dev mode: agents are discovered via direct gRPC and
+  # the autoscaler hints are disabled). For production point this at an
+  # etcd you operate, e.g. ["http://etcd.cognitora.svc:2379"].
+  etcdEndpoints: []
 
 # OpenID Connect / API key auth for the OpenAI HTTP surface.
 auth:
   enabled: false
   existingSecret: ""      # secret with keys: api-keys, oidc-client-id, oidc-issuer
 
-# mTLS material between cluster components. When createCa is true the
-# operator will issue a self-signed CA on first install.
+# ---- Security (mTLS between cluster components) -----------------------------
+#
+# Disabled by default so a fresh `helm install` comes up without any PKI
+# material. Internal gRPC then runs in plaintext — fine for dev clusters
+# and private networks, not for multi-tenant production.
+#
+# To enable mTLS:
+#   1. Mint a CA + leaf certs:   cgn-ctl pki bootstrap --out ./pki
+#   2. Create the secret:        kubectl create secret generic cognitora-pki \
+#                                  --from-file=ca.crt=./pki/ca.crt \
+#                                  --from-file=leaf.crt=./pki/leaf.crt \
+#                                  --from-file=leaf.key=./pki/leaf.key
+#   3. Install with:             --set security.require_mtls=true \
+#                                --set pki.existingSecret=cognitora-pki
+security:
+  require_mtls: false
+
+# mTLS material between cluster components. Only consulted when
+# security.require_mtls is true. When createCa is true (and no
+# existingSecret is given) the operator issues a self-signed CA on
+# first install; otherwise point existingSecret at a secret containing
+# ca.crt, leaf.crt and leaf.key (see `cgn-ctl pki bootstrap`).
 pki:
-  createCa: true
+  createCa: false
   existingSecret: ""
 
 # ---- Router ---------------------------------------------------------------
 router:
   replicas: 2
   resources:
-    requests: { cpu: "500m", memory: "1Gi" }
-    limits:   { cpu: "4",    memory: "4Gi" }
+    requests: { cpu: "250m", memory: "512Mi" }
+    limits:   { cpu: "2",    memory: "2Gi" }
   service:
     type: ClusterIP
     httpPort: 8080
@@ -56,24 +86,95 @@ router:
     enabled: false
     colocateBelowTokens: 256
 
-# ---- Agent (DaemonSet on GPU nodes) ---------------------------------------
+# ---- Agent (DaemonSet, one per inference node) ------------------------------
 agent:
   enabled: true
-  nodeSelector:
-    nvidia.com/gpu.present: "true"
-  tolerations:
-    - key: nvidia.com/gpu
-      operator: Exists
-      effect: NoSchedule
+
+  # Defaults schedule the agent on every node so a plain install works on
+  # CPU-only clusters. For a GPU fleet, pin the DaemonSet to GPU nodes:
+  #
+  # nodeSelector:
+  #   nvidia.com/gpu.present: "true"
+  # tolerations:
+  #   - key: nvidia.com/gpu
+  #     operator: Exists
+  #     effect: NoSchedule
+  nodeSelector: {}
+  tolerations: []
+
+  # Run the agent pod on the host network. Off by default so the engine
+  # sidecar's port can't clash with node services; turn on when the KV
+  # QUIC transport needs to bypass the CNI overlay.
+  hostNetwork: false
+
+  # Resources for the cgn-agent container itself (the supervisor, not the
+  # engine — engine resources live under agent.engine.resources).
   resources:
-    limits:
-      nvidia.com/gpu: 1
-      memory: "32Gi"
-    requests:
-      cpu: "2"
-      memory: "16Gi"
-  engine: vllm
-  engineImage: ""         # default: pulls vLLM image from values.global
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits:   { cpu: "1",    memory: "512Mi" }
+
+  # ---- Inference engine ------------------------------------------------
+  #
+  # engine.enabled=false (default): no sidecar is rendered and the agent
+  # proxies to engine.url — point it at an engine you run yourself
+  # (an existing vLLM Deployment, a llama.cpp server, any OpenAI-
+  # compatible endpoint).
+  #
+  # engine.enabled=true: the engine runs as a sidecar container in the
+  # agent pod. The sidecar owns the engine process, so the rendered
+  # config always uses `[engine] kind = "openai_compat"` with
+  # url = http://127.0.0.1:<engine.port> — the agent proxies, it never
+  # spawns.
+  engine:
+    enabled: false
+
+    # Used only when enabled=false: where the agent finds the engine.
+    # kind must be "openai_compat" unless the agent should spawn the
+    # engine itself (bare-metal style — unusual inside Kubernetes).
+    kind: openai_compat
+    url: "http://127.0.0.1:8000"
+
+    # Sidecar settings (used only when enabled=true).
+    image: ""             # required when enabled=true
+    command: []
+    args: []
+    port: 8000
+    env: []
+    resources: {}
+    # Path probed on <port> for sidecar readiness. Works for vLLM and
+    # llama.cpp server alike; set to "" to disable the probe.
+    readinessPath: /health
+
+    # -- Example 1: llama.cpp server on CPU (pairs with an initContainer
+    #    or a model baked into the image; see the chart README) --------
+    #
+    # engine:
+    #   enabled: true
+    #   image: ghcr.io/ggml-org/llama.cpp:server
+    #   command: ["/app/llama-server"]
+    #   args: ["-m", "/models/model.gguf", "--host", "0.0.0.0",
+    #          "--port", "8000", "-c", "4096", "--alias", "mymodel"]
+    #   port: 8000
+    #   resources:
+    #     requests: { cpu: "2", memory: "4Gi" }
+    #     limits:   { cpu: "4", memory: "8Gi" }
+    #
+    # -- Example 2: vLLM on GPU (also set agent.nodeSelector /
+    #    agent.tolerations to the GPU variants shown above) ------------
+    #
+    # engine:
+    #   enabled: true
+    #   image: vllm/vllm-openai:latest
+    #   args: ["--model", "meta-llama/Meta-Llama-3-8B-Instruct",
+    #          "--port", "8000", "--tensor-parallel-size", "1"]
+    #   port: 8000
+    #   env:
+    #     - name: HUGGING_FACE_HUB_TOKEN
+    #       valueFrom:
+    #         secretKeyRef: { name: hf-token, key: token }
+    #   resources:
+    #     requests: { cpu: "4", memory: "24Gi", nvidia.com/gpu: 1 }
+    #     limits:   { memory: "32Gi", nvidia.com/gpu: 1 }
 
 # ---- KV cache daemon ------------------------------------------------------
 kvcached:

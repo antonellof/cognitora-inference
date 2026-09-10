@@ -69,6 +69,10 @@ async fn emit_with_lease(supervisor: &Supervisor, endpoints: &[String]) -> Resul
         .map_err(|e| Error::Etcd(format!("lease_keep_alive: {e}")))?;
     info!(%lease_id, ttl = lease_ttl, "etcd lease acquired");
 
+    // Confirmed-KV keys this session has published, oldest first. Used
+    // to evict our own claims when the engine reports cache pressure.
+    let mut published_kv: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+
     loop {
         let ready = supervisor.engine.ready().await;
         let gpu = read_nvml_blocking().unwrap_or_default();
@@ -91,6 +95,18 @@ async fn emit_with_lease(supervisor: &Supervisor, endpoints: &[String]) -> Resul
             warn!(error=?e, "publish failed; will retry");
         }
 
+        if let Err(e) = publish_kv_confirmed(
+            &mut client,
+            supervisor,
+            lease_id,
+            &engine_stats,
+            &mut published_kv,
+        )
+        .await
+        {
+            warn!(error=?e, "kv-confirmed publish failed; will retry");
+        }
+
         // Renew the lease.
         keeper
             .keep_alive()
@@ -106,6 +122,70 @@ async fn emit_with_lease(supervisor: &Supervisor, endpoints: &[String]) -> Resul
 
         tokio::time::sleep(HEARTBEAT_INTERVAL).await;
     }
+}
+
+/// Cap on lease-bound confirmed-KV keys per node. Beyond this the oldest
+/// claims are deleted — they're also the ones the engine's LRU evicts
+/// first, so the index converges toward what's actually cached.
+const KV_CONFIRMED_MAX_KEYS: usize = 4096;
+
+/// Publish completion-confirmed prefix digests (queued by the gRPC
+/// Generate handler) as lease-bound etcd keys
+/// `<KV_CONFIRMED>{node_id}/{digest_hex}`. The router watcher mirrors
+/// PUT/DELETE into its `PrefixIndex`, turning the KV-overlap score from
+/// an optimistic guess into a truth-fed signal:
+///
+/// * confirmed only after the engine finished the generation,
+/// * dies with the node (heartbeat lease),
+/// * actively deleted under cache pressure (engine is LRU-evicting, so
+///   our oldest claims are the ones most likely gone).
+async fn publish_kv_confirmed(
+    client: &mut etcd_client::Client,
+    supervisor: &Supervisor,
+    lease_id: i64,
+    engine_stats: &crate::telemetry::EngineStats,
+    published: &mut std::collections::VecDeque<String>,
+) -> Result<()> {
+    use cgn_core::Error;
+    let node_id = &supervisor.cfg.agent.node_id;
+    let pending: Vec<Vec<u8>> = std::mem::take(&mut *supervisor.kv_confirmed.lock());
+
+    for digest in pending {
+        if digest.len() != 32 {
+            continue;
+        }
+        let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+        let key = format!("{}{}/{}", cgn_core::etcd_keys::KV_CONFIRMED, node_id, hex);
+        client
+            .put(
+                key.as_str(),
+                "1",
+                Some(etcd_client::PutOptions::new().with_lease(lease_id)),
+            )
+            .await
+            .map_err(|e| Error::Etcd(format!("kv put: {e}")))?;
+        published.push_back(key);
+    }
+
+    // Evict our own stale claims: on hard cap overflow, and under KV
+    // pressure (<5% free blocks) drop the oldest half.
+    let under_pressure = engine_stats.total_blocks > 0
+        && (engine_stats.free_blocks as f32 / engine_stats.total_blocks as f32) < 0.05;
+    let target = if under_pressure {
+        published.len() / 2
+    } else {
+        KV_CONFIRMED_MAX_KEYS
+    };
+    while published.len() > target {
+        let Some(key) = published.pop_front() else {
+            break;
+        };
+        client
+            .delete(key.as_str(), None)
+            .await
+            .map_err(|e| Error::Etcd(format!("kv delete: {e}")))?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Default, Clone)]

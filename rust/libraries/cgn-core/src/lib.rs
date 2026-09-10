@@ -31,6 +31,12 @@ pub mod etcd_keys {
     /// presence of `<CORDON>{node_id}` into `NodeEntry::cordoned`, and
     /// scoring excludes cordoned nodes from candidate selection.
     pub const CORDON: &str = "/cognitora/cordon/";
+    /// Completion-confirmed KV prefix claims. Agents write
+    /// `<KV_CONFIRMED>{node_id}/{digest_hex}` (lease-bound, so claims
+    /// die with the node) after a generation finishes; the router
+    /// watcher mirrors PUT/DELETE into its `PrefixIndex`, giving the
+    /// KV-overlap score a truth-fed signal instead of an optimistic one.
+    pub const KV_CONFIRMED: &str = "/cognitora/kv/";
 }
 
 /// Default ports.

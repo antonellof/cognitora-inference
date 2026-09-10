@@ -91,6 +91,9 @@ async fn reconcile(obj: Arc<ModelPool>, ctx: Arc<Ctx>) -> std::result::Result<Ac
         ModelPoolStatus {
             phase: "Synced".into(),
             loaded_replicas: obj.spec.prefill_replicas + obj.spec.decode_replicas,
+            // Planner-owned fields: `None` skips serialization, so this
+            // merge patch never clobbers what the planner wrote.
+            ..Default::default()
         },
     )
     .await;

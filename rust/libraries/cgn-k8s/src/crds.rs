@@ -102,12 +102,60 @@ pub struct ModelPoolSpec {
     pub max_model_len: Option<u32>,
     #[serde(default)]
     pub extra_args: Vec<String>,
+    /// Optional reactive SLO autoscaling ("planner-lite"). When set (and
+    /// `maxQueuePerReplica` is present) the operator's planner loop scales
+    /// `decode_replicas` from live queue-depth heartbeats. Absent → the
+    /// pool is entirely user-driven, exactly as before 0.7.
+    #[serde(default)]
+    pub slo: Option<SloSpec>,
+}
+
+/// SLO knobs for the reactive planner. camelCase on the wire to match
+/// the CRD YAML convention (`maxQueuePerReplica`, …).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SloSpec {
+    /// Scale up when total queued requests divided by this exceeds the
+    /// current replica count (i.e. avg queue per ready replica is too
+    /// high). Unset → planner ignores the pool.
+    #[serde(default)]
+    pub max_queue_per_replica: Option<u32>,
+    /// Floor for planner decisions (default 1) so an idle pool never
+    /// scales to zero unless explicitly allowed.
+    #[serde(default)]
+    pub min_replicas: Option<u32>,
+    /// Ceiling for planner decisions. Unset → the current
+    /// `decode_replicas` acts as the ceiling (the planner may only
+    /// scale back down, never above what the user asked for).
+    #[serde(default)]
+    pub max_replicas: Option<u32>,
+    /// Minimum seconds between planner-initiated scales for one pool
+    /// (default 120), so heartbeat noise cannot thrash replicas.
+    #[serde(default)]
+    pub scale_cooldown_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct ModelPoolStatus {
     pub phase: String,
     pub loaded_replicas: u32,
+    /// Replica count last decided by the SLA planner (None until the
+    /// planner has acted on this pool). camelCase on the wire to match
+    /// the CRD YAML status convention (`readyReplicas`, …).
+    #[serde(
+        default,
+        rename = "desiredReplicas",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub desired_replicas: Option<u32>,
+    /// RFC 3339 timestamp of the planner's last scale action; drives
+    /// operator observability (the cooldown itself is tracked in-memory).
+    #[serde(
+        default,
+        rename = "lastScaleTime",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_scale_time: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

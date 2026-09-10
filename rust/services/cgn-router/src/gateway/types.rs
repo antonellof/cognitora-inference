@@ -27,6 +27,16 @@ pub struct ChatRequest {
     pub user: Option<String>,
     #[serde(default)]
     pub seed: Option<u32>,
+    /// OpenAI tool definitions, forwarded verbatim to the engine.
+    #[serde(default)]
+    pub tools: Option<serde_json::Value>,
+    /// OpenAI tool_choice ("auto" / "none" / {...}), forwarded verbatim.
+    #[serde(default)]
+    pub tool_choice: Option<serde_json::Value>,
+    /// OpenAI response_format ({"type":"json_object"} / json_schema),
+    /// forwarded verbatim — the engine's guided decoding enforces it.
+    #[serde(default)]
+    pub response_format: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -48,9 +58,53 @@ impl StopSpec {
 pub struct ChatMessage {
     pub role: String,
     #[serde(default)]
-    pub content: String,
-    #[serde(default)]
+    pub content: ContentSpec,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Assistant messages carrying prior tool calls (request side) or
+    /// the aggregated tool calls of a buffered response (response side).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<serde_json::Value>,
+    /// Set on tool-role messages that answer a specific tool call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+/// OpenAI message content: either a plain string or an array of content
+/// parts (`[{"type":"text",...},{"type":"image_url",...}]`). Parts are
+/// kept as raw JSON and passed through to the engine untouched.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum ContentSpec {
+    Text(String),
+    Parts(serde_json::Value),
+}
+
+impl Default for ContentSpec {
+    fn default() -> Self {
+        ContentSpec::Text(String::new())
+    }
+}
+
+impl ContentSpec {
+    /// Plain-text view: the string itself, or the concatenated `text`
+    /// fields of the parts (images contribute nothing — the prefix hash
+    /// covers only the textual prompt).
+    pub fn as_text(&self) -> String {
+        match self {
+            ContentSpec::Text(s) => s.clone(),
+            ContentSpec::Parts(v) => v
+                .as_array()
+                .map(|parts| {
+                    parts
+                        .iter()
+                        .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .unwrap_or_default(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -101,6 +155,9 @@ pub struct ChatDelta {
     pub role: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    /// Streaming tool-call deltas, forwarded verbatim from the engine.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<serde_json::Value>,
 }
 
 // ---------------------------------------------------------------------------
