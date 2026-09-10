@@ -11,6 +11,7 @@
 //! prefix index and the node registry — see [`score`].
 
 pub mod grpc;
+pub mod prompt;
 pub mod score;
 pub mod selector;
 

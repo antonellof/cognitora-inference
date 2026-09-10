@@ -137,13 +137,20 @@ impl Engine for OpenAiHttpEngine {
         while let Some(item) = stream.next().await {
             let bytes = item.map_err(|e| Error::Internal(format!("{} stream: {e}", self.kind)))?;
             buf.extend_from_slice(&bytes);
-            // SSE frames are `data: <json>\n\n`. Pop complete frames.
-            while let Some(idx) = find_subseq(&buf, b"\n\n") {
-                let frame = buf.drain(..idx + 2).collect::<Vec<u8>>();
-                let line = std::str::from_utf8(&frame).unwrap_or("").trim();
-                if !line.starts_with("data:") {
+            // SSE frames are `data: <json>` terminated by a blank line.
+            // Servers may use LF (`\n\n`) or CRLF (`\r\n\r\n`) framing —
+            // treating only LF as a delimiter would never complete a
+            // frame on a CRLF stream and grow `buf` without bound.
+            while let Some(end) = find_frame_end(&buf) {
+                let frame = buf.drain(..end).collect::<Vec<u8>>();
+                let text = std::str::from_utf8(&frame).unwrap_or("");
+                // A frame may carry `event:`/`id:` lines alongside the
+                // `data:` line; pick the data line rather than requiring
+                // the whole frame to start with it.
+                let Some(line) = text.lines().map(str::trim).find(|l| l.starts_with("data:"))
+                else {
                     continue;
-                }
+                };
                 let payload = line.trim_start_matches("data:").trim();
                 if payload == "[DONE]" {
                     let _ = tx
@@ -278,8 +285,24 @@ impl Engine for OpenAiHttpEngine {
     }
 }
 
-fn find_subseq(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|w| w == needle)
+/// Find the end (exclusive) of the first complete SSE frame in `buf`,
+/// i.e. one past its blank-line terminator. Handles both LF (`\n\n`)
+/// and CRLF (`\r\n\r\n`, seen as `\n\r\n` after the previous line's
+/// `\r`) framing.
+fn find_frame_end(buf: &[u8]) -> Option<usize> {
+    let mut i = 0;
+    while i + 1 < buf.len() {
+        if buf[i] == b'\n' {
+            if buf[i + 1] == b'\n' {
+                return Some(i + 2);
+            }
+            if buf[i + 1] == b'\r' && buf.get(i + 2) == Some(&b'\n') {
+                return Some(i + 3);
+            }
+        }
+        i += 1;
+    }
+    None
 }
 
 /// Render one chat message as OpenAI JSON, restoring multimodal content
@@ -426,6 +449,15 @@ mod tests {
         let v = message_json(&t);
         assert_eq!(v["content"], "72F");
         assert_eq!(v["tool_call_id"], "call_1");
+    }
+
+    #[test]
+    fn frame_end_handles_lf_and_crlf() {
+        assert_eq!(find_frame_end(b"data: x\n\nrest"), Some(9));
+        assert_eq!(find_frame_end(b"data: x\r\n\r\nrest"), Some(11));
+        assert_eq!(find_frame_end(b"data: x\n"), None);
+        assert_eq!(find_frame_end(b"data: x\r\n"), None);
+        assert_eq!(find_frame_end(b""), None);
     }
 
     #[test]

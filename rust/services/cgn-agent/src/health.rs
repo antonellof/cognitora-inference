@@ -156,6 +156,14 @@ async fn publish_kv_confirmed(
         }
         let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
         let key = format!("{}{}/{}", cgn_core::etcd_keys::KV_CONFIRMED, node_id, hex);
+        // Re-confirmed digests (shared prefixes across requests) must not
+        // be queued twice: a duplicate deque entry would let the eviction
+        // pass below delete a key that is still tracked by its newer
+        // twin, silently dropping a live claim and inflating the deque
+        // count against the cap.
+        if published.contains(&key) {
+            continue;
+        }
         client
             .put(
                 key.as_str(),
@@ -196,8 +204,15 @@ pub(crate) struct GpuSnapshot {
     pub power_watts: f32,
 }
 
+/// NVML handle initialised once per process. Re-initialising the NVML
+/// library on every 5 s heartbeat (and every gRPC `Health` call) is
+/// needlessly expensive; hosts without NVML simply cache the `None`.
+static NVML: std::sync::OnceLock<Option<nvml_wrapper::Nvml>> = std::sync::OnceLock::new();
+
 pub(crate) fn read_nvml_blocking() -> Option<GpuSnapshot> {
-    let nvml = nvml_wrapper::Nvml::init().ok()?;
+    let nvml = NVML
+        .get_or_init(|| nvml_wrapper::Nvml::init().ok())
+        .as_ref()?;
     let count = nvml.device_count().ok()?;
     if count == 0 {
         return None;

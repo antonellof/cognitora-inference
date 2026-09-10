@@ -73,9 +73,23 @@ impl SharedState {
         let policy = self.policy.clone();
         let prefix = self.prefix.clone();
         tokio::spawn(async move {
-            if let Err(e) = crate::cluster::run_etcd_watcher(endpoints, nodes, policy, prefix).await
-            {
-                tracing::error!(error=?e, "etcd watcher exited");
+            // The watcher returns when its etcd watch stream ends (etcd
+            // restart, compaction, network partition). Without a reconnect
+            // the node registry would go permanently stale, so loop with a
+            // small backoff; each run re-applies the initial snapshot.
+            loop {
+                match crate::cluster::run_etcd_watcher(
+                    endpoints.clone(),
+                    nodes.clone(),
+                    policy.clone(),
+                    prefix.clone(),
+                )
+                .await
+                {
+                    Ok(()) => tracing::warn!("etcd watcher stream ended; reconnecting in 5s"),
+                    Err(e) => tracing::error!(error=?e, "etcd watcher exited; reconnecting in 5s"),
+                }
+                tokio::time::sleep(Duration::from_secs(5)).await;
             }
         });
         Ok(())

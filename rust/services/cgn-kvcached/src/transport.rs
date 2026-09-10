@@ -21,7 +21,6 @@ use bytes::{Bytes, BytesMut};
 use cgn_core::{Error, Result};
 use cgn_kv::{
     block::BlockAddress,
-    tier::Tier,
     transport::{Frame, Op, ALPN},
 };
 use quinn::{ClientConfig, Connection, Endpoint, ServerConfig};
@@ -73,13 +72,7 @@ async fn handle_connection(store: Arc<Store>, conn: Connection) -> Result<()> {
         let frame = read_frame(&mut recv).await?;
         match frame.op {
             Op::Pull => {
-                let bytes = match store.ram.get(&frame.addr) {
-                    Some(handle) if handle.meta.bytes > 0 => match read_ram(&store, &frame.addr) {
-                        Some(b) => b,
-                        None => Bytes::new(),
-                    },
-                    _ => Bytes::new(),
-                };
+                let bytes = store.ram.get_bytes(&frame.addr).unwrap_or_default();
                 let resp = Frame {
                     op: Op::Push,
                     addr: frame.addr,
@@ -128,14 +121,6 @@ async fn handle_connection(store: Arc<Store>, conn: Connection) -> Result<()> {
             }
         }
     }
-}
-
-fn read_ram(store: &Store, addr: &BlockAddress) -> Option<Bytes> {
-    use cgn_kv::tier::Tier;
-    let _ = store.ram.get(addr)?;
-    // RamTier exposes get-handle but not raw bytes; we re-read directly
-    // from the inner DashMap via a tiny helper below.
-    store.ram.get_bytes(addr)
 }
 
 // ---------------------------------------------------------------------------

@@ -45,7 +45,7 @@ pub async fn embeddings(
         );
     }
 
-    let token_ids = approximate_token_ids(&inputs.join(" "));
+    let token_ids = routing::prompt::approximate_token_ids(&inputs.join(" "));
     let decision = match routing::pick(&state, &req.model, NodeRole::Both, &token_ids).await {
         Ok(d) => d,
         Err(e) => {
@@ -136,16 +136,6 @@ pub async fn embeddings(
         },
     })
     .into_response()
-}
-
-fn approximate_token_ids(s: &str) -> Vec<u32> {
-    s.split_whitespace()
-        .map(|w| {
-            let b = blake3::hash(w.as_bytes());
-            let bb = b.as_bytes();
-            u32::from_le_bytes([bb[0], bb[1], bb[2], bb[3]])
-        })
-        .collect()
 }
 
 fn error_with(status: StatusCode, ty: &str, msg: &str) -> Response {

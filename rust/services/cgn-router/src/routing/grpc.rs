@@ -72,7 +72,7 @@ impl Router for RouterGrpc {
         if body.inputs.is_empty() {
             return Err(Status::invalid_argument("inputs must be non-empty"));
         }
-        let token_ids = approximate_token_ids(&body.inputs.join(" "));
+        let token_ids = super::prompt::approximate_token_ids(&body.inputs.join(" "));
         let decision = super::pick(&self.state, &body.model, NodeRole::Both, &token_ids)
             .await
             .map_err(Status::from)?;
@@ -97,8 +97,10 @@ async fn forward(
     use cgn_core::Error;
 
     // Approximate prefix tokens; a future revision uses the model's real
-    // tokenizer — see `gateway::tokenize_for_routing`.
-    let token_ids = approximate_token_ids(&join_messages(&req.messages));
+    // tokenizer. Shared with the HTTP gateway so both surfaces compute
+    // identical prefix hashes for the same prompt.
+    let token_ids =
+        super::prompt::approximate_token_ids(&super::prompt::join_messages(&req.messages));
 
     let role = if state.cfg.router.disagg.enabled
         && (token_ids.len() as u32) >= state.cfg.router.disagg.colocate_below_tokens
@@ -161,37 +163,4 @@ async fn forward(
         }
     }
     Ok::<_, Error>(())
-}
-
-/// Join chat-style messages for prefix-hashing purposes. Stable across
-/// versions; not the model's chat template.
-fn join_messages(msgs: &[cgn_proto::v1::Message]) -> String {
-    let mut out = String::with_capacity(msgs.iter().map(|m| m.content.len() + 16).sum());
-    for m in msgs {
-        out.push('<');
-        out.push_str(&m.role);
-        out.push_str(">\n");
-        out.push_str(&m.content);
-        out.push('\n');
-    }
-    out
-}
-
-/// Quick, dependency-free approximation: split on whitespace and hash. Used
-/// only when the full tokenizer hasn't been resolved for the model yet
-/// (cold start). The real path uses `tokenizers::Tokenizer::encode`.
-fn approximate_token_ids(s: &str) -> Vec<u32> {
-    s.split_whitespace()
-        .map(|w| {
-            let mut h = blake3::Hasher::new();
-            h.update(w.as_bytes());
-            let bytes = h.finalize();
-            u32::from_le_bytes([
-                bytes.as_bytes()[0],
-                bytes.as_bytes()[1],
-                bytes.as_bytes()[2],
-                bytes.as_bytes()[3],
-            ])
-        })
-        .collect()
 }
