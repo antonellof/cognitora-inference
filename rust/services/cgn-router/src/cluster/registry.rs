@@ -20,6 +20,19 @@ pub struct NodeEntry {
     pub free_blocks: u32,
     pub total_blocks: u32,
     pub power_watts: f32,
+    /// Soft power cap in watts (`0.0` = uncapped), from the agent's
+    /// `[agent].watt_limit`. The selector prefers under-cap nodes.
+    #[serde(default)]
+    pub watt_limit: f32,
+    /// GPU marketing name (`"NVIDIA H100 80GB HBM3"`); empty = unknown.
+    #[serde(default)]
+    pub gpu_name: String,
+    /// `"nvidia"` / `"amd"` / `""` (unknown).
+    #[serde(default)]
+    pub gpu_vendor: String,
+    /// Total GPU memory across devices, MiB; 0 = unknown.
+    #[serde(default)]
+    pub vram_total_mb: u64,
     /// Operator-set flag mirrored from `/cognitora/cordon/<node_id>`.
     /// Cordoned nodes are excluded from candidate selection so the
     /// router stops sending new traffic to them. Inflight requests

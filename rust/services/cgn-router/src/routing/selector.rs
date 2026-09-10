@@ -58,6 +58,34 @@ pub async fn pick_excluding(
 ) -> Result<RoutingDecision> {
     let mut candidates = state.nodes.nodes_for(role, Some(model));
     candidates.retain(|n| !exclude.iter().any(|x| x == &n.node_id));
+
+    // Capability constraints (heterogeneous fleets): a model may declare
+    // `min_vram_mb` and/or `require_gpu` in its `[models.*]` block. Nodes
+    // that don't report GPU identity/VRAM are *not* filtered — the
+    // constraint only bites on nodes that affirmatively report an
+    // incompatible GPU (backwards compatible with older agents).
+    if let Some(mc) = state.cfg.models.get(model) {
+        if let Some(min_vram) = mc.min_vram_mb {
+            candidates.retain(|n| n.vram_total_mb == 0 || n.vram_total_mb >= min_vram);
+        }
+        if let Some(req) = &mc.require_gpu {
+            let req = req.to_ascii_lowercase();
+            candidates.retain(|n| {
+                (n.gpu_name.is_empty() && n.gpu_vendor.is_empty())
+                    || n.gpu_name.to_ascii_lowercase().contains(&req)
+                    || n.gpu_vendor.to_ascii_lowercase().contains(&req)
+            });
+        }
+    }
+
+    // Soft power cap: prefer nodes under their configured watt limit.
+    // Only enforced when at least one candidate is under cap — if the
+    // whole pool is over, serving still beats browning out a request.
+    let under_cap = |n: &Arc<NodeEntry>| n.watt_limit <= 0.0 || n.power_watts < n.watt_limit;
+    if candidates.iter().any(&under_cap) {
+        candidates.retain(under_cap);
+    }
+
     if candidates.is_empty() {
         return Err(Error::Unavailable(format!(
             "no live node serving model {model} for role {role:?}\
@@ -144,11 +172,16 @@ pub async fn pick_pair(
     // We avoid the same node id; if the only eligible decode node is the
     // prefill node (small cluster) we degrade to colocate.
     let candidates = state.nodes.nodes_for(decode_role, Some(model));
-    let distinct: Vec<_> = candidates
+    let mut distinct: Vec<_> = candidates
         .iter()
         .filter(|n| n.node_id != prefill.node.node_id && !exclude.iter().any(|x| x == &n.node_id))
         .cloned()
         .collect();
+    // Same soft watt-cap preference as the primary pick.
+    let under_cap = |n: &Arc<NodeEntry>| n.watt_limit <= 0.0 || n.power_watts < n.watt_limit;
+    if distinct.iter().any(&under_cap) {
+        distinct.retain(under_cap);
+    }
     if distinct.is_empty() {
         return Ok((prefill.clone(), prefill));
     }
@@ -223,5 +256,107 @@ mod tests {
         let s = fake_state();
         let r = pick(&s, "llama3", NodeRole::Both, &[1, 2, 3]).await;
         assert!(matches!(r, Err(Error::Unavailable(_))));
+    }
+
+    fn entry(id: &str, watts: f32, watt_limit: f32, gpu: &str, vram_mb: u64) -> NodeEntry {
+        NodeEntry {
+            node_id: id.into(),
+            address: format!("http://{id}:7070"),
+            role: NodeRole::Both as i32,
+            gpu_index: None,
+            model: Some("llama3".into()),
+            queue_depth: 0,
+            free_blocks: 100,
+            total_blocks: 100,
+            power_watts: watts,
+            watt_limit,
+            gpu_name: gpu.into(),
+            gpu_vendor: if gpu.to_ascii_lowercase().contains("nvidia") {
+                "nvidia".into()
+            } else if gpu.is_empty() {
+                String::new()
+            } else {
+                "amd".into()
+            },
+            vram_total_mb: vram_mb,
+            cordoned: false,
+            last_heartbeat: std::time::Instant::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn watt_cap_prefers_under_cap_nodes() {
+        let s = fake_state();
+        // n1 is over its cap, n2 under; n2 must win even though scores tie.
+        s.nodes.upsert(entry("n1", 400.0, 350.0, "", 0));
+        s.nodes.upsert(entry("n2", 200.0, 350.0, "", 0));
+        for _ in 0..8 {
+            let d = pick(&s, "llama3", NodeRole::Both, &[1, 2, 3])
+                .await
+                .unwrap();
+            assert_eq!(d.node.node_id, "n2");
+        }
+    }
+
+    #[tokio::test]
+    async fn watt_cap_soft_when_all_over() {
+        let s = fake_state();
+        // Every node over cap: still serve rather than fail.
+        s.nodes.upsert(entry("n1", 400.0, 350.0, "", 0));
+        let d = pick(&s, "llama3", NodeRole::Both, &[1, 2, 3])
+            .await
+            .unwrap();
+        assert_eq!(d.node.node_id, "n1");
+    }
+
+    #[tokio::test]
+    async fn capability_filters_apply_only_to_reporting_nodes() {
+        let mut state = fake_state();
+        let mc = cgn_core::config::ModelConfig {
+            min_vram_mb: Some(40_000),
+            require_gpu: Some("h100".into()),
+            ..Default::default()
+        };
+        state.cfg.models.insert("llama3".into(), mc);
+
+        // small: reports an incompatible GPU → filtered.
+        state
+            .nodes
+            .upsert(entry("small", 0.0, 0.0, "NVIDIA A10", 24_000));
+        // legacy: reports nothing → kept (backwards compatible).
+        state.nodes.upsert(entry("legacy", 0.0, 0.0, "", 0));
+        // big: matches both constraints → kept.
+        state
+            .nodes
+            .upsert(entry("big", 0.0, 0.0, "NVIDIA H100 80GB HBM3", 81_000));
+
+        for _ in 0..8 {
+            let d = pick(&state, "llama3", NodeRole::Both, &[1, 2, 3])
+                .await
+                .unwrap();
+            assert_ne!(d.node.node_id, "small");
+        }
+    }
+
+    #[tokio::test]
+    async fn require_gpu_matches_vendor_string() {
+        let mut state = fake_state();
+        let mc = cgn_core::config::ModelConfig {
+            require_gpu: Some("amd".into()),
+            ..Default::default()
+        };
+        state.cfg.models.insert("llama3".into(), mc);
+
+        state
+            .nodes
+            .upsert(entry("nv", 0.0, 0.0, "NVIDIA H100 80GB HBM3", 81_000));
+        state
+            .nodes
+            .upsert(entry("mi", 0.0, 0.0, "AMD Instinct MI300X", 192_000));
+
+        let d = pick(&state, "llama3", NodeRole::Both, &[1, 2, 3])
+            .await
+            .unwrap();
+        assert_eq!(d.node.node_id, "mi");
     }
 }

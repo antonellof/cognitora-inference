@@ -628,11 +628,18 @@ const MAX_DISPATCH_ATTEMPTS: usize = 3;
 /// streaming responses the SSE role chunk is emitted independently).
 /// Mid-stream errors remain terminal — resuming half-generated output
 /// safely requires token-state migration, which is future work.
+///
+/// When the *local* cluster has no eligible node at all (routing itself
+/// failed, not a dispatch to a chosen node) and `[router.federation]` is
+/// enabled, the request is forwarded to the lowest-latency reachable
+/// peer cluster instead of failing. Forwarding targets the peer's gRPC
+/// surface, whose handler only routes locally — so a request crosses at
+/// most one cluster boundary and cannot loop.
 async fn run_to_token_stream(
     state: Arc<SharedState>,
     req: GenerateRequest,
 ) -> cgn_core::Result<
-    impl futures::Stream<Item = Result<cgn_proto::v1::Token, tonic::Status>> + Unpin,
+    futures::stream::BoxStream<'static, Result<cgn_proto::v1::Token, tonic::Status>>,
 > {
     let token_ids =
         routing::prompt::approximate_token_ids(&routing::prompt::join_messages(&req.messages));
@@ -640,8 +647,21 @@ async fn run_to_token_stream(
 
     for attempt in 1..=MAX_DISPATCH_ATTEMPTS {
         match dispatch_once(&state, &req, &token_ids, &exclude).await {
-            Ok(stream) => return Ok(stream),
+            Ok(stream) => return Ok(Box::pin(stream)),
             Err((failed_node, e)) => {
+                // Routing found no local candidate: try peer clusters.
+                if failed_node.is_none() && matches!(e, cgn_core::Error::Unavailable(_)) {
+                    let fed = &state.cfg.router.federation;
+                    if fed.enabled && !fed.peers.is_empty() {
+                        match federate(&state, &req).await {
+                            Ok(stream) => return Ok(stream),
+                            Err(fe) => {
+                                warn!(error = ?fe, "federation fallback failed");
+                            }
+                        }
+                    }
+                    return Err(e);
+                }
                 let retryable = matches!(
                     e,
                     cgn_core::Error::Unavailable(_) | cgn_core::Error::Internal(_)
@@ -661,6 +681,24 @@ async fn run_to_token_stream(
         }
     }
     unreachable!("loop returns or errors within MAX_DISPATCH_ATTEMPTS");
+}
+
+/// Forward the request to the best federation peer and return its token
+/// stream. See [`crate::federation`].
+async fn federate(
+    state: &Arc<SharedState>,
+    req: &GenerateRequest,
+) -> cgn_core::Result<
+    futures::stream::BoxStream<'static, Result<cgn_proto::v1::Token, tonic::Status>>,
+> {
+    let fed = &state.cfg.router.federation;
+    let (peer, mut client) = crate::federation::pick_peer(&fed.peers, &req.model).await?;
+    let stream = crate::federation::forward(&mut client, req.clone()).await?;
+    info!(%peer, model = %req.model, "no local node; request federated to peer cluster");
+    super::metrics::FEDERATION_FORWARDS
+        .with_label_values(&[&req.model, &peer])
+        .inc();
+    Ok(Box::pin(stream))
 }
 
 /// One dispatch attempt: plan → pick → (prefill) → decode. On failure

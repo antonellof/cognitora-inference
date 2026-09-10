@@ -20,9 +20,11 @@
 //! | `cgn_cluster_node_cordoned`        | `node`                          |
 //! | `cgn_cluster_node_queue_depth`     | `node`                          |
 //! | `cgn_cluster_node_power_watts`     | `node`                          |
+//! | `cgn_cluster_node_watt_limit`      | `node`                          |
 //! | `cgn_cluster_node_kv_free_blocks`  | `node`                          |
 //! | `cgn_cluster_node_kv_total_blocks` | `node`                          |
-//! | `cgn_cluster_node_info`            | `node`, `address`, `model`, `role` (always 1) |
+//! | `cgn_cluster_node_vram_total_mb`   | `node`                          |
+//! | `cgn_cluster_node_info`            | `node`, `address`, `model`, `role`, `gpu`, `gpu_vendor` (always 1) |
 //! | `cgn_cluster_nodes_total`          | —                               |
 //! | `cgn_router_prefix_index_digests`  | —                               |
 //!
@@ -88,11 +90,27 @@ static NODE_POWER: LazyLock<GaugeVec> = LazyLock::new(|| {
     )
 });
 
+static NODE_WATT_LIMIT: LazyLock<GaugeVec> = LazyLock::new(|| {
+    float_gauge_vec!(
+        "cgn_cluster_node_watt_limit",
+        "Configured soft power cap per node, watts (0 = uncapped).",
+        &["node"]
+    )
+});
+
+static NODE_VRAM_TOTAL: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    gauge_vec!(
+        "cgn_cluster_node_vram_total_mb",
+        "Total GPU memory across devices per node, MiB (0 when unknown).",
+        &["node"]
+    )
+});
+
 static NODE_INFO: LazyLock<IntGaugeVec> = LazyLock::new(|| {
     gauge_vec!(
         "cgn_cluster_node_info",
         "Static node metadata carried as labels; value is always 1.",
-        &["node", "address", "model", "role"]
+        &["node", "address", "model", "role", "gpu", "gpu_vendor"]
     )
 });
 
@@ -128,6 +146,8 @@ fn refresh(state: &SharedState) {
     NODE_KV_FREE.reset();
     NODE_KV_TOTAL.reset();
     NODE_POWER.reset();
+    NODE_WATT_LIMIT.reset();
+    NODE_VRAM_TOTAL.reset();
     NODE_INFO.reset();
 
     let nodes = state.nodes.snapshot();
@@ -154,12 +174,20 @@ fn refresh(state: &SharedState) {
         NODE_POWER
             .with_label_values(&[id])
             .set(n.power_watts as f64);
+        NODE_WATT_LIMIT
+            .with_label_values(&[id])
+            .set(n.watt_limit as f64);
+        NODE_VRAM_TOTAL
+            .with_label_values(&[id])
+            .set(n.vram_total_mb as i64);
         NODE_INFO
             .with_label_values(&[
                 id,
                 n.address.as_str(),
                 n.model.as_deref().unwrap_or(""),
                 role_str(n.role_enum()),
+                n.gpu_name.as_str(),
+                n.gpu_vendor.as_str(),
             ])
             .set(1);
     }
@@ -176,6 +204,8 @@ pub fn spawn(state: Arc<SharedState>) {
     LazyLock::force(&NODE_KV_FREE);
     LazyLock::force(&NODE_KV_TOTAL);
     LazyLock::force(&NODE_POWER);
+    LazyLock::force(&NODE_WATT_LIMIT);
+    LazyLock::force(&NODE_VRAM_TOTAL);
     LazyLock::force(&NODE_INFO);
 
     tokio::spawn(async move {
@@ -203,6 +233,10 @@ mod tests {
             free_blocks: 900,
             total_blocks: 1000,
             power_watts: watts,
+            watt_limit: 0.0,
+            gpu_name: String::new(),
+            gpu_vendor: String::new(),
+            vram_total_mb: 0,
             cordoned,
             last_heartbeat: std::time::Instant::now(),
         }

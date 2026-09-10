@@ -1,10 +1,11 @@
 //! Power-collection loop that updates `cgn_power_watts{component=...}`
-//! gauges from Redfish + NVML, used by the router's energy-aware score.
+//! gauges from Redfish + NVML + ROCm, used by the router's energy-aware
+//! score.
 
 use std::time::Duration;
 
 use cgn_core::{config::Config, Result};
-use cgn_power::{nvml::Nvml, redfish::Redfish, PowerReader};
+use cgn_power::{nvml::Nvml, redfish::Redfish, rocm::Rocm, PowerReader};
 use tracing::warn;
 
 pub async fn run(cfg: Config) -> Result<()> {
@@ -14,7 +15,7 @@ pub async fn run(cfg: Config) -> Result<()> {
     );
     let gpu_w = cgn_telemetry::gauge!(
         "cgn_power_watts_gpu",
-        "Sum of per-GPU power draw in watts (NVML)"
+        "Sum of per-GPU power draw in watts (NVML on NVIDIA, rocm-smi on AMD)"
     );
 
     let redfish = cfg.metrics.redfish_url.as_ref().and_then(|url| {
@@ -23,6 +24,7 @@ pub async fn run(cfg: Config) -> Result<()> {
         Redfish::new(url, "1", user, pass).ok()
     });
     let nvml = Nvml::new();
+    let rocm = Rocm::new();
 
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     loop {
@@ -37,13 +39,19 @@ pub async fn run(cfg: Config) -> Result<()> {
                 Err(e) => warn!(error=?e, "redfish sample"),
             }
         }
-        match nvml.sample().await {
-            Ok(samples) => {
-                for s in samples {
-                    gpu_w.set(s.watts as i64);
+        // A host realistically has one GPU vendor; the absent vendor's
+        // reader returns an empty sample list, so summing is safe.
+        let mut gpu_total = 0.0;
+        for reader in [&nvml as &dyn PowerReader, &rocm as &dyn PowerReader] {
+            match reader.sample().await {
+                Ok(samples) => {
+                    for s in samples {
+                        gpu_total += s.watts;
+                    }
                 }
+                Err(e) => warn!(reader = reader.name(), error=?e, "power sample"),
             }
-            Err(e) => warn!(error=?e, "nvml sample"),
         }
+        gpu_w.set(gpu_total as i64);
     }
 }

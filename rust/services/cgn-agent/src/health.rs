@@ -27,7 +27,7 @@ pub async fn loop_emit(supervisor: Arc<Supervisor>) -> Result<()> {
         info!("no etcd endpoints configured; running in single-node mode");
         loop {
             let ready = supervisor.engine.ready().await;
-            let _gpu = read_nvml_blocking().unwrap_or_default();
+            let _gpu = read_gpu_blocking().unwrap_or_default();
             debug!(ready, "single-node health snapshot");
             tokio::time::sleep(HEARTBEAT_INTERVAL).await;
         }
@@ -75,7 +75,7 @@ async fn emit_with_lease(supervisor: &Supervisor, endpoints: &[String]) -> Resul
 
     loop {
         let ready = supervisor.engine.ready().await;
-        let gpu = read_nvml_blocking().unwrap_or_default();
+        let gpu = read_gpu_blocking().unwrap_or_default();
         let engine_stats =
             crate::telemetry::scrape(supervisor.engine.name(), &supervisor.engine_cfg.url)
                 .await
@@ -202,6 +202,19 @@ pub(crate) struct GpuSnapshot {
     pub mem_used_pct: f32,
     pub temp_c: f32,
     pub power_watts: f32,
+    /// Marketing name of the first GPU (`"NVIDIA H100 80GB HBM3"`,
+    /// `"AMD Instinct MI300X"`). Empty when unknown.
+    pub gpu_name: String,
+    /// `"nvidia"` / `"amd"` / `""` (unknown).
+    pub gpu_vendor: String,
+    /// Total GPU memory summed across devices, MiB. 0 when unknown.
+    pub vram_total_mb: u64,
+}
+
+/// Vendor-neutral GPU snapshot: NVML first (NVIDIA), then `rocm-smi`
+/// (AMD ROCm). Hosts with neither return `None`.
+pub(crate) fn read_gpu_blocking() -> Option<GpuSnapshot> {
+    read_nvml_blocking().or_else(read_rocm_blocking)
 }
 
 /// NVML handle initialised once per process. Re-initialising the NVML
@@ -217,11 +230,19 @@ pub(crate) fn read_nvml_blocking() -> Option<GpuSnapshot> {
     if count == 0 {
         return None;
     }
-    let mut out = GpuSnapshot::default();
+    let mut out = GpuSnapshot {
+        gpu_vendor: "nvidia".into(),
+        ..Default::default()
+    };
     for i in 0..count {
         let Ok(dev) = nvml.device_by_index(i) else {
             continue;
         };
+        if out.gpu_name.is_empty() {
+            if let Ok(name) = dev.name() {
+                out.gpu_name = name;
+            }
+        }
         if let Ok(u) = dev.utilization_rates() {
             out.util_pct = u.gpu as f32;
         }
@@ -229,6 +250,7 @@ pub(crate) fn read_nvml_blocking() -> Option<GpuSnapshot> {
             if mem.total > 0 {
                 out.mem_used_pct = (mem.used as f64 / mem.total as f64) as f32 * 100.0;
             }
+            out.vram_total_mb += mem.total / (1024 * 1024);
         }
         if let Ok(t) = dev.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu)
         {
@@ -238,6 +260,101 @@ pub(crate) fn read_nvml_blocking() -> Option<GpuSnapshot> {
             out.power_watts += p as f32 / 1000.0;
         }
     }
+    Some(out)
+}
+
+/// Whether `rocm-smi` exists on this host, probed once per process.
+static ROCM_SMI: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// AMD fallback: shell out to `rocm-smi --json` and parse the per-card
+/// object. Field names vary across ROCm releases, so matching is by
+/// tolerant substring rather than exact key.
+pub(crate) fn read_rocm_blocking() -> Option<GpuSnapshot> {
+    let available = *ROCM_SMI.get_or_init(|| {
+        std::process::Command::new("rocm-smi")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    });
+    if !available {
+        return None;
+    }
+    let out = std::process::Command::new("rocm-smi")
+        .args([
+            "--showpower",
+            "--showuse",
+            "--showtemp",
+            "--showmeminfo",
+            "vram",
+            "--showproductname",
+            "--json",
+        ])
+        .output()
+        .ok()?;
+    parse_rocm_smi(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// Parse `rocm-smi --json` output. Public within the crate for tests.
+pub(crate) fn parse_rocm_smi(json: &str) -> Option<GpuSnapshot> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let obj = v.as_object()?;
+    let num = |val: &serde_json::Value| -> Option<f64> {
+        match val {
+            serde_json::Value::Number(n) => n.as_f64(),
+            serde_json::Value::String(s) => s.trim().parse().ok(),
+            _ => None,
+        }
+    };
+    let mut out = GpuSnapshot {
+        gpu_vendor: "amd".into(),
+        ..Default::default()
+    };
+    let mut vram_total_bytes = 0u64;
+    let mut saw_card = false;
+    for (card, fields) in obj {
+        if !card.starts_with("card") {
+            continue; // "system" block etc.
+        }
+        let Some(fields) = fields.as_object() else {
+            continue;
+        };
+        saw_card = true;
+        for (k, val) in fields {
+            let kl = k.to_ascii_lowercase();
+            if kl.contains("power") && kl.contains("(w)") {
+                if let Some(w) = num(val) {
+                    out.power_watts += w as f32;
+                }
+            } else if kl.contains("gpu use") {
+                if let Some(u) = num(val) {
+                    out.util_pct = u as f32;
+                }
+            } else if kl.contains("temperature") && kl.contains("edge") {
+                if let Some(t) = num(val) {
+                    out.temp_c = t as f32;
+                }
+            } else if kl.contains("vram total memory") {
+                if let Some(b) = num(val) {
+                    vram_total_bytes += b as u64;
+                }
+            } else if (kl.contains("card series") || kl.contains("card model"))
+                && out.gpu_name.is_empty()
+            {
+                if let Some(name) = val.as_str() {
+                    if !name.trim().is_empty() && !name.contains("0x") {
+                        out.gpu_name = name.trim().to_string();
+                    }
+                }
+            }
+        }
+    }
+    if !saw_card {
+        return None;
+    }
+    out.vram_total_mb = vram_total_bytes / (1024 * 1024);
     Some(out)
 }
 
@@ -270,6 +387,10 @@ async fn publish_one(
         "free_blocks": engine_stats.free_blocks,
         "total_blocks": engine_stats.total_blocks,
         "power_watts": gpu.power_watts,
+        "watt_limit": supervisor.cfg.agent.watt_limit,
+        "gpu_name": gpu.gpu_name,
+        "gpu_vendor": gpu.gpu_vendor,
+        "vram_total_mb": gpu.vram_total_mb,
         "ready": ready,
         "servable": true,
         "version": env!("CARGO_PKG_VERSION"),
@@ -335,5 +456,42 @@ pub(crate) fn role_to_int(r: &cgn_core::config::NodeRoleCfg) -> i32 {
         Decode => cgn_proto::v1::NodeRole::Decode as i32,
         Prefill => cgn_proto::v1::NodeRole::Prefill as i32,
         Both => cgn_proto::v1::NodeRole::Both as i32,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_rocm_smi_snapshot() {
+        let json = r#"{
+            "card0": {
+                "Average Graphics Package Power (W)": "203.0",
+                "GPU use (%)": "87",
+                "Temperature (Sensor edge) (C)": "62.0",
+                "VRAM Total Memory (B)": "206158430208",
+                "Card series": "AMD Instinct MI300X"
+            },
+            "card1": {
+                "Average Graphics Package Power (W)": "121.5",
+                "VRAM Total Memory (B)": "206158430208"
+            },
+            "system": {"Driver version": "6.3.6"}
+        }"#;
+        let s = parse_rocm_smi(json).expect("parses");
+        assert_eq!(s.gpu_vendor, "amd");
+        assert_eq!(s.gpu_name, "AMD Instinct MI300X");
+        assert!((s.power_watts - 324.5).abs() < 0.01);
+        assert!((s.util_pct - 87.0).abs() < 0.01);
+        assert!((s.temp_c - 62.0).abs() < 0.01);
+        assert_eq!(s.vram_total_mb, 2 * 196_608); // 2 × 192 GiB in MiB
+    }
+
+    #[test]
+    fn rocm_parse_rejects_no_cards() {
+        assert!(parse_rocm_smi(r#"{"system": {}}"#).is_none());
+        assert!(parse_rocm_smi("").is_none());
+        assert!(parse_rocm_smi("nope").is_none());
     }
 }

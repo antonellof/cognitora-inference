@@ -17,13 +17,24 @@
 //! peer's snapshot, picks the best peer cluster (lowest queue depth /
 //! best cache overlap if known), and proxies the OpenAI request unchanged.
 
+use std::time::{Duration, Instant};
+
 use cgn_core::{Error, Result};
 use cgn_proto::v1::{router_client::RouterClient, GenerateRequest};
 use tracing::{debug, warn};
 
+/// Per-peer connect budget. A peer that can't complete a gRPC connect in
+/// this window is a poor place to send a latency-sensitive request.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// Dispatch a request to a federated peer. Returns the chosen peer's
 /// gRPC endpoint and an open client. Caller is responsible for then
 /// streaming the request through that client.
+///
+/// All peers are probed **concurrently** and the reachable peer with the
+/// lowest connect latency wins — connect RTT is a serviceable proxy for
+/// geographic proximity without a dedicated stats RPC. Unreachable peers
+/// are logged and skipped.
 pub async fn pick_peer(
     peers: &[String],
     model: &str,
@@ -31,23 +42,43 @@ pub async fn pick_peer(
     if peers.is_empty() {
         return Err(Error::Unavailable("no federation peers configured".into()));
     }
-    // Probe each peer's `/healthz` (out of band) and pick the first
-    // healthy one. With dozens of peers we'd want a smarter scoring
-    // strategy — geography, latency, cache overlap — tracked as
-    // future work.
-    for peer in peers {
-        match RouterClient::connect(peer.clone()).await {
-            Ok(client) => {
-                debug!(%peer, %model, "federation peer connected");
-                return Ok((peer.clone(), client));
+    let probes = peers.iter().map(|peer| {
+        let peer = peer.clone();
+        async move {
+            let started = Instant::now();
+            match tokio::time::timeout(CONNECT_TIMEOUT, RouterClient::connect(peer.clone())).await {
+                Ok(Ok(client)) => {
+                    let rtt = started.elapsed();
+                    debug!(%peer, rtt_ms = rtt.as_millis() as u64, "federation peer reachable");
+                    Some((rtt, peer, client))
+                }
+                Ok(Err(e)) => {
+                    warn!(%peer, error=?e, "federation peer unreachable");
+                    None
+                }
+                Err(_) => {
+                    warn!(%peer, timeout_ms = CONNECT_TIMEOUT.as_millis() as u64,
+                          "federation peer connect timed out");
+                    None
+                }
             }
-            Err(e) => warn!(%peer, error=?e, "federation peer unreachable"),
         }
+    });
+    let best = futures::future::join_all(probes)
+        .await
+        .into_iter()
+        .flatten()
+        .min_by_key(|(rtt, _, _)| *rtt);
+    match best {
+        Some((rtt, peer, client)) => {
+            debug!(%peer, %model, rtt_ms = rtt.as_millis() as u64, "federation peer selected");
+            Ok((peer, client))
+        }
+        None => Err(Error::Unavailable(format!(
+            "all {} federation peers unreachable",
+            peers.len()
+        ))),
     }
-    Err(Error::Unavailable(format!(
-        "all {} federation peers unreachable",
-        peers.len()
-    )))
 }
 
 /// Forward `req` to `peer` and return its streaming response. Used by

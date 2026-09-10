@@ -247,6 +247,11 @@ pub struct AgentConfig {
     pub node_id: String,
     pub kv_uds: PathBuf,
     pub gpu_index: Option<u32>,
+    /// Soft power cap for this node in watts (`0.0` = uncapped). Published
+    /// in the heartbeat; the router prefers nodes under their cap when at
+    /// least one candidate is, and only routes to over-cap nodes when every
+    /// candidate is over (serving beats brown-out).
+    pub watt_limit: f32,
 
     // Legacy aliases for the engine block. If `[engine]` is unset we fall
     // back to these fields so older configs keep working.
@@ -263,6 +268,7 @@ impl Default for AgentConfig {
             node_id: default_node_id("agent"),
             kv_uds: PathBuf::from("/run/cognitora/kv.sock"),
             gpu_index: None,
+            watt_limit: 0.0,
             vllm_url: None,
             vllm_cmd: None,
         }
@@ -754,6 +760,15 @@ pub struct ModelConfig {
     /// registers the workers in etcd as non-servable, and restarts the
     /// whole pipeline if any member dies.
     pub pipeline: Option<PipelineTopologyConfig>,
+    /// Minimum GPU memory (MiB) a node must report to serve this model.
+    /// Nodes that report no VRAM figure (older agents, CPU boxes running
+    /// llama.cpp) are *not* filtered — the constraint only bites on nodes
+    /// that affirmatively report less.
+    pub min_vram_mb: Option<u64>,
+    /// Case-insensitive substring the node's GPU name or vendor must
+    /// contain (e.g. `"h100"`, `"mi300"`, `"nvidia"`, `"amd"`). Nodes
+    /// that report no GPU identity are not filtered.
+    pub require_gpu: Option<String>,
 }
 impl Default for ModelConfig {
     fn default() -> Self {
@@ -766,6 +781,8 @@ impl Default for ModelConfig {
             extra_args: vec![],
             path: None,
             pipeline: None,
+            min_vram_mb: None,
+            require_gpu: None,
         }
     }
 }

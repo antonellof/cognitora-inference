@@ -247,7 +247,7 @@ impl Agent for AgentSvc {
         )
         .await
         .unwrap_or_default();
-        let gpu = crate::health::read_nvml_blocking().unwrap_or_default();
+        let gpu = crate::health::read_gpu_blocking().unwrap_or_default();
         Ok(Response::new(NodeHealth {
             node_id: self.supervisor.cfg.agent.node_id.clone(),
             ready,
@@ -258,7 +258,7 @@ impl Agent for AgentSvc {
             gpu_mem_used_pct: gpu.mem_used_pct,
             gpu_temp_c: gpu.temp_c,
             rack_watts: gpu.power_watts,
-            rack_watt_limit: 0.0,
+            rack_watt_limit: self.supervisor.cfg.agent.watt_limit,
             last_seen_unix_ms: chrono::Utc::now().timestamp_millis() as u64,
             loaded_models: self.supervisor.cfg.models.keys().cloned().collect(),
             role: crate::health::role_to_int(&self.supervisor.cfg.agent.role),

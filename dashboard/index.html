@@ -116,10 +116,10 @@
 <table id="nodes">
   <caption>Nodes</caption>
   <thead><tr>
-    <th>node</th><th>status</th><th>role</th><th>model</th><th>address</th>
+    <th>node</th><th>status</th><th>role</th><th>model</th><th>gpu</th><th>address</th>
     <th class="num">queue</th><th class="num">kv free / total</th><th class="num">power (W)</th>
   </tr></thead>
-  <tbody><tr><td colspan="8" id="empty">no node data yet — point the endpoint at a cgn-router admin listener (:9091/metrics) or cgn-metrics</td></tr></tbody>
+  <tbody><tr><td colspan="9" id="empty">no node data yet — point the endpoint at a cgn-router admin listener (:9091/metrics) or cgn-metrics</td></tr></tbody>
 </table>
 
 <footer>
@@ -292,7 +292,8 @@ function renderNodes(metrics) {
   };
   const up = byNode("cgn_cluster_node_up"), cord = byNode("cgn_cluster_node_cordoned"),
     queue = byNode("cgn_cluster_node_queue_depth"), power = byNode("cgn_cluster_node_power_watts"),
-    kvFree = byNode("cgn_cluster_node_kv_free_blocks"), kvTotal = byNode("cgn_cluster_node_kv_total_blocks");
+    kvFree = byNode("cgn_cluster_node_kv_free_blocks"), kvTotal = byNode("cgn_cluster_node_kv_total_blocks"),
+    wattLimit = byNode("cgn_cluster_node_watt_limit"), vram = byNode("cgn_cluster_node_vram_total_mb");
 
   const tbody = document.querySelector("#nodes tbody");
   if (!info.length) return;
@@ -307,12 +308,24 @@ function renderNodes(metrics) {
     const kvCell = total > 0
       ? `<span class="bar"><i style="width:${usedPct.toFixed(0)}%"></i></span>${free} / ${total}`
       : "–";
+    // GPU cell: name (or vendor) + VRAM when reported.
+    const vramMb = vram.get(n) || 0;
+    const gpuLabel = s.labels.gpu || s.labels.gpu_vendor || "";
+    const gpuCell = gpuLabel
+      ? esc(gpuLabel) + (vramMb > 0 ? ` <small style="color:var(--muted)">${(vramMb / 1024).toFixed(0)}G</small>` : "")
+      : "–";
+    // Power cell: draw, plus "/ cap" and a warning tint when over cap.
+    const draw = power.get(n) || 0, cap = wattLimit.get(n) || 0;
+    const overCap = cap > 0 && draw >= cap;
+    const powerCell = cap > 0
+      ? `<span style="color:${overCap ? "var(--warn)" : "inherit"}">${draw.toFixed(1)} / ${cap.toFixed(0)}</span>`
+      : draw.toFixed(1);
     tbody.insertAdjacentHTML("beforeend", `<tr>
       <td>${esc(n)}</td><td>${status}</td><td>${esc(s.labels.role)}</td>
-      <td>${esc(s.labels.model) || "–"}</td><td>${esc(s.labels.address)}</td>
+      <td>${esc(s.labels.model) || "–"}</td><td>${gpuCell}</td><td>${esc(s.labels.address)}</td>
       <td class="num">${queue.get(n) ?? 0}</td>
       <td class="num">${kvCell}</td>
-      <td class="num">${(power.get(n) || 0).toFixed(1)}</td>
+      <td class="num">${powerCell}</td>
     </tr>`);
   }
 }

@@ -9,6 +9,8 @@
 //! 3. **NVML (DCGM)** — per-GPU power draw via `nvml-wrapper`. Always read
 //!    when an NVIDIA GPU is present, blended with the chassis number to
 //!    derive `gpu_share`.
+//! 4. **ROCm** — per-GPU power draw via `rocm-smi --showpower --json` on
+//!    AMD hosts. No-op when `rocm-smi` isn't installed.
 //!
 //! `cgn-metrics` polls these readers on a configurable interval and
 //! exports `cgn_power_watts{component=...}` plus derived gauges that the
@@ -18,6 +20,7 @@
 
 pub mod nvml;
 pub mod redfish;
+pub mod rocm;
 
 use async_trait::async_trait;
 use cgn_core::Result;

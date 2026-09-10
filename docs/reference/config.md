@@ -122,6 +122,57 @@ not install them; the recipe's `up.sh` warns when they're missing.
 unset the spawn argv uses the model table key as the Hugging Face repo id; when set,
 it is passed to `--model` as a local directory. vLLM behaves the same way as SGLang for `path`.
 
+#### Capability constraints (heterogeneous fleets)
+
+Per-model hardware constraints for clusters mixing GPU generations or
+vendors. The router filters routing candidates against the GPU identity
+each agent publishes in its heartbeat (NVML on NVIDIA, `rocm-smi` on
+AMD). Nodes that report **no** GPU identity (older agents, CPU boxes)
+are never filtered — the constraint only excludes nodes that
+affirmatively report incompatible hardware.
+
+```toml
+[models."llama3-70b"]
+min_vram_mb = 80000     # only nodes reporting ≥ 80 GB of GPU memory
+require_gpu = "h100"    # case-insensitive substring of GPU name or vendor
+```
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `min_vram_mb` | u64 | unset | Minimum total GPU memory (MiB) a node must report. |
+| `require_gpu` | string | unset | Substring the node's GPU name or vendor must contain (`"h100"`, `"mi300"`, `"nvidia"`, `"amd"`). |
+
+#### `[agent].watt_limit` — soft power cap
+
+```toml
+[agent]
+watt_limit = 700.0   # watts; 0 (default) = uncapped
+```
+
+Published in the heartbeat and mirrored to
+`cgn_cluster_node_watt_limit`. When at least one candidate node is under
+its cap, the router routes only to under-cap nodes; when *every*
+candidate is over, routing proceeds anyway — serving beats browning out
+a request. Combine with the autoscaler's `high_watt_threshold` for
+drain-based enforcement.
+
+#### `[router.federation]` — cross-cluster fallback
+
+```toml
+[router.federation]
+enabled = true
+peers = ["https://us-west.cognitora.example:7070",
+         "https://eu-central.cognitora.example:7070"]
+```
+
+When the local cluster has no eligible node for a request's model, the
+gateway forwards the request to a peer cluster's router over gRPC
+(mTLS). Peers are probed concurrently and the lowest-connect-latency
+reachable peer wins. Forwarding targets the peer's gRPC surface, which
+only routes locally — a request crosses at most one cluster boundary
+and cannot loop. Forwards are counted in
+`cgn_router_federation_forwards_total{model,peer}`.
+
 ### `[models.*.pipeline]` — cgn-infer layer pipeline
 
 With `engine.kind = "cgn_infer"`, a per-model `pipeline` block splits

@@ -33,6 +33,14 @@ pub static CHAT_LATENCY: LazyLock<HistogramVec> = LazyLock::new(|| {
     )
 });
 
+pub static FEDERATION_FORWARDS: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    counter_vec!(
+        "cgn_router_federation_forwards_total",
+        "Requests forwarded to a peer cluster because no local node was eligible.",
+        &["model", "peer"]
+    )
+});
+
 pub static CHAT_TTFT: LazyLock<HistogramVec> = LazyLock::new(|| {
     histogram_vec!(
         "cgn_router_chat_ttft_seconds",
@@ -52,4 +60,5 @@ pub fn warm_up() {
     LazyLock::force(&CHAT_COMPLETION_TOKENS);
     LazyLock::force(&CHAT_LATENCY);
     LazyLock::force(&CHAT_TTFT);
+    LazyLock::force(&FEDERATION_FORWARDS);
 }

@@ -92,6 +92,10 @@ mod tests {
             free_blocks: free,
             total_blocks: total,
             power_watts: watts,
+            watt_limit: 0.0,
+            gpu_name: String::new(),
+            gpu_vendor: String::new(),
+            vram_total_mb: 0,
             cordoned: false,
             last_heartbeat: std::time::Instant::now(),
         }

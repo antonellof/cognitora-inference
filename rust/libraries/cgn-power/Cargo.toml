@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Cognitora: power readers (Redfish + IPMI + NVML)"
+description = "Cognitora: power readers (Redfish + IPMI + NVML + ROCm)"
 
 [dependencies]
 cgn-core    = { workspace = true }

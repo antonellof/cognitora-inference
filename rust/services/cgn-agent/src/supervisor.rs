@@ -115,7 +115,7 @@ impl Supervisor {
         let mut children = Vec::with_capacity(argvs.len());
         for argv in &argvs {
             info!(argv = ?argv, kind = %self.engine.name(), "spawning engine process");
-            children.push(spawn_child(argv)?);
+            children.push(spawn_child(argv, self.cfg.agent.gpu_index)?);
         }
         *self.children.lock() = children;
         Ok(())
@@ -185,7 +185,7 @@ impl Supervisor {
     }
 }
 
-fn spawn_child(argv: &[String]) -> Result<Child> {
+fn spawn_child(argv: &[String], gpu_index: Option<u32>) -> Result<Child> {
     let mut cmd = Command::new(&argv[0]);
     cmd.args(&argv[1..])
         .stdin(Stdio::null())
@@ -195,6 +195,20 @@ fn spawn_child(argv: &[String]) -> Result<Child> {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .kill_on_drop(true);
+    // Pin the engine to the configured GPU. Both env vars are set — CUDA
+    // runtimes read CUDA_VISIBLE_DEVICES, ROCm/HIP reads
+    // HIP_VISIBLE_DEVICES — and each vendor's runtime ignores the other's
+    // variable, so setting both is harmless on any host. Explicit ambient
+    // values are respected: config-level pinning only applies when the
+    // operator hasn't already scoped the agent's environment.
+    if let Some(idx) = gpu_index {
+        if std::env::var_os("CUDA_VISIBLE_DEVICES").is_none() {
+            cmd.env("CUDA_VISIBLE_DEVICES", idx.to_string());
+        }
+        if std::env::var_os("HIP_VISIBLE_DEVICES").is_none() {
+            cmd.env("HIP_VISIBLE_DEVICES", idx.to_string());
+        }
+    }
     cmd.spawn()
         .map_err(|e| Error::Internal(format!("spawn engine: {e}")))
 }
