@@ -99,7 +99,9 @@ WORK=$(mktemp -d)
 PIDS=()
 cleanup() {
   for p in "${PIDS[@]:-}"; do
-    [[ -n "$p" ]] && kill -9 "$p" 2>/dev/null || true
+    if [[ -n "$p" ]]; then
+      kill -9 "$p" 2>/dev/null || true
+    fi
   done
   etcdctl --endpoints="$ETCD_ENDPOINTS" del --prefix /cognitora/nodes/node- >/dev/null 2>&1 || true
   etcdctl --endpoints="$ETCD_ENDPOINTS" del --prefix /cognitora/nodes/agent- >/dev/null 2>&1 || true
@@ -198,7 +200,7 @@ while IFS= read -r line; do
   [[ "$code" == 5* ]] \
     || { cat "$WORK/resp.json"; fail "request $N_LINES: expected 5xx (fake agents unreachable), got $code"; }
   if grep -q 'no live node serving model' "$WORK/resp.json"; then
-    cat "$WORK/router.log" | tail -20
+    tail -20 "$WORK/router.log"
     fail "request $N_LINES: router found no candidates — etcd node discovery broken"
   fi
 done <"$TRACE"
