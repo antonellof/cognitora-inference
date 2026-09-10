@@ -33,7 +33,22 @@ python3 -m http.server 8088 -d dashboard
 
 Opening `index.html` directly from `file://` also works.
 
-The endpoint and poll interval are saved to `localStorage`.
+The endpoint and poll interval are saved to `localStorage`. You can also
+deep-link an endpoint: `http://localhost:8088/?endpoint=http://<router>:9091/metrics`.
+
+## No cluster? Generate mock data
+
+[`mock_metrics.py`](mock_metrics.py) serves a fake — but wire-identical —
+Prometheus endpoint that simulates a 16-node mixed GPU fleet
+(H100 / H200 / A100 / MI300X / L40S / A10) serving five models under a
+waving load, complete with latency/TTFT histograms, KV pressure, power
+draw against soft caps, and the occasional node outage. Stdlib only:
+
+```bash
+python3 dashboard/mock_metrics.py            # :9099/metrics
+python3 -m http.server 8088 -d dashboard
+# open http://localhost:8088/?endpoint=http://localhost:9099/metrics
+```
 
 ## Charts
 

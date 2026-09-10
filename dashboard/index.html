@@ -134,7 +134,10 @@
 const MAX_POINTS = 360; // 30 min at 5 s
 const $ = (id) => document.getElementById(id);
 const endpointEl = $("endpoint");
-endpointEl.value = localStorage.getItem("cgn.endpoint") || "http://localhost:9091/metrics";
+endpointEl.value =
+  new URLSearchParams(location.search).get("endpoint") ||
+  localStorage.getItem("cgn.endpoint") ||
+  "http://localhost:9091/metrics";
 let pollMs = Number(localStorage.getItem("cgn.interval") || 5000);
 $("interval").value = String(pollMs);
 let paused = false;
