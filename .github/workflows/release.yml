@@ -303,3 +303,90 @@ jobs:
             ghcr.io/${{ steps.owner.outputs.lc }}/cognitora:latest
           cache-from: type=gha,scope=cognitora-docker
           cache-to: type=gha,scope=cognitora-docker,mode=max
+
+  # ---------------------------------------------------------------------------
+  # Publish the library crates to crates.io.
+  #
+  # Only the shared libraries are published — the service binaries ship as
+  # release tarballs / the installer, not through cargo install. Crates are
+  # published in dependency order (roots first). `cargo publish` verifies
+  # each crate by building it, so the job needs the same toolchain + protoc
+  # setup as the binary build.
+  #
+  # Requires the `CRATES_IO_TOKEN` repository secret (a crates.io API token
+  # with publish scope). The job is skipped, not failed, when the secret is
+  # absent so forks can still cut releases.
+  # ---------------------------------------------------------------------------
+  publish-crates:
+    name: publish crates
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for crates.io token
+        id: token
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.CRATES_IO_TOKEN }}" ]; then
+            echo "present=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "present=false" >>"$GITHUB_OUTPUT"
+            echo "::warning::CRATES_IO_TOKEN not set — skipping crates.io publish"
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.token.outputs.present == 'true'
+
+      - uses: arduino/setup-protoc@v3
+        if: steps.token.outputs.present == 'true'
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.token.outputs.present == 'true'
+        with:
+          key: publish-crates
+
+      - name: Install build deps
+        if: steps.token.outputs.present == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev clang lld libprotobuf-dev
+
+      - name: Publish library crates (dependency order)
+        if: steps.token.outputs.present == 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Roots first, then everything that depends on them:
+          #   cgn-proto, cgn-core          (no internal deps)
+          #   cgn-tls/telemetry/auth/helm/k8s/power  (→ core)
+          #   cgn-kv                        (→ core + proto)
+          #   cgn-ratelimit                 (→ core + telemetry)
+          CRATES=(
+            cgn-proto cgn-core
+            cgn-tls cgn-telemetry cgn-auth cgn-helm cgn-k8s cgn-power
+            cgn-kv cgn-ratelimit
+          )
+          for crate in "${CRATES[@]}"; do
+            echo "::group::publish $crate"
+            out=$(cargo publish -p "$crate" 2>&1) && rc=0 || rc=$?
+            echo "$out"
+            if [ "$rc" -ne 0 ]; then
+              # Re-runs and partially-published releases are fine: treat
+              # "this version already exists" as success.
+              if echo "$out" | grep -qi "already exists\|already uploaded"; then
+                echo "$crate: version already on crates.io — skipping"
+              else
+                echo "::endgroup::"
+                exit "$rc"
+              fi
+            fi
+            echo "::endgroup::"
+            # crates.io needs a moment to index a new crate before a
+            # dependent crate's verification build can resolve it.
+            sleep 20
+          done
