@@ -15,6 +15,9 @@
 //!   [extra ...]`.
 //! * **mlx** — `python -m mlx_lm.server --model <hf_or_path> --host <h>
 //!   --port <p> [extra ...]` (Apple Silicon only).
+//! * **tensorrt_llm** — `trtllm-serve <model> --host <h> --port <p>
+//!   --tp_size <tp> [--max_seq_len <len>] [extra ...]` (NVIDIA
+//!   TensorRT-LLM's OpenAI-compatible server).
 //! * **cgn_infer** — `cgn-infer serve --model <gguf> --host <h> --port <p>
 //!   [--ctx N] [--threads N] [extra ...]` (Cognitora's first-party engine).
 //! * **openai_compat** — no spawn; caller checks `should_spawn()`.
@@ -32,7 +35,7 @@
 //! | vllm    | decode   | lmcache     | `--kv-transfer-config '{NixlConnector,kv_consumer}'`   |
 //! | vllm    | both     | kvbm        | `--kv-transfer-config '{DynamoConnector(kvbm),kv_both}'`|
 //! | sglang  | both     | hicache     | `--enable-hierarchical-cache --hicache-* ...`          |
-//! | llama_cpp / mlx / cgn_infer / openai_compat | * | only `none` is valid              |
+//! | llama_cpp / mlx / tensorrt_llm / cgn_infer / openai_compat | * | only `none` is valid |
 //!
 //! Combinations not in the table are rejected at render time.
 
@@ -74,12 +77,42 @@ pub fn render_argv(
         EngineKind::Sglang => Ok(render_sglang(cfg, spec)),
         EngineKind::LlamaCpp => render_llama_cpp(cfg, spec),
         EngineKind::Mlx => Ok(render_mlx(cfg, spec)),
+        EngineKind::TensorrtLlm => Ok(render_tensorrt_llm(cfg, spec)),
         EngineKind::CgnInfer => render_cgn_infer(cfg, spec),
         EngineKind::OpenaiCompat => Err(Error::Config(
             "engine.kind = openai_compat does not spawn — caller should check should_spawn()"
                 .into(),
         )),
     }
+}
+
+/// `trtllm-serve` — TensorRT-LLM's OpenAI-compatible HTTP server.
+/// The model argument is the local path when `[models.*].path` is set
+/// (a checkpoint/engine directory) or the HF repo id otherwise.
+fn render_tensorrt_llm(cfg: &EngineConfig, spec: &ModelSpec) -> Vec<String> {
+    let model = spec
+        .path
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| spec.name.clone());
+
+    let mut argv: Vec<String> = vec![
+        cfg.tensorrt_llm.binary.clone(),
+        model,
+        "--host".into(),
+        cfg.tensorrt_llm.host.clone(),
+        "--port".into(),
+        cfg.tensorrt_llm.port.to_string(),
+        "--tp_size".into(),
+        spec.tp.to_string(),
+    ];
+    if let Some(len) = spec.max_model_len {
+        argv.push("--max_seq_len".into());
+        argv.push(len.to_string());
+    }
+    argv.extend(cfg.tensorrt_llm.extra_args.clone());
+    argv.extend(spec.extra_args.clone());
+    argv
 }
 
 fn render_vllm(cfg: &EngineConfig, spec: &ModelSpec, role: NodeRoleCfg) -> Vec<String> {
@@ -371,13 +404,14 @@ fn validate_kv_offload(kind: EngineKind, offload: KvOffload) -> Result<()> {
         return Err(Error::Config(format!(
             "engine.kv_offload = \"{}\" is not supported with engine.kind = \"{}\". \
              Valid pairings: vllm × {{none,nixl,lmcache,kvbm}}, sglang × {{none,nixl,hicache}}, \
-             llama_cpp/mlx/cgn_infer/openai_compat × {{none}}.",
+             llama_cpp/mlx/tensorrt_llm/cgn_infer/openai_compat × {{none}}.",
             offload.as_str(),
             match kind {
                 EngineKind::Vllm => "vllm",
                 EngineKind::Sglang => "sglang",
                 EngineKind::LlamaCpp => "llama_cpp",
                 EngineKind::Mlx => "mlx",
+                EngineKind::TensorrtLlm => "tensorrt_llm",
                 EngineKind::CgnInfer => "cgn_infer",
                 EngineKind::OpenaiCompat => "openai_compat",
             }
@@ -404,9 +438,8 @@ pub(crate) fn vllm_kv_transfer_config(role: NodeRoleCfg, offload: KvOffload) -> 
             r#"{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}"#.to_string()
         }
         (Prefill, Lmcache) => {
-            // Dynamo's pattern: prefill worker stacks LMCache (offload) +
-            // Nixl (handoff to decode). See
-            // .temp/dynamo/docs/integrations/lmcache-integration.md.
+            // Dynamo's pattern: the prefill worker stacks LMCache
+            // (offload) + Nixl (handoff to decode) via a MultiConnector.
             r#"{"kv_connector":"PdConnector","kv_role":"kv_both","kv_connector_extra_config":{"connectors":[{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"},{"kv_connector":"NixlConnector","kv_role":"kv_both"}]}}"#.to_string()
         }
         (Decode, Lmcache) => {
@@ -462,6 +495,7 @@ mod tests {
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
             mlx_lm: Default::default(),
+            tensorrt_llm: Default::default(),
             cgn_infer: Default::default(),
         }
     }
@@ -482,6 +516,7 @@ mod tests {
             },
             llama_cpp: LlamaCppEngineConfig::default(),
             mlx_lm: Default::default(),
+            tensorrt_llm: Default::default(),
             cgn_infer: Default::default(),
         }
     }
@@ -504,6 +539,7 @@ mod tests {
                 extra_args: vec![],
             },
             mlx_lm: Default::default(),
+            tensorrt_llm: Default::default(),
             cgn_infer: Default::default(),
         }
     }
@@ -517,6 +553,7 @@ mod tests {
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
             mlx_lm: MlxLmEngineConfig::default(),
+            tensorrt_llm: Default::default(),
             cgn_infer: Default::default(),
         }
     }
@@ -530,6 +567,7 @@ mod tests {
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
             mlx_lm: Default::default(),
+            tensorrt_llm: Default::default(),
             cgn_infer: CgnInferEngineConfig {
                 binary_path: "cgn-infer".into(),
                 host: "127.0.0.1".into(),
@@ -836,6 +874,69 @@ mod tests {
         assert!(argv.contains(&"/models/my-mlx".to_string()));
     }
 
+    fn trt_cfg() -> EngineConfig {
+        EngineConfig {
+            kind: EngineKind::TensorrtLlm,
+            url: "http://127.0.0.1:8000".into(),
+            kv_offload: KvOffload::None,
+            vllm: VllmEngineConfig::default(),
+            sglang: SglangEngineConfig::default(),
+            llama_cpp: LlamaCppEngineConfig::default(),
+            mlx_lm: Default::default(),
+            tensorrt_llm: cgn_core::config::TensorrtLlmEngineConfig {
+                binary: "trtllm-serve".into(),
+                host: "127.0.0.1".into(),
+                port: 8000,
+                extra_args: vec!["--backend".into(), "pytorch".into()],
+            },
+            cgn_infer: Default::default(),
+        }
+    }
+
+    #[test]
+    fn renders_tensorrt_llm_command() {
+        let argv = render_argv(
+            &trt_cfg(),
+            &spec("meta-llama/Llama-3.1-8B-Instruct", None),
+            NodeRoleCfg::Both,
+            None,
+        )
+        .unwrap();
+        assert_eq!(argv[0], "trtllm-serve");
+        assert_eq!(argv[1], "meta-llama/Llama-3.1-8B-Instruct");
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--host" && w[1] == "127.0.0.1"));
+        assert!(argv.windows(2).any(|w| w[0] == "--port" && w[1] == "8000"));
+        assert!(argv.windows(2).any(|w| w[0] == "--tp_size" && w[1] == "1"));
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--max_seq_len" && w[1] == "2048"));
+        assert!(argv.contains(&"--backend".to_string()));
+    }
+
+    #[test]
+    fn tensorrt_llm_uses_local_path_when_present() {
+        let argv = render_argv(
+            &trt_cfg(),
+            &spec("llama3", Some("/models/llama3-trt")),
+            NodeRoleCfg::Both,
+            None,
+        )
+        .unwrap();
+        assert_eq!(argv[1], "/models/llama3-trt");
+    }
+
+    #[test]
+    fn rejects_non_none_kv_offload_on_tensorrt_llm() {
+        let mut cfg = trt_cfg();
+        cfg.kv_offload = KvOffload::Nixl;
+        let err = render_argv(&cfg, &spec("m", None), NodeRoleCfg::Both, None).unwrap_err();
+        let msg = format!("{err:?}");
+        assert!(msg.contains("kv_offload"));
+        assert!(msg.contains("tensorrt_llm"));
+    }
+
     #[test]
     fn renders_cgn_infer_command() {
         let argv = render_argv(
@@ -893,11 +994,14 @@ mod tests {
 
     #[test]
     fn pipeline_renders_coordinator_argv() {
-        let argv = render_argv(&cgn_infer_cfg(), &pipeline_spec(), NodeRoleCfg::Both, None).unwrap();
+        let argv =
+            render_argv(&cgn_infer_cfg(), &pipeline_spec(), NodeRoleCfg::Both, None).unwrap();
         assert!(argv
             .windows(2)
             .any(|w| w[0] == "--role" && w[1] == "coordinator"));
-        assert!(argv.windows(2).any(|w| w[0] == "--layers" && w[1] == "0:11"));
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--layers" && w[1] == "0:11"));
         let i = argv.iter().position(|a| a == "--workers").unwrap();
         // Explicit endpoint wins; otherwise http://<listen>.
         assert_eq!(argv[i + 1], "http://127.0.0.1:9101,https://worker-b:9101");
@@ -926,12 +1030,15 @@ mod tests {
 
     #[test]
     fn no_pipeline_means_no_worker_argvs() {
-        let argvs =
-            render_pipeline_workers(&cgn_infer_cfg(), &spec("m", Some("/m.gguf"))).unwrap();
+        let argvs = render_pipeline_workers(&cgn_infer_cfg(), &spec("m", Some("/m.gguf"))).unwrap();
         assert!(argvs.is_empty());
-        let argv =
-            render_argv(&cgn_infer_cfg(), &spec("m", Some("/m.gguf")), NodeRoleCfg::Both, None)
-                .unwrap();
+        let argv = render_argv(
+            &cgn_infer_cfg(),
+            &spec("m", Some("/m.gguf")),
+            NodeRoleCfg::Both,
+            None,
+        )
+        .unwrap();
         assert!(!argv.iter().any(|a| a == "--role"));
     }
 
@@ -1007,6 +1114,7 @@ mod tests {
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
             mlx_lm: MlxLmEngineConfig::default(),
+            tensorrt_llm: Default::default(),
             cgn_infer: Default::default(),
         };
         assert!(!should_spawn(&cfg));

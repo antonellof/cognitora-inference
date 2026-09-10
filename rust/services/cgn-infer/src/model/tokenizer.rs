@@ -18,10 +18,7 @@ use cgn_core::{Error, Result};
 use tokenizers::Tokenizer;
 use tracing::{debug, info};
 
-pub fn tokenizer_from_gguf(
-    content: &gguf_file::Content,
-    gguf_path: &Path,
-) -> Result<Tokenizer> {
+pub fn tokenizer_from_gguf(content: &gguf_file::Content, gguf_path: &Path) -> Result<Tokenizer> {
     // Sidecar tokenizer.json wins if present.
     let sidecar = gguf_path.with_file_name("tokenizer.json");
     if sidecar.is_file() {

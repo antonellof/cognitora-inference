@@ -56,16 +56,33 @@ pub async fn completions(
         let state_clone = state.clone();
         let metric_model = model.clone();
         let started_for_metric = started;
+        let casc = Cascade::from_config(&state.cfg, &model, &[]);
         tokio::spawn(async move {
-            let outcome = stream_run(
-                state_clone,
-                proto_req,
-                tx.clone(),
-                id_for_task,
-                model_for_task,
-                created,
-            )
-            .await;
+            let outcome = match casc {
+                Some(c) => {
+                    stream_run_cascade(
+                        state_clone,
+                        proto_req,
+                        c,
+                        tx.clone(),
+                        id_for_task,
+                        model_for_task,
+                        created,
+                    )
+                    .await
+                }
+                None => {
+                    stream_run(
+                        state_clone,
+                        proto_req,
+                        tx.clone(),
+                        id_for_task,
+                        model_for_task,
+                        created,
+                    )
+                    .await
+                }
+            };
             let status = if outcome.is_ok() { "200" } else { "5xx" };
             CHAT_REQUESTS
                 .with_label_values(&[&metric_model, status])
@@ -81,10 +98,8 @@ pub async fn completions(
         return sse::into_response(stream);
     }
 
-    // Cascade kicks in only on the buffered path (we need a complete
-    // response before we can read its mean logprob and decide whether
-    // to escalate). Streaming requests bypass the cascade — incremental
-    // logprob gating on streaming responses is tracked as future work.
+    // Buffered path: the cascade evaluates the complete response's
+    // confidence before deciding whether to escalate.
     let casc = Cascade::from_config(&state.cfg, &model, &[]);
     let result = match casc {
         Some(c) => buffered_with_cascade(state.clone(), proto_req, c).await,
@@ -150,11 +165,7 @@ async fn buffered_with_cascade(
             async move {
                 match buffered_run(state, step_proto).await {
                     Ok((text, n, finish)) => StepOutcome {
-                        // Without engine-side logprobs, approximate with a
-                        // length-based heuristic: longer responses imply
-                        // higher confidence. Real impl plugs in the engine's
-                        // mean-logprob output once exposed.
-                        logprob: -1.0 / ((n as f32).max(1.0)).ln().max(0.5),
+                        logprob: heuristic_logprob(n),
                         text,
                         tokens: n,
                         finish,
@@ -225,6 +236,124 @@ fn build_proto_request(r: &ChatRequest) -> GenerateRequest {
     }
 }
 
+/// Without engine-side logprobs, approximate confidence with a
+/// length-based heuristic: longer responses imply higher confidence.
+/// Real impl plugs in the engine's mean-logprob output once exposed.
+fn heuristic_logprob(tokens: u32) -> f32 {
+    -1.0 / ((tokens as f32).max(1.0)).ln().max(0.5)
+}
+
+/// Build one SSE chunk JSON string.
+fn chunk_json(
+    id: &str,
+    created: i64,
+    model: &str,
+    role: Option<&str>,
+    content: Option<&str>,
+    finish: Option<&str>,
+) -> String {
+    let chunk = ChatChunk {
+        id: id.to_string(),
+        object: "chat.completion.chunk",
+        created,
+        model: model.to_string(),
+        choices: vec![ChatChunkChoice {
+            index: 0,
+            delta: ChatDelta {
+                role: role.map(str::to_string),
+                content: content.map(str::to_string),
+            },
+            finish_reason: finish.map(str::to_string),
+        }],
+    };
+    serde_json::to_string(&chunk).unwrap()
+}
+
+/// Streaming path with a model cascade (SLM → … → LLM).
+///
+/// Steps before the last are executed *buffered* — confidence gating
+/// needs the complete output — and a passing step's text is emitted as
+/// a single content chunk. If every early step escalates, the final
+/// model streams live token-by-token, so the worst case degrades to
+/// exactly the non-cascade streaming behavior (plus the SLM detour).
+async fn stream_run_cascade(
+    state: Arc<SharedState>,
+    proto: GenerateRequest,
+    casc: Cascade,
+    tx: mpsc::Sender<String>,
+    id: String,
+    model: String,
+    created: i64,
+) -> cgn_core::Result<()> {
+    if casc.steps.is_empty() {
+        return stream_run(state, proto, tx, id, model, created).await;
+    }
+    // Role chunk first, tagged with the originally requested model —
+    // per-step model substitution is an internal routing detail.
+    let _ = tx
+        .send(chunk_json(
+            &id,
+            created,
+            &model,
+            Some("assistant"),
+            None,
+            None,
+        ))
+        .await;
+
+    let n = casc.steps.len();
+    for (i, step) in casc.steps.iter().enumerate() {
+        let mut step_proto = proto.clone();
+        step_proto.model = step.clone();
+
+        if i + 1 == n {
+            // Final step: stream live.
+            info!(step = %step, "cascade streaming final step");
+            return stream_tokens(state, step_proto, tx, id, model, created).await;
+        }
+
+        match buffered_run(state.clone(), step_proto).await {
+            Ok((text, tokens, finish)) => {
+                let outcome = StepOutcome {
+                    logprob: heuristic_logprob(tokens),
+                    text,
+                    tokens,
+                    finish,
+                };
+                if !casc.should_escalate(&outcome) {
+                    info!(step = %step, tokens, "cascade streaming: early step accepted");
+                    let _ = tx
+                        .send(chunk_json(
+                            &id,
+                            created,
+                            &model,
+                            None,
+                            Some(&outcome.text),
+                            None,
+                        ))
+                        .await;
+                    let _ = tx
+                        .send(chunk_json(
+                            &id,
+                            created,
+                            &model,
+                            None,
+                            None,
+                            Some(&outcome.finish),
+                        ))
+                        .await;
+                    return Ok(());
+                }
+                tracing::debug!(step = %step, logprob = outcome.logprob, "cascade escalating");
+            }
+            Err(e) => {
+                warn!(step = %step, error=?e, "cascade step failed; escalating");
+            }
+        }
+    }
+    unreachable!("loop returns on the final step");
+}
+
 /// Streaming path: forward token deltas as `data: {...chunk...}\n\n`.
 async fn stream_run(
     state: Arc<SharedState>,
@@ -235,22 +364,29 @@ async fn stream_run(
     created: i64,
 ) -> cgn_core::Result<()> {
     // First chunk announces the role.
-    let first = ChatChunk {
-        id: id.clone(),
-        object: "chat.completion.chunk",
-        created,
-        model: model.clone(),
-        choices: vec![ChatChunkChoice {
-            index: 0,
-            delta: ChatDelta {
-                role: Some("assistant".into()),
-                content: None,
-            },
-            finish_reason: None,
-        }],
-    };
-    let _ = tx.send(serde_json::to_string(&first).unwrap()).await;
+    let _ = tx
+        .send(chunk_json(
+            &id,
+            created,
+            &model,
+            Some("assistant"),
+            None,
+            None,
+        ))
+        .await;
+    stream_tokens(state, proto, tx, id, model, created).await
+}
 
+/// Pump engine tokens into SSE chunks. Assumes the role chunk has
+/// already been sent.
+async fn stream_tokens(
+    state: Arc<SharedState>,
+    proto: GenerateRequest,
+    tx: mpsc::Sender<String>,
+    id: String,
+    model: String,
+    created: i64,
+) -> cgn_core::Result<()> {
     let mut stream = run_to_token_stream(state, proto).await?;
     while let Some(item) = stream.next().await {
         match item {
@@ -332,19 +468,72 @@ async fn buffered_run(
     Ok((text, count, finish))
 }
 
+/// Maximum dispatch attempts per request. The first failure excludes
+/// the failed node and re-picks; a second failure gives up (small
+/// clusters run out of alternatives quickly and the client's own retry
+/// budget is usually tighter than ours).
+const MAX_DISPATCH_ATTEMPTS: usize = 3;
+
 /// Drive the routing pipeline and return a stream of tokens. Currently the
 /// router talks to the agent over gRPC; this helper hides that detail so
 /// the gateway handlers are pure HTTP code.
+///
+/// Dispatch failures (agent unreachable, gRPC connect/setup error) are
+/// retried against the next-best node with the failed node excluded, up
+/// to [`MAX_DISPATCH_ATTEMPTS`]. Retries happen strictly *before* any
+/// token has been produced, so they are invisible to the client (for
+/// streaming responses the SSE role chunk is emitted independently).
+/// Mid-stream errors remain terminal — resuming half-generated output
+/// safely requires token-state migration, which is future work.
 async fn run_to_token_stream(
     state: Arc<SharedState>,
     req: GenerateRequest,
 ) -> cgn_core::Result<
     impl futures::Stream<Item = Result<cgn_proto::v1::Token, tonic::Status>> + Unpin,
 > {
+    let token_ids = approximate_token_ids(&join_messages(&req.messages));
+    let mut exclude: Vec<String> = Vec::new();
+
+    for attempt in 1..=MAX_DISPATCH_ATTEMPTS {
+        match dispatch_once(&state, &req, &token_ids, &exclude).await {
+            Ok(stream) => return Ok(stream),
+            Err((failed_node, e)) => {
+                let retryable = matches!(
+                    e,
+                    cgn_core::Error::Unavailable(_) | cgn_core::Error::Internal(_)
+                ) && failed_node.is_some();
+                if !retryable || attempt == MAX_DISPATCH_ATTEMPTS {
+                    return Err(e);
+                }
+                let node = failed_node.expect("checked above");
+                warn!(
+                    %node,
+                    attempt,
+                    error = ?e,
+                    "dispatch failed; retrying on next-best node"
+                );
+                exclude.push(node);
+            }
+        }
+    }
+    unreachable!("loop returns or errors within MAX_DISPATCH_ATTEMPTS");
+}
+
+/// One dispatch attempt: plan → pick → (prefill) → decode. On failure
+/// returns the decode node id (when one was chosen) so the caller can
+/// exclude it and retry.
+async fn dispatch_once(
+    state: &Arc<SharedState>,
+    req: &GenerateRequest,
+    token_ids: &[u32],
+    exclude: &[String],
+) -> Result<
+    impl futures::Stream<Item = Result<cgn_proto::v1::Token, tonic::Status>> + Unpin,
+    (Option<String>, cgn_core::Error),
+> {
     use crate::disagg::{self, Plan};
     use cgn_proto::v1::AgentGenerateRequest;
 
-    let token_ids = approximate_token_ids(&join_messages(&req.messages));
     let prompt_tokens = token_ids.len() as u32;
 
     // Disagg plan: maybe split into (prefill, decode) or stay colocate.
@@ -357,16 +546,25 @@ async fn run_to_token_stream(
 
     let (prefill_decision, decode_decision) = match plan {
         Plan::Colocate => {
-            let d = routing::pick(&state, &req.model, NodeRole::Both, &token_ids).await?;
+            let d = routing::pick_excluding(state, &req.model, NodeRole::Both, token_ids, exclude)
+                .await
+                .map_err(|e| (None, e))?;
             (d.clone(), d)
         }
         Plan::Split {
             prefill_role,
             decode_role,
         } => {
-            let (p, d) =
-                routing::pick_pair(&state, &req.model, prefill_role, decode_role, &token_ids)
-                    .await?;
+            let (p, d) = routing::pick_pair(
+                state,
+                &req.model,
+                prefill_role,
+                decode_role,
+                token_ids,
+                exclude,
+            )
+            .await
+            .map_err(|e| (None, e))?;
             info!(
                 prefill = %p.node.node_id,
                 decode  = %d.node.node_id,
@@ -383,10 +581,12 @@ async fn run_to_token_stream(
         "openai → routing decision"
     );
 
+    let decode_node_id = decode_decision.node.node_id.clone();
+
     // Phase 1: prefill (only when split *and* prefill node ≠ decode node).
     let prefill_blocks: Vec<Vec<u8>> =
         if prefill_decision.node.node_id != decode_decision.node.node_id {
-            run_prefill(state.clone(), &prefill_decision.node.address, &req)
+            run_prefill(state.clone(), &prefill_decision.node.address, req)
                 .await
                 .unwrap_or_default()
         } else {
@@ -395,29 +595,38 @@ async fn run_to_token_stream(
 
     // Phase 2: decode. Pass the prefill block list so the engine can
     // skip the first forward pass.
-    let mut client = state.connect_agent(&decode_decision.node.address).await?;
+    let mut client = state
+        .connect_agent(&decode_decision.node.address)
+        .await
+        .map_err(|e| (Some(decode_node_id.clone()), e))?;
 
     let agent_req = AgentGenerateRequest {
         id: uuid::Uuid::new_v4().to_string(),
-        model: req.model,
-        messages: req.messages,
-        params: req.params,
+        model: req.model.clone(),
+        messages: req.messages.clone(),
+        params: req.params.clone(),
         prefill_only: false,
         decode_only: !prefill_blocks.is_empty(),
         blocks: prefill_blocks,
-        traceparent: req.traceparent,
-        tracestate: req.tracestate,
+        traceparent: req.traceparent.clone(),
+        tracestate: req.tracestate.clone(),
     };
     let req_stream = futures::stream::iter(vec![agent_req]);
     let response = client
         .generate(tonic::Request::new(req_stream))
         .await
-        .map_err(|s| cgn_core::Error::Internal(format!("agent generate: {s}")))?
+        .map_err(|s| {
+            (
+                Some(decode_node_id.clone()),
+                cgn_core::Error::Internal(format!("agent generate: {s}")),
+            )
+        })?
         .into_inner();
 
     // Optimistic prefix announcement: both the prefill and decode nodes
     // end up holding this prompt's prefix KV, so record them (TTL-bounded)
-    // for KV-aware routing of follow-up turns.
+    // for KV-aware routing of follow-up turns. Only after a successful
+    // dispatch — failed nodes must not accrue prefix claims.
     state
         .prefix
         .insert_many(&decode_decision.digests, &decode_decision.node.node_id);

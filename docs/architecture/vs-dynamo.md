@@ -49,10 +49,12 @@ not the internal module names of either project.
 | KV-aware prefix routing | yes | yes |
 | Hashing scheme | **Sequence-chained BLAKE3** — each chunk's hash covers all preceding tokens, so identical chunks at different positions never collide | RadixTree of chained block hashes |
 | Scoring metric | **Longest-prefix overlap** + `load` + `power` + `capacity`, weights live in etcd, hot-reloaded via `arc_swap` | Overlap + load |
-| Power / energy term | yes (Redfish + IPMI + DCGM) | no |
+| Power / energy term | yes (Redfish + NVML; IPMI/DCGM planned) | no |
+| Load / capacity signals | live engine telemetry — vLLM/SGLang `/metrics` queue depth + KV occupancy scraped into the heartbeat | engine KV events + forward-pass metrics |
 | SLO / deadline propagation | yes (`cgn-router::deadline`) | yes (Planner SLA targets) |
 | Admission control | per-(model, role) inflight counters; queue caps; rate limiting | similar |
-| Cascade (SLM → Mid → LLM) | yes (logprob gating) | partial |
+| Dispatch retry / failover | pre-token retry against next-best node (failed node excluded) | in-flight request migration |
+| Cascade (SLM → Mid → LLM) | yes (confidence gating, buffered **and** streaming) | — |
 
 ### Engines
 
@@ -60,7 +62,7 @@ not the internal module names of either project.
 |--------|-----------|--------|
 | vLLM | first-class | first-class |
 | SGLang | first-class | first-class |
-| TensorRT-LLM | thin driver via the same `Engine` trait — community-supported | first-class |
+| TensorRT-LLM | first-class spawn driver (`trtllm-serve`, `kind = "tensorrt_llm"`) | first-class |
 | llama.cpp (CPU + GPU offload) | first-class | not supported |
 | OpenAI-compatible (Ollama, hosted, sidecars) | first-class (`engine.kind = "openai_compat"`) | not supported |
 | Mixing engines in one cluster | yes (router routes by `model`, not engine) | partial |
@@ -101,9 +103,9 @@ sits above all of them**.
 | Concern | Cognitora | Dynamo |
 |---------|-----------|--------|
 | Runtime artefact | Six single-file binaries — no Python control plane, JVM, or operator runtime | Rust core + Python frontend / extensibility |
-| Service discovery | etcd (optional) + gossip fallback | etcd or NATS (KV routing requires NATS) |
-| Coordination plane | etcd only — `nodes`, `routing/policy` keys | etcd + NATS — KV events, prefix coordination |
-| External hard dependencies | etcd | etcd + NATS (when KV routing on) |
+| Service discovery | etcd (optional; single-node needs nothing — gossip fallback planned) | K8s-native, etcd, or file backends (etcd/NATS optional as of 1.x) |
+| Coordination plane | etcd only — `nodes`, `routing/policy` keys | pluggable planes (TCP/NATS request, ZMQ/NATS events) |
+| External hard dependencies | etcd (multi-node only) | none on Kubernetes; etcd/NATS on Slurm/bare-metal paths |
 | Kubernetes | optional Helm chart (`deploy/kubernetes/helm/cognitora`) | first-class operator + CRDs |
 | Bare metal | first-class systemd units (`deploy/systemd/`) | not the focus |
 | Cloud Terraform | `deploy/terraform/{aws,gcp,azure,hetzner}` | not shipped |
@@ -114,12 +116,12 @@ sits above all of them**.
 
 | Capability | Cognitora | Dynamo |
 |------------|-----------|--------|
-| SLA / TCO-driven autoscaler | `cgn-operator` + energy-aware admission | Planner |
+| Autoscaler | closed loop — router writes energy-aware drain hints, `cgn-operator` cordons / restores capacity | Planner (SLA/TCO-driven, predictive) |
 | Workload simulator | not yet | AIConfigurator (search 10K configs) |
 | Topology-aware gang scheduling | basic (cgn-operator + node selectors) | Grove (NVL72-aware) |
 | Federation (cross-cluster) | `cgn-router::federation` + `cgn-kvcached` QUIC peer fetch | not shipped |
 | Multi-tenancy | OIDC SSO + group → scope mapping; in-process and Redis rate-limit | similar |
-| Energy / power telemetry | yes (Redfish + IPMI + DCGM) | no |
+| Energy / power telemetry | yes (Redfish + NVML; IPMI/DCGM planned) | no |
 
 ### Modalities
 
@@ -172,9 +174,9 @@ Differentiators where Cognitora is currently ahead:
 5. **Cross-cluster federation.** `cgn-router::federation` forwards
    across clusters; `cgn-kvcached` peers across QUIC. Multi-region
    inference doesn't need a Kubernetes-of-Kubernetes.
-6. **Energy-aware admission.** `cgn-power` reads Redfish + IPMI +
-   DCGM and feeds into the router scoring weight; admission can drain
-   nodes that hit thermal or power caps.
+6. **Energy-aware admission.** `cgn-power` reads Redfish + NVML and
+   feeds into the router scoring weight; the autoscaler drains nodes
+   that hit thermal or power caps and the operator closes the loop.
 7. **Multi-model SLM → LLM cascade.** `cascade::Cascade::run` runs
    the cheap model first and only escalates when the log-probability
    of the cheap answer falls below threshold.

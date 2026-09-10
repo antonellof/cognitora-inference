@@ -131,6 +131,15 @@ pub async fn run_etcd_watcher(
             match ev.event_type() {
                 EventType::Put => {
                     if let Ok(entry) = serde_json::from_slice::<super::NodeEntry>(kv.value()) {
+                        // KV-cache pressure: when the engine reports < 5%
+                        // free blocks it is LRU-evicting, so our older
+                        // optimistic prefix claims for this node are the
+                        // ones most likely gone. Prune the stale half.
+                        if entry.total_blocks > 0
+                            && (entry.free_blocks as f32 / entry.total_blocks as f32) < 0.05
+                        {
+                            prefix.forget_node_stale(&entry.node_id, prefix.ttl() / 2);
+                        }
                         nodes.upsert(entry);
                     } else {
                         tracing::warn!(key = %kv.key_str().unwrap_or("?"), "bad node entry");

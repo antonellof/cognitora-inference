@@ -72,9 +72,22 @@ async fn emit_with_lease(supervisor: &Supervisor, endpoints: &[String]) -> Resul
     loop {
         let ready = supervisor.engine.ready().await;
         let gpu = read_nvml_blocking().unwrap_or_default();
-        debug!(ready, ?gpu, "health snapshot");
+        let engine_stats =
+            crate::telemetry::scrape(supervisor.engine.name(), &supervisor.engine_cfg.url)
+                .await
+                .unwrap_or_default();
+        debug!(ready, ?gpu, ?engine_stats, "health snapshot");
 
-        if let Err(e) = publish_one(&mut client, supervisor, lease_id, ready, &gpu).await {
+        if let Err(e) = publish_one(
+            &mut client,
+            supervisor,
+            lease_id,
+            ready,
+            &gpu,
+            &engine_stats,
+        )
+        .await
+        {
             warn!(error=?e, "publish failed; will retry");
         }
 
@@ -96,14 +109,14 @@ async fn emit_with_lease(supervisor: &Supervisor, endpoints: &[String]) -> Resul
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct GpuSnapshot {
+pub(crate) struct GpuSnapshot {
     pub util_pct: f32,
     pub mem_used_pct: f32,
     pub temp_c: f32,
     pub power_watts: f32,
 }
 
-fn read_nvml_blocking() -> Option<GpuSnapshot> {
+pub(crate) fn read_nvml_blocking() -> Option<GpuSnapshot> {
     let nvml = nvml_wrapper::Nvml::init().ok()?;
     let count = nvml.device_count().ok()?;
     if count == 0 {
@@ -141,6 +154,7 @@ async fn publish_one(
     lease_id: i64,
     ready: bool,
     gpu: &GpuSnapshot,
+    engine_stats: &crate::telemetry::EngineStats,
 ) -> Result<()> {
     use cgn_core::Error;
     let scheme = if supervisor.cfg.security.require_mtls {
@@ -154,9 +168,12 @@ async fn publish_one(
         "role":    role_to_int(&supervisor.cfg.agent.role),
         "gpu_index": supervisor.cfg.agent.gpu_index,
         "model": supervisor.cfg.models.keys().next().cloned(),
-        "queue_depth": 0u32,
-        "free_blocks": 0u32,
-        "total_blocks": 0u32,
+        // Real engine telemetry (vLLM / SGLang /metrics). Engines without
+        // a Prometheus endpoint report zeros — the router treats
+        // total_blocks == 0 as "capacity unknown".
+        "queue_depth": engine_stats.queue_depth,
+        "free_blocks": engine_stats.free_blocks,
+        "total_blocks": engine_stats.total_blocks,
         "power_watts": gpu.power_watts,
         "ready": ready,
         "servable": true,
@@ -217,7 +234,7 @@ async fn publish_pipeline_workers(
     Ok(())
 }
 
-fn role_to_int(r: &cgn_core::config::NodeRoleCfg) -> i32 {
+pub(crate) fn role_to_int(r: &cgn_core::config::NodeRoleCfg) -> i32 {
     use cgn_core::config::NodeRoleCfg::*;
     match r {
         Decode => cgn_proto::v1::NodeRole::Decode as i32,

@@ -363,7 +363,8 @@ impl QLlama {
         // RoPE tables over the full training context (candle's
         // quantized_llama caps these at 4096 which silently limits
         // long-context models; we size them from the header).
-        let (cos, sin) = precompute_freqs(cfg.rope_dim, cfg.rope_freq_base, cfg.context_length, device)?;
+        let (cos, sin) =
+            precompute_freqs(cfg.rope_dim, cfg.rope_freq_base, cfg.context_length, device)?;
         let neg_inf = Tensor::new(f32::NEG_INFINITY, device).map_err(ce)?;
 
         let embed = if parts.embedding {
@@ -392,9 +393,8 @@ impl QLlama {
         for idx in range.start..range.end {
             let p = format!("blk.{idx}");
             let proj = |reader: &mut R, name: &str| -> Result<QkvProj> {
-                let weight =
-                    QMatMul::from_qtensor(tensor(reader, &format!("{p}.{name}.weight"))?)
-                        .map_err(ce)?;
+                let weight = QMatMul::from_qtensor(tensor(reader, &format!("{p}.{name}.weight"))?)
+                    .map_err(ce)?;
                 let bias = if cfg.qkv_bias && name != "attn_output" {
                     Some(
                         tensor(reader, &format!("{p}.{name}.bias"))?
@@ -411,12 +411,16 @@ impl QLlama {
             let wv = proj(reader, "attn_v")?;
             let wo = QMatMul::from_qtensor(tensor(reader, &format!("{p}.attn_output.weight"))?)
                 .map_err(ce)?;
-            let attn_norm =
-                RmsNorm::from_qtensor(tensor(reader, &format!("{p}.attn_norm.weight"))?, cfg.rms_eps)
-                    .map_err(ce)?;
-            let ffn_norm =
-                RmsNorm::from_qtensor(tensor(reader, &format!("{p}.ffn_norm.weight"))?, cfg.rms_eps)
-                    .map_err(ce)?;
+            let attn_norm = RmsNorm::from_qtensor(
+                tensor(reader, &format!("{p}.attn_norm.weight"))?,
+                cfg.rms_eps,
+            )
+            .map_err(ce)?;
+            let ffn_norm = RmsNorm::from_qtensor(
+                tensor(reader, &format!("{p}.ffn_norm.weight"))?,
+                cfg.rms_eps,
+            )
+            .map_err(ce)?;
             let w_gate = QMatMul::from_qtensor(tensor(reader, &format!("{p}.ffn_gate.weight"))?)
                 .map_err(ce)?;
             let w_down = QMatMul::from_qtensor(tensor(reader, &format!("{p}.ffn_down.weight"))?)
@@ -460,9 +464,7 @@ impl QLlama {
 
     /// Token ids → embeddings, shape `(1, t, embd)`.
     pub fn embed_tokens(&self, tokens: &[u32]) -> Result<Tensor> {
-        let embed = self
-            .embed
-            .ok_or_embed()?;
+        let embed = self.embed.ok_or_embed()?;
         let x = Tensor::new(tokens, &self.device)
             .and_then(|t| t.unsqueeze(0))
             .map_err(internal("embed input"))?;
@@ -745,7 +747,13 @@ mod tests {
     #[test]
     fn splits_layers_evenly() {
         let r = split_layers(32, 2).unwrap();
-        assert_eq!(r, vec![LayerRange { start: 0, end: 16 }, LayerRange { start: 16, end: 32 }]);
+        assert_eq!(
+            r,
+            vec![
+                LayerRange { start: 0, end: 16 },
+                LayerRange { start: 16, end: 32 }
+            ]
+        );
     }
 
     #[test]
@@ -770,10 +778,16 @@ mod tests {
 
     #[test]
     fn coverage_validation() {
-        let ok = vec![LayerRange { start: 0, end: 3 }, LayerRange { start: 3, end: 8 }];
+        let ok = vec![
+            LayerRange { start: 0, end: 3 },
+            LayerRange { start: 3, end: 8 },
+        ];
         validate_coverage(8, &ok).unwrap();
 
-        let gap = vec![LayerRange { start: 0, end: 3 }, LayerRange { start: 4, end: 8 }];
+        let gap = vec![
+            LayerRange { start: 0, end: 3 },
+            LayerRange { start: 4, end: 8 },
+        ];
         assert!(validate_coverage(8, &gap).is_err());
 
         let short = vec![LayerRange { start: 0, end: 3 }];

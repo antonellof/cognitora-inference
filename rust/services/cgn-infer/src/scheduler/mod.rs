@@ -74,7 +74,9 @@ pub struct Request {
 
 enum Phase {
     /// `done` prompt tokens are already in the runtime's KV state.
-    Prefill { done: usize },
+    Prefill {
+        done: usize,
+    },
     Decode,
 }
 
@@ -216,7 +218,9 @@ impl Scheduler {
 
     fn admit(&mut self) {
         while self.running.len() < self.cfg.max_batch {
-            let Some(seq) = self.waiting.front() else { break };
+            let Some(seq) = self.waiting.front() else {
+                break;
+            };
             // Reserve the whole prompt plus one decode block up front
             // so admission implies the prefill can complete.
             if !self.pool.reserve(seq.id, seq.prompt_len + 1) {
@@ -466,7 +470,12 @@ impl Scheduler {
             prompt_tokens: seq.prompt_len,
             completion_tokens: seq.generated.len(),
         });
-        debug!(seq = seq.id, reason, tokens = seq.generated.len(), "finished");
+        debug!(
+            seq = seq.id,
+            reason,
+            tokens = seq.generated.len(),
+            "finished"
+        );
     }
 
     /// Drop a sequence without emitting (client disconnected).
@@ -592,10 +601,7 @@ mod tests {
         tok
     }
 
-    fn mk_request(
-        prompt: Vec<u32>,
-        max_tokens: usize,
-    ) -> (Request, mpsc::Receiver<StreamEvent>) {
+    fn mk_request(prompt: Vec<u32>, max_tokens: usize) -> (Request, mpsc::Receiver<StreamEvent>) {
         let (tx, rx) = mpsc::channel(256);
         (
             Request {

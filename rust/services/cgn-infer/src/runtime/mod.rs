@@ -85,7 +85,13 @@ impl BatchedLlama {
         let cfg = QLlamaConfig::from_gguf(&gguf.content)?;
         let range = LayerRange::new(0, cfg.n_layers)?;
         let mut reader = gguf.cursor();
-        let model = QLlama::load(&gguf.content, &mut reader, device, range, ModelParts::full())?;
+        let model = QLlama::load(
+            &gguf.content,
+            &mut reader,
+            device,
+            range,
+            ModelParts::full(),
+        )?;
         let max_seq_len = ctx.min(model.cfg.context_length).max(1);
         info!(
             arch = %model.cfg.architecture,
@@ -406,8 +412,7 @@ pub fn pick_device(backend: Backend) -> Result<Device> {
             }
             #[cfg(not(feature = "cuda"))]
             Err(Error::Config(
-                "cuda backend requested but cgn-infer was built without the `cuda` feature"
-                    .into(),
+                "cuda backend requested but cgn-infer was built without the `cuda` feature".into(),
             ))
         }
         Backend::Auto => {

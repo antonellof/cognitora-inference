@@ -14,4 +14,4 @@ pub mod grpc;
 pub mod score;
 pub mod selector;
 
-pub use selector::{pick, pick_pair};
+pub use selector::{pick, pick_excluding, pick_pair};

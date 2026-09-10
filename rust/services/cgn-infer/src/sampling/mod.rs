@@ -77,8 +77,7 @@ impl Sampler {
 
         // Work on (index, logit) pairs sorted by descending logit so
         // top-k and top-p are both simple prefix truncations.
-        let mut ranked: Vec<(usize, f32)> =
-            logits.iter().copied().enumerate().collect();
+        let mut ranked: Vec<(usize, f32)> = logits.iter().copied().enumerate().collect();
         ranked.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
 
         if self.params.top_k > 0 && self.params.top_k < ranked.len() {
@@ -105,8 +104,8 @@ impl Sampler {
             }
         }
 
-        let dist = rand::distributions::WeightedIndex::new(&probs)
-            .expect("non-empty positive weights");
+        let dist =
+            rand::distributions::WeightedIndex::new(&probs).expect("non-empty positive weights");
         let picked = dist.sample(&mut self.rng);
         ranked[picked].0 as u32
     }
@@ -114,12 +113,7 @@ impl Sampler {
 
 /// llama.cpp-style penalty: divide positive logits, multiply negative
 /// ones, for every distinct token in the recent window.
-fn apply_repetition_penalty(
-    logits: &mut [f32],
-    recent: &[u32],
-    penalty: f32,
-    last_n: usize,
-) {
+fn apply_repetition_penalty(logits: &mut [f32], recent: &[u32], penalty: f32, last_n: usize) {
     if (penalty - 1.0).abs() < f32::EPSILON || last_n == 0 {
         return;
     }

@@ -12,6 +12,7 @@
 
 #![forbid(unsafe_code)]
 
+mod autoscaler;
 mod controllers;
 mod reconcile;
 mod render;
@@ -43,10 +44,16 @@ async fn main() -> Result<()> {
         .map_err(|e| cgn_core::Error::Unavailable(format!("kube client: {e}")))?;
     info!(namespace = ?cli.namespace, "operator starting");
 
+    // Autoscaler hint consumer reads `[cluster].etcd_endpoints` from the
+    // standard config lookup (CGN_CONFIG → /etc/cognitora/cognitora.toml).
+    let cfg =
+        cgn_core::config::Config::load(cgn_core::config::Config::locate(None)).unwrap_or_default();
+
     tokio::try_join!(
         controllers::inference_cluster::run(client.clone(), cli.namespace.clone()),
         controllers::model_pool::run(client.clone(), cli.namespace.clone()),
         controllers::routing_policy::run(client, cli.namespace),
+        autoscaler::run(cfg.cluster.etcd_endpoints),
     )?;
     Ok(())
 }

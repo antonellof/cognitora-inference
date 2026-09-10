@@ -8,6 +8,7 @@
 //! * `llama_cpp` — `python -m llama_cpp.server ...` or a standalone
 //!   `llama-server` binary (CPU or GPU offload).
 //! * `mlx` — `python3 -m mlx_lm.server …` (Apple Silicon / mlx-lm).
+//! * `tensorrt_llm` — `trtllm-serve <model> …` (NVIDIA TensorRT-LLM).
 //! * `openai_compat` — externally managed engine; the agent only proxies.
 //!
 //! The trait below describes what an engine driver needs to expose.

@@ -49,9 +49,21 @@ impl SharedState {
         })
     }
 
-    /// Spawn the etcd / gossip watcher that keeps `nodes` and `policy`
-    /// in sync. Returns once the initial snapshot has been applied.
+    /// Spawn the etcd watcher that keeps `nodes` and `policy` in sync,
+    /// plus the periodic prefix-index GC. Returns once the initial
+    /// snapshot has been applied.
     pub async fn bootstrap_cluster_watch(&self) -> Result<()> {
+        // Prefix-index GC runs in every mode (the index fills up from
+        // optimistic inserts even in single-node deployments).
+        let gc_prefix = self.prefix.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                tick.tick().await;
+                gc_prefix.gc();
+            }
+        });
+
         if self.cfg.cluster.etcd_endpoints.is_empty() {
             tracing::warn!("no etcd endpoints; running in single-node mode");
             return Ok(());
