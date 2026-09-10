@@ -5,6 +5,8 @@ inference cluster: live request/token throughput, latency and TTFT
 percentiles, per-node status, KV-cache utilization, queue depth, power
 draw, and estimated energy per token.
 
+![Cognitora cluster dashboard monitoring a 12-node mixed fleet (H100, A100, MI300X, L40S) with live throughput, latency, TTFT, queue, power, KV, and energy-per-token charts](screenshot.png)
+
 ## How it works
 
 The dashboard is a single static HTML file. It polls a Prometheus

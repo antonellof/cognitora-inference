@@ -76,6 +76,14 @@ supports Llama-family GGUF models with sequential request serving; only
 | [**Cluster dashboard**](dashboard/README.md) | Standalone zero-dependency web dashboard: live req/s, tokens/s, latency + TTFT percentiles, per-node status, KV utilisation, power, and J/token — driven purely by the CORS-enabled Prometheus `/metrics` endpoints. | Instant fleet visibility with no Grafana setup; the same series feed any Prometheus stack. |
 
 <p align="center">
+  <a href="dashboard/README.md">
+    <img src="dashboard/screenshot.png" alt="Cognitora cluster dashboard monitoring a 12-node mixed fleet (H100, A100, MI300X, L40S): live requests/s, tokens/s, latency and TTFT percentiles, queue depth, fleet power, KV cache utilisation, and energy per token." width="90%" />
+  </a>
+  <br />
+  <sub>The <a href="dashboard/README.md">cluster dashboard</a> watching a 12-node mixed fleet — single static HTML file, fed straight from the Prometheus <code>/metrics</code> endpoints.</sub>
+</p>
+
+<p align="center">
   <img src="docs/architecture.svg" alt="Cognitora architecture: an OpenAI SDK client speaks HTTP to cgn-router; cgn-router routes via gRPC mTLS to cgn-agent, which supervises one inference engine per node (vLLM, SGLang, llama.cpp, TensorRT-LLM, or any OpenAI-compatible server). cgn-router watches etcd for cluster state. cgn-agent talks to a colocated cgn-kvcached over UDS; cgn-kvcached owns the RAM and SSD KV tiers, indexes engine-internal GPU residency, and uses QUIC to fetch missing blocks from peer nodes." width="90%" />
 </p>
 
