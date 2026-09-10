@@ -14,6 +14,7 @@ mod admission;
 mod autoscaler;
 mod cascade;
 mod cluster;
+mod cluster_metrics;
 mod deadline;
 mod disagg;
 mod federation;
@@ -56,6 +57,7 @@ async fn main() -> Result<()> {
     let state = Arc::new(SharedState::new(cfg.clone()).await?);
     state.bootstrap_cluster_watch().await?;
     autoscaler::spawn(state.clone());
+    cluster_metrics::spawn(state.clone());
 
     let listen_http: SocketAddr = cfg
         .router

@@ -25,7 +25,7 @@ use crate::cascade::{Cascade, StepOutcome};
 use crate::routing;
 use crate::state::SharedState;
 
-use super::metrics::{CHAT_COMPLETION_TOKENS, CHAT_LATENCY, CHAT_REQUESTS};
+use super::metrics::{CHAT_COMPLETION_TOKENS, CHAT_LATENCY, CHAT_REQUESTS, CHAT_TTFT};
 use super::sse;
 use super::types::{
     ChatChoice, ChatChunk, ChatChunkChoice, ChatDelta, ChatMessage, ChatRequest, ChatResponse,
@@ -375,6 +375,9 @@ async fn stream_run_cascade(
                 };
                 if !casc.should_escalate(&outcome) {
                     info!(step = %step, tokens, "cascade streaming: early step accepted");
+                    CHAT_COMPLETION_TOKENS
+                        .with_label_values(&[&model])
+                        .inc_by(outcome.tokens as u64);
                     let _ = tx
                         .send(chunk_json(
                             &id,
@@ -440,10 +443,22 @@ async fn stream_tokens(
     model: String,
     created: i64,
 ) -> cgn_core::Result<()> {
+    let dispatch_started = std::time::Instant::now();
     let mut stream = run_to_token_stream(state, proto).await?;
+    let mut completion_tokens = 0u64;
+    let mut first_token_seen = false;
     while let Some(item) = stream.next().await {
         match item {
             Ok(t) => {
+                if !first_token_seen {
+                    first_token_seen = true;
+                    CHAT_TTFT
+                        .with_label_values(&[&model])
+                        .observe(dispatch_started.elapsed().as_secs_f64());
+                }
+                if !t.text.is_empty() || !t.tool_calls_json.is_empty() {
+                    completion_tokens += 1;
+                }
                 let chunk = ChatChunk {
                     id: id.clone(),
                     object: "chat.completion.chunk",
@@ -477,7 +492,7 @@ async fn stream_tokens(
                     .await
                     .is_err()
                 {
-                    return Ok(());
+                    break; // client disconnected
                 }
             }
             Err(e) => {
@@ -493,9 +508,17 @@ async fn stream_tokens(
                     }],
                 };
                 let _ = tx.send(serde_json::to_string(&chunk).unwrap()).await;
-                return Ok(());
+                break;
             }
         }
+    }
+    // Streaming responses previously never fed the completion-tokens
+    // counter (only the buffered path did), silently under-reporting
+    // token throughput for streaming-heavy workloads.
+    if completion_tokens > 0 {
+        CHAT_COMPLETION_TOKENS
+            .with_label_values(&[&model])
+            .inc_by(completion_tokens);
     }
     Ok(())
 }
@@ -517,7 +540,11 @@ async fn buffered_run(
         match item {
             Ok(t) => {
                 text.push_str(&t.text);
-                count += 1;
+                // Don't count the synthetic empty terminator chunk (or
+                // finish-only frames) as a completion token.
+                if !t.text.is_empty() || !t.tool_calls_json.is_empty() {
+                    count += 1;
+                }
                 if !t.tool_calls_json.is_empty() {
                     if let Ok(v) = serde_json::from_str(&t.tool_calls_json) {
                         tool_agg.push(&v);
@@ -607,7 +634,8 @@ async fn run_to_token_stream(
 ) -> cgn_core::Result<
     impl futures::Stream<Item = Result<cgn_proto::v1::Token, tonic::Status>> + Unpin,
 > {
-    let token_ids = approximate_token_ids(&join_messages(&req.messages));
+    let token_ids =
+        routing::prompt::approximate_token_ids(&routing::prompt::join_messages(&req.messages));
     let mut exclude: Vec<String> = Vec::new();
 
     for attempt in 1..=MAX_DISPATCH_ATTEMPTS {
@@ -795,45 +823,6 @@ async fn run_prefill(
     // side-channel so the router can drive the QUIC push between agents.
     let _ = stream.next().await;
     Some(vec![])
-}
-
-fn join_messages(msgs: &[PMessage]) -> String {
-    let mut out = String::with_capacity(msgs.iter().map(|m| m.content.len() + 16).sum());
-    for m in msgs {
-        out.push('<');
-        out.push_str(&m.role);
-        out.push_str(">\n");
-        if !m.content_json.is_empty() {
-            // Multimodal content: hash only the textual parts. Image
-            // bytes don't affect prompt-prefix KV reuse in the engines
-            // we route to, and hashing megabyte-scale data URLs would
-            // be pure overhead.
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&m.content_json) {
-                if let Some(parts) = v.as_array() {
-                    for p in parts {
-                        if let Some(t) = p.get("text").and_then(|t| t.as_str()) {
-                            out.push_str(t);
-                            out.push('\n');
-                        }
-                    }
-                }
-            }
-        } else {
-            out.push_str(&m.content);
-        }
-        out.push('\n');
-    }
-    out
-}
-
-fn approximate_token_ids(s: &str) -> Vec<u32> {
-    s.split_whitespace()
-        .map(|w| {
-            let h = blake3::hash(w.as_bytes());
-            let b = h.as_bytes();
-            u32::from_le_bytes([b[0], b[1], b[2], b[3]])
-        })
-        .collect()
 }
 
 fn error_json(e: &cgn_core::Error) -> Response {

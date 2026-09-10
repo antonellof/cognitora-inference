@@ -1,0 +1,393 @@
+<!doctype html>
+<!--
+  Cognitora cluster dashboard — standalone, zero-dependency.
+
+  Point it at any Cognitora Prometheus /metrics endpoint:
+    * cgn-router admin listener (default :9091) → one cluster
+    * cgn-metrics federation endpoint            → whole fleet
+
+  The router exposes cluster-state gauges (cgn_cluster_node_*) plus
+  gateway counters/histograms; this page polls the exposition text,
+  keeps in-browser ring buffers, and renders live charts. No build
+  step, no external assets — works air-gapped from file:// or any
+  static host (`python3 -m http.server -d dashboard`).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cognitora — Cluster Dashboard</title>
+<style>
+  :root {
+    --bg: #0a0f0d; --panel: #101815; --border: #1e2b25;
+    --fg: #d8e5de; --muted: #7d9188; --accent: #34d399;
+    --accent-dim: #34d39933; --warn: #fbbf24; --err: #f87171;
+    --grid: #16211c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 13px/1.5 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    padding: 16px; min-height: 100vh;
+  }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }
+  header h1 { font-size: 15px; font-weight: 600; letter-spacing: .04em; }
+  header h1 span { color: var(--accent); }
+  #endpoint { flex: 1 1 280px; max-width: 480px; background: var(--panel);
+    border: 1px solid var(--border); color: var(--fg); padding: 6px 10px; font: inherit; }
+  #endpoint:focus { outline: 1px solid var(--accent); }
+  select, button { background: var(--panel); border: 1px solid var(--border);
+    color: var(--fg); padding: 6px 10px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  #status { font-size: 11px; color: var(--muted); }
+  #status.ok::before  { content: "●"; color: var(--accent); margin-right: 6px; }
+  #status.err::before { content: "●"; color: var(--err);    margin-right: 6px; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px; margin-bottom: 16px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); padding: 10px 12px; }
+  .stat .label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .stat .value { font-size: 20px; font-weight: 600; margin-top: 2px; }
+  .stat .value small { font-size: 11px; color: var(--muted); font-weight: 400; }
+
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 10px; margin-bottom: 16px; }
+  .chart { background: var(--panel); border: 1px solid var(--border); padding: 10px 12px; }
+  .chart h2 { font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--muted); display: flex; justify-content: space-between; }
+  .chart h2 b { color: var(--fg); font-weight: 600; }
+  .chart canvas { width: 100%; height: 120px; display: block; margin-top: 8px; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--panel);
+    border: 1px solid var(--border); }
+  caption { text-align: left; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--muted); padding: 10px 12px;
+    background: var(--panel); border: 1px solid var(--border); border-bottom: none; }
+  th, td { padding: 7px 12px; text-align: left; border-bottom: 1px solid var(--border);
+    font-size: 12px; white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; font-size: 10px;
+    text-transform: uppercase; letter-spacing: .06em; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; padding: 1px 8px; font-size: 10px; border: 1px solid; }
+  .pill.up   { color: var(--accent); border-color: var(--accent-dim); }
+  .pill.cord { color: var(--warn);   border-color: #fbbf2433; }
+  .bar { display: inline-block; width: 80px; height: 6px; background: var(--grid);
+    vertical-align: middle; margin-right: 6px; }
+  .bar i { display: block; height: 100%; background: var(--accent); }
+  #empty { color: var(--muted); padding: 24px 12px; text-align: center; }
+  footer { margin-top: 16px; font-size: 11px; color: var(--muted); }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>cognitora <span>/ cluster dashboard</span></h1>
+  <input id="endpoint" spellcheck="false" placeholder="http://localhost:9091/metrics" />
+  <select id="interval">
+    <option value="2000">2s</option>
+    <option value="5000" selected>5s</option>
+    <option value="10000">10s</option>
+  </select>
+  <button id="pause">pause</button>
+  <span id="status">connecting…</span>
+</header>
+
+<div class="stats">
+  <div class="stat"><div class="label">Nodes</div><div class="value" id="s-nodes">–</div></div>
+  <div class="stat"><div class="label">Requests / s</div><div class="value" id="s-rps">–</div></div>
+  <div class="stat"><div class="label">Tokens / s</div><div class="value" id="s-tps">–</div></div>
+  <div class="stat"><div class="label">Latency p95</div><div class="value" id="s-p95">–</div></div>
+  <div class="stat"><div class="label">TTFT p95</div><div class="value" id="s-ttft">–</div></div>
+  <div class="stat"><div class="label">Cluster power</div><div class="value" id="s-power">–</div></div>
+  <div class="stat"><div class="label">Prefix digests</div><div class="value" id="s-digests">–</div></div>
+</div>
+
+<div class="charts">
+  <div class="chart"><h2>requests / s <b id="v-rps"></b></h2><canvas id="c-rps"></canvas></div>
+  <div class="chart"><h2>tokens / s <b id="v-tps"></b></h2><canvas id="c-tps"></canvas></div>
+  <div class="chart"><h2>latency p50 / p95 (s) <b id="v-lat"></b></h2><canvas id="c-lat"></canvas></div>
+  <div class="chart"><h2>ttft p95 (s) <b id="v-ttft"></b></h2><canvas id="c-ttft"></canvas></div>
+  <div class="chart"><h2>queue depth (Σ nodes) <b id="v-queue"></b></h2><canvas id="c-queue"></canvas></div>
+  <div class="chart"><h2>power (W) <b id="v-power"></b></h2><canvas id="c-power"></canvas></div>
+  <div class="chart"><h2>kv cache used % <b id="v-kv"></b></h2><canvas id="c-kv"></canvas></div>
+  <div class="chart"><h2>energy (J / token) <b id="v-jpt"></b></h2><canvas id="c-jpt"></canvas></div>
+</div>
+
+<table id="nodes">
+  <caption>Nodes</caption>
+  <thead><tr>
+    <th>node</th><th>status</th><th>role</th><th>model</th><th>address</th>
+    <th class="num">queue</th><th class="num">kv free / total</th><th class="num">power (W)</th>
+  </tr></thead>
+  <tbody><tr><td colspan="8" id="empty">no node data yet — point the endpoint at a cgn-router admin listener (:9091/metrics) or cgn-metrics</td></tr></tbody>
+</table>
+
+<footer>
+  scraping Prometheus exposition · series kept in-browser (30 min @ 5s) ·
+  <a href="https://github.com/antonellof/cognitora-inference" target="_blank" rel="noreferrer">cognitora-inference</a>
+</footer>
+
+<script>
+"use strict";
+
+/* ---------------------------------------------------------------- config */
+const MAX_POINTS = 360; // 30 min at 5 s
+const $ = (id) => document.getElementById(id);
+const endpointEl = $("endpoint");
+endpointEl.value = localStorage.getItem("cgn.endpoint") || "http://localhost:9091/metrics";
+let pollMs = Number(localStorage.getItem("cgn.interval") || 5000);
+$("interval").value = String(pollMs);
+let paused = false;
+
+/* ------------------------------------------------- prometheus text parse */
+// Returns Map name -> [{labels: {k:v}, value: Number}]
+function parseProm(text) {
+  const out = new Map();
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const sp = line.lastIndexOf(" ");
+    if (sp < 0) continue;
+    const value = Number(line.slice(sp + 1));
+    if (!Number.isFinite(value)) continue;
+    let head = line.slice(0, sp).trim();
+    let labels = {};
+    const brace = head.indexOf("{");
+    if (brace >= 0) {
+      const body = head.slice(brace + 1, head.lastIndexOf("}"));
+      head = head.slice(0, brace);
+      // label parser tolerant of commas inside quoted values
+      for (const m of body.matchAll(/(\w+)="((?:[^"\\]|\\.)*)"/g)) {
+        labels[m[1]] = m[2].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+      }
+    }
+    if (!out.has(head)) out.set(head, []);
+    out.get(head).push({ labels, value });
+  }
+  return out;
+}
+const sum = (fam) => (fam || []).reduce((a, s) => a + s.value, 0);
+
+/* -------------------------------------------- histogram percentile (est) */
+// Aggregates all series of `<name>_bucket` and interpolates quantile q of
+// the *delta* between two scrapes (i.e. recent traffic, not lifetime).
+function bucketTotals(metrics, name) {
+  const totals = new Map(); // le -> cumulative count
+  for (const s of metrics.get(name + "_bucket") || []) {
+    const le = s.labels.le === "+Inf" ? Infinity : Number(s.labels.le);
+    totals.set(le, (totals.get(le) || 0) + s.value);
+  }
+  return [...totals.entries()].sort((a, b) => a[0] - b[0]);
+}
+function quantileFromDelta(curr, prev, q) {
+  if (!curr.length || !prev.length) return null;
+  const prevBy = new Map(prev);
+  const deltas = curr.map(([le, v]) => [le, v - (prevBy.get(le) || 0)]);
+  const total = deltas.length ? deltas[deltas.length - 1][1] : 0;
+  if (total <= 0) return null;
+  const target = q * total;
+  let lastLe = 0, lastCount = 0;
+  for (const [le, count] of deltas) {
+    if (count >= target) {
+      if (le === Infinity) return lastLe; // clamp to last finite bucket
+      const span = count - lastCount;
+      return span > 0 ? lastLe + (le - lastLe) * ((target - lastCount) / span) : le;
+    }
+    lastLe = le === Infinity ? lastLe : le;
+    lastCount = count;
+  }
+  return null;
+}
+
+/* ------------------------------------------------------------ ring series */
+class Series {
+  constructor() { this.data = []; }
+  push(v) { this.data.push(v); if (this.data.length > MAX_POINTS) this.data.shift(); }
+  last() { for (let i = this.data.length - 1; i >= 0; i--) if (this.data[i] != null) return this.data[i]; return null; }
+}
+const S = { rps: new Series(), tps: new Series(), p50: new Series(), p95: new Series(),
+  ttft: new Series(), queue: new Series(), power: new Series(), kv: new Series(), jpt: new Series() };
+
+/* -------------------------------------------------------------- charting */
+function drawChart(canvas, seriesList, colors, fmt) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight || 120;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  let lo = Infinity, hi = -Infinity;
+  for (const s of seriesList) for (const v of s.data) if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+  if (!Number.isFinite(lo)) { lo = 0; hi = 1; }
+  if (hi === lo) hi = lo + (lo === 0 ? 1 : Math.abs(lo) * 0.1);
+  lo = Math.min(lo, 0);
+  const pad = (hi - lo) * 0.08; hi += pad;
+
+  // grid + y labels
+  const css = getComputedStyle(document.documentElement);
+  ctx.strokeStyle = css.getPropertyValue("--grid").trim();
+  ctx.fillStyle = css.getPropertyValue("--muted").trim();
+  ctx.font = "9px ui-monospace, monospace";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 3; i++) {
+    const y = (h - 12) * (i / 3) + 2;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    const val = hi - (hi - lo) * (i / 3);
+    ctx.fillText(fmt(val), 2, y - 2);
+  }
+
+  seriesList.forEach((s, si) => {
+    ctx.strokeStyle = colors[si]; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    let started = false;
+    s.data.forEach((v, i) => {
+      if (v == null) { started = false; return; }
+      const x = (i / (MAX_POINTS - 1)) * w;
+      const y = 2 + (h - 14) * (1 - (v - lo) / (hi - lo));
+      if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    // area fill for the first series only
+    if (si === 0) {
+      ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
+      ctx.fillStyle = colors[si] + "18"; ctx.fill();
+    }
+  });
+}
+
+const fmtNum = (v) => v >= 1000 ? (v / 1000).toFixed(1) + "k" : v >= 10 ? v.toFixed(0) : v.toFixed(2);
+const fmtSec = (v) => v >= 1 ? v.toFixed(2) + "s" : (v * 1000).toFixed(0) + "ms";
+
+function render() {
+  const accent = "#34d399", second = "#60a5fa";
+  drawChart($("c-rps"),   [S.rps],        [accent], fmtNum);
+  drawChart($("c-tps"),   [S.tps],        [accent], fmtNum);
+  drawChart($("c-lat"),   [S.p95, S.p50], [accent, second], fmtSec);
+  drawChart($("c-ttft"),  [S.ttft],       [accent], fmtSec);
+  drawChart($("c-queue"), [S.queue],      ["#fbbf24"], fmtNum);
+  drawChart($("c-power"), [S.power],      ["#f87171"], fmtNum);
+  drawChart($("c-kv"),    [S.kv],         [second], (v) => v.toFixed(0) + "%");
+  drawChart($("c-jpt"),   [S.jpt],        ["#f87171"], fmtNum);
+
+  const put = (id, v, f) => { $(id).textContent = v == null ? "–" : f(v); };
+  put("s-rps", S.rps.last(), fmtNum);  put("v-rps", S.rps.last(), fmtNum);
+  put("s-tps", S.tps.last(), fmtNum);  put("v-tps", S.tps.last(), fmtNum);
+  put("s-p95", S.p95.last(), fmtSec);
+  put("v-lat", S.p95.last(), (v) => "p95 " + fmtSec(v));
+  put("s-ttft", S.ttft.last(), fmtSec); put("v-ttft", S.ttft.last(), fmtSec);
+  put("s-power", S.power.last(), (v) => fmtNum(v) + " W"); put("v-power", S.power.last(), fmtNum);
+  put("v-queue", S.queue.last(), fmtNum);
+  put("v-kv", S.kv.last(), (v) => v.toFixed(0) + "%");
+  put("v-jpt", S.jpt.last(), fmtNum);
+}
+
+/* -------------------------------------------------------------- node table */
+function renderNodes(metrics) {
+  const info = metrics.get("cgn_cluster_node_info") || [];
+  const byNode = (name) => {
+    const m = new Map();
+    for (const s of metrics.get(name) || []) m.set(s.labels.node, s.value);
+    return m;
+  };
+  const up = byNode("cgn_cluster_node_up"), cord = byNode("cgn_cluster_node_cordoned"),
+    queue = byNode("cgn_cluster_node_queue_depth"), power = byNode("cgn_cluster_node_power_watts"),
+    kvFree = byNode("cgn_cluster_node_kv_free_blocks"), kvTotal = byNode("cgn_cluster_node_kv_total_blocks");
+
+  const tbody = document.querySelector("#nodes tbody");
+  if (!info.length) return;
+  tbody.innerHTML = "";
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  for (const s of info.sort((a, b) => a.labels.node.localeCompare(b.labels.node))) {
+    const n = s.labels.node;
+    const total = kvTotal.get(n) || 0, free = kvFree.get(n) || 0;
+    const usedPct = total > 0 ? ((total - free) / total) * 100 : null;
+    const status = cord.get(n) ? '<span class="pill cord">cordoned</span>'
+      : up.get(n) ? '<span class="pill up">up</span>' : '<span class="pill cord">down</span>';
+    const kvCell = total > 0
+      ? `<span class="bar"><i style="width:${usedPct.toFixed(0)}%"></i></span>${free} / ${total}`
+      : "–";
+    tbody.insertAdjacentHTML("beforeend", `<tr>
+      <td>${esc(n)}</td><td>${status}</td><td>${esc(s.labels.role)}</td>
+      <td>${esc(s.labels.model) || "–"}</td><td>${esc(s.labels.address)}</td>
+      <td class="num">${queue.get(n) ?? 0}</td>
+      <td class="num">${kvCell}</td>
+      <td class="num">${(power.get(n) || 0).toFixed(1)}</td>
+    </tr>`);
+  }
+}
+
+/* ------------------------------------------------------------------ poll */
+let prev = null; // { t, reqTotal, tokTotal, latBuckets, ttftBuckets, powerSum }
+
+async function poll() {
+  if (paused) return;
+  const url = endpointEl.value.trim();
+  if (!url) return;
+  try {
+    const resp = await fetch(url, { cache: "no-store" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const metrics = parseProm(await resp.text());
+    const now = Date.now();
+
+    const reqTotal = sum(metrics.get("cgn_router_chat_requests_total"));
+    const tokTotal = sum(metrics.get("cgn_router_chat_completion_tokens_total"));
+    const latBuckets = bucketTotals(metrics, "cgn_router_chat_latency_seconds");
+    const ttftBuckets = bucketTotals(metrics, "cgn_router_chat_ttft_seconds");
+    const powerNow = sum(metrics.get("cgn_cluster_node_power_watts"));
+
+    if (prev) {
+      const dt = (now - prev.t) / 1000;
+      if (dt > 0) {
+        const dTok = Math.max(0, tokTotal - prev.tokTotal);
+        S.rps.push(Math.max(0, reqTotal - prev.reqTotal) / dt);
+        S.tps.push(dTok / dt);
+        // joules per token: average watts over the window × seconds ÷ tokens
+        const avgW = (powerNow + prev.powerSum) / 2;
+        S.jpt.push(dTok > 0 && avgW > 0 ? (avgW * dt) / dTok : null);
+      }
+      S.p50.push(quantileFromDelta(latBuckets, prev.latBuckets, 0.5));
+      S.p95.push(quantileFromDelta(latBuckets, prev.latBuckets, 0.95));
+      S.ttft.push(quantileFromDelta(ttftBuckets, prev.ttftBuckets, 0.95));
+    }
+    prev = { t: now, reqTotal, tokTotal, latBuckets, ttftBuckets, powerSum: powerNow };
+
+    S.queue.push(sum(metrics.get("cgn_cluster_node_queue_depth")));
+    S.power.push(powerNow);
+    const kvTot = sum(metrics.get("cgn_cluster_node_kv_total_blocks"));
+    const kvFree = sum(metrics.get("cgn_cluster_node_kv_free_blocks"));
+    S.kv.push(kvTot > 0 ? ((kvTot - kvFree) / kvTot) * 100 : null);
+
+    $("s-nodes").textContent = sum(metrics.get("cgn_cluster_nodes_total")) || "0";
+    $("s-digests").textContent = fmtNum(sum(metrics.get("cgn_router_prefix_index_digests")));
+
+    renderNodes(metrics);
+    render();
+    const st = $("status");
+    st.className = "ok";
+    st.textContent = "live · " + new Date(now).toLocaleTimeString();
+    localStorage.setItem("cgn.endpoint", url);
+  } catch (e) {
+    const st = $("status");
+    st.className = "err";
+    st.textContent = "scrape failed: " + e.message;
+  }
+}
+
+/* ------------------------------------------------------------------ wiring */
+let timer = setInterval(poll, pollMs);
+$("interval").addEventListener("change", (e) => {
+  pollMs = Number(e.target.value);
+  localStorage.setItem("cgn.interval", String(pollMs));
+  clearInterval(timer); timer = setInterval(poll, pollMs);
+});
+$("pause").addEventListener("click", (e) => {
+  paused = !paused;
+  e.target.textContent = paused ? "resume" : "pause";
+});
+endpointEl.addEventListener("change", () => { prev = null; poll(); });
+window.addEventListener("resize", render);
+poll();
+</script>
+</body>
+</html>

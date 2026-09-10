@@ -61,11 +61,35 @@ pub fn init(service: &'static str) {
 /// Build an admin axum router with `/metrics`, `/healthz`, `/readyz`.
 ///
 /// Mount it on the binary's admin listener (e.g. `:9091` for the router).
+///
+/// `/metrics` responses carry `Access-Control-Allow-Origin: *` so
+/// browser-based monitoring UIs (e.g. the standalone `dashboard/` app)
+/// can scrape the exposition text directly. The endpoint is read-only
+/// GET text with no credentials, so the permissive origin is safe; keep
+/// the admin listener on an internal interface as usual.
 pub fn admin_router() -> Router {
     Router::new()
-        .route("/metrics", get(metrics_handler))
+        .route(
+            "/metrics",
+            get(metrics_handler).options(|| async { cors_preflight() }),
+        )
         .route("/healthz", get(|| async { "ok" }))
         .route("/readyz", get(|| async { "ok" }))
+}
+
+fn cors_preflight() -> axum::response::Response {
+    use axum::http::{header, StatusCode};
+    use axum::response::IntoResponse;
+    (
+        StatusCode::NO_CONTENT,
+        [
+            (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
+            (header::ACCESS_CONTROL_ALLOW_METHODS, "GET, OPTIONS"),
+            (header::ACCESS_CONTROL_ALLOW_HEADERS, "*"),
+            (header::ACCESS_CONTROL_MAX_AGE, "86400"),
+        ],
+    )
+        .into_response()
 }
 
 async fn metrics_handler() -> axum::response::Response {
@@ -74,7 +98,16 @@ async fn metrics_handler() -> axum::response::Response {
     match encode_metrics() {
         Ok(body) => (
             StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+            [
+                (
+                    header::CONTENT_TYPE,
+                    header::HeaderValue::from_static("text/plain; version=0.0.4"),
+                ),
+                (
+                    header::ACCESS_CONTROL_ALLOW_ORIGIN,
+                    header::HeaderValue::from_static("*"),
+                ),
+            ],
             body,
         )
             .into_response(),
@@ -112,6 +145,64 @@ macro_rules! latency_histogram {
             2.0,
         ]);
         let h = $crate::prometheus::Histogram::with_opts(opts).expect("histogram create");
+        $crate::registry().register(Box::new(h.clone())).ok();
+        h
+    }};
+}
+
+/// Convenience macro: register a labeled counter vector on the workspace
+/// registry. `$labels` is a `&[&str]` of label names.
+#[macro_export]
+macro_rules! counter_vec {
+    ($name:expr, $help:expr, $labels:expr) => {{
+        let v = $crate::prometheus::IntCounterVec::new(
+            $crate::prometheus::Opts::new($name, $help),
+            $labels,
+        )
+        .expect("counter_vec create");
+        $crate::registry().register(Box::new(v.clone())).ok();
+        v
+    }};
+}
+
+/// Convenience macro: register a labeled integer gauge vector on the
+/// workspace registry. `$labels` is a `&[&str]` of label names.
+#[macro_export]
+macro_rules! gauge_vec {
+    ($name:expr, $help:expr, $labels:expr) => {{
+        let v = $crate::prometheus::IntGaugeVec::new(
+            $crate::prometheus::Opts::new($name, $help),
+            $labels,
+        )
+        .expect("gauge_vec create");
+        $crate::registry().register(Box::new(v.clone())).ok();
+        v
+    }};
+}
+
+/// Convenience macro: register a labeled float gauge vector on the
+/// workspace registry (for fractional readings, e.g. watts).
+#[macro_export]
+macro_rules! float_gauge_vec {
+    ($name:expr, $help:expr, $labels:expr) => {{
+        let v =
+            $crate::prometheus::GaugeVec::new($crate::prometheus::Opts::new($name, $help), $labels)
+                .expect("float_gauge_vec create");
+        $crate::registry().register(Box::new(v.clone())).ok();
+        v
+    }};
+}
+
+/// Convenience macro: register a labeled histogram vector on the workspace
+/// registry with caller-supplied buckets.
+#[macro_export]
+macro_rules! histogram_vec {
+    ($name:expr, $help:expr, $labels:expr, $buckets:expr) => {{
+        let h = $crate::prometheus::HistogramVec::new(
+            $crate::prometheus::HistogramOpts::new($name, $help).buckets($buckets),
+            $labels,
+        )
+        .expect("histogram_vec create");
         $crate::registry().register(Box::new(h.clone())).ok();
         h
     }};

@@ -40,6 +40,21 @@ Each binary serves Prometheus on its admin port:
 `cgn-metrics` federates the per-host endpoints and exposes the union
 on `:9092`, plus the power gauges from `cgn-power`.
 
+All `/metrics` listeners send `Access-Control-Allow-Origin: *`, so any
+browser app can scrape them directly — including the bundled
+[standalone cluster dashboard](../../dashboard/README.md), which charts
+req/s, tokens/s, latency + TTFT percentiles, per-node status, KV
+utilisation, power, and J/token with no Prometheus server required.
+
+The router additionally mirrors its live node registry into
+`cgn_cluster_node_*` gauges (`up`, `cordoned`, `queue_depth`,
+`kv_free_blocks`, `kv_total_blocks`, `power_watts`, `info`) refreshed
+every 5 s, plus `cgn_cluster_nodes_total` and
+`cgn_router_prefix_index_digests`. Gateway traffic is covered by
+`cgn_router_chat_requests_total`, `cgn_router_chat_completion_tokens_total`,
+`cgn_router_chat_latency_seconds`, and `cgn_router_chat_ttft_seconds`
+(time from dispatch to first streamed token).
+
 ### Core series
 
 | Metric                                    | Type      | Labels                       |
