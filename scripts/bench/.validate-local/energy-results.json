@@ -1,0 +1,34 @@
+{
+  "generated_at": "2026-09-11T11:01:59.060233+00:00",
+  "host": "BFG-028706",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "meta": {
+    "model": "test",
+    "n": "8",
+    "concurrency": "2"
+  },
+  "before": {
+    "t": 1,
+    "power_watts": 200,
+    "completion_tokens": 1000,
+    "tokens_per_watt": 0
+  },
+  "after": {
+    "t": 6,
+    "power_watts": 220,
+    "completion_tokens": 1500,
+    "tokens_per_watt": 0.05
+  },
+  "bench": {
+    "wall_s": 5,
+    "total_completion_tokens": 500
+  },
+  "energy": {
+    "avg_power_watts": 210.0,
+    "completion_tokens": 500,
+    "wall_s": 5,
+    "tokens_per_s": 100.0,
+    "tokens_per_watt": 0.47619047619047616,
+    "joules_per_token": 2.1
+  }
+}

@@ -6,7 +6,16 @@ chat completions through `cgn-router`. Power comes from
 `cgn_cluster_power_watts_total`); token counts from
 `cgn_router_chat_completion_tokens_total`.
 
-## Prerequisites
+## Local validation (no GPU)
+
+```bash
+bash scripts/bench/validate-local.sh
+```
+
+Exercises the summarize math with fixture metrics. Publishable J/token
+numbers require a GPU host with power reporting (below).
+
+## Prerequisites (GPU host)
 
 * A running Cognitora stack with agents reporting power in heartbeats
   (NVML / Redfish / rocm-smi).

@@ -114,6 +114,7 @@ impl Agent for AgentSvc {
                 stop: p.stop,
                 stream: true,
                 extensions_json: first.extensions_json,
+                prefix_digests: first.digests,
             };
             let (e_tx, mut e_rx) = mpsc::channel::<Token>(64);
             let gen = engine.generate(req, e_tx);

@@ -90,6 +90,11 @@ pub struct GenerateReq {
     /// `response_format`), JSON object verbatim. Merged into the
     /// engine's chat-completions body. Empty = none.
     pub extensions_json: String,
+    /// Sequence-chained BLAKE3 prefix digests from the router. When
+    /// non-empty they are forwarded to vLLM as `kv_transfer_params` so
+    /// engine-side connectors (e.g. `CognitoraConnector`) can probe
+    /// `cgn-kvcached` for resident prefixes.
+    pub prefix_digests: Vec<Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]

@@ -12,6 +12,11 @@ each one is called out under **Breaking** below.
 
 ### Added
 
+- **Router → vLLM prefix digest passthrough**: agents forward sequence-chained
+  BLAKE3 digests as `kv_transfer_params.cgn_prefix_digests` on chat requests
+  so `CognitoraConnector` can probe `cgn-kvcached`.
+- **`scripts/bench/validate-local.sh`**: Mac/CPU smoke test for disagg/energy
+  harness scripts (no GPU required).
 - **`engine.kv_offload = "cgn"`** (preview): vLLM `CognitoraConnector` via the
   `python/cgn-kv-connector` package spills blocks into `cgn-kvcached` through
   a new gRPC `PutBlock` RPC. Reference recipe: `recipes/llama3-8b/vllm/agg-cgn/`.

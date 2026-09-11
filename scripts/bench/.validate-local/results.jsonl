@@ -1,0 +1,2 @@
+{"name":"disagg","n":8,"ok":8,"ttft_ms":{"p50":120,"p95":340},"decode_tps":{"p50":42.1},"system_tps":81.9}
+{"name":"agg","n":8,"ok":8,"ttft_ms":{"p50":180,"p95":420},"decode_tps":{"p50":38.0},"system_tps":72.5}

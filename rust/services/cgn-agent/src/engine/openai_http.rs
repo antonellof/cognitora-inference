@@ -116,6 +116,12 @@ impl Engine for OpenAiHttpEngine {
             }
         }
 
+        if let Some(kv) = kv_transfer_params_from_digests(&req.prefix_digests) {
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert("kv_transfer_params".into(), kv);
+            }
+        }
+
         let resp = self
             .client
             .post(&url)
@@ -367,6 +373,21 @@ struct EmbedFrame {
     usage: Option<EmbedUsage>,
 }
 
+/// Build vLLM `kv_transfer_params` from router-supplied prefix digests.
+pub(crate) fn kv_transfer_params_from_digests(digests: &[Vec<u8>]) -> Option<serde_json::Value> {
+    let hex: Vec<String> = digests
+        .iter()
+        .filter(|d| d.len() == 32)
+        .map(|d| d.iter().map(|b| format!("{b:02x}")).collect())
+        .collect();
+    if hex.is_empty() {
+        return None;
+    }
+    Some(serde_json::json!({
+        "cgn_prefix_digests": hex,
+    }))
+}
+
 #[derive(Deserialize)]
 struct EmbedDatum {
     embedding: Vec<f32>,
@@ -466,5 +487,16 @@ mod tests {
         let f: StreamFrame = serde_json::from_str(payload).unwrap();
         let c = &f.choices[0];
         assert_eq!(c.finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[test]
+    fn kv_transfer_params_from_digests_hex_encodes() {
+        let d = vec![0u8; 32];
+        let v = kv_transfer_params_from_digests(&[d.clone()]).unwrap();
+        let arr = v["cgn_prefix_digests"].as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0].as_str().unwrap().len(), 64);
+        assert!(kv_transfer_params_from_digests(&[]).is_none());
+        assert!(kv_transfer_params_from_digests(&[vec![1, 2, 3]]).is_none());
     }
 }

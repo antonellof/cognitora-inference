@@ -1,0 +1,37 @@
+{
+  "generated_at": "2026-09-11T11:01:58.954979+00:00",
+  "host": "BFG-028706",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "meta": {
+    "model": "test",
+    "n": "8"
+  },
+  "scenarios": [
+    {
+      "name": "disagg",
+      "n": 8,
+      "ok": 8,
+      "ttft_ms": {
+        "p50": 120,
+        "p95": 340
+      },
+      "decode_tps": {
+        "p50": 42.1
+      },
+      "system_tps": 81.9
+    },
+    {
+      "name": "agg",
+      "n": 8,
+      "ok": 8,
+      "ttft_ms": {
+        "p50": 180,
+        "p95": 420
+      },
+      "decode_tps": {
+        "p50": 38.0
+      },
+      "system_tps": 72.5
+    }
+  ]
+}

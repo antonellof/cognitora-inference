@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Iterable
 
+from cgn_kv_connector.digests import request_prefix_digests
 from cgn_kv_connector.kv_client import KvCachedClient
 
 try:
@@ -87,7 +88,7 @@ class CognitoraConnector(KVConnectorBase_V1):
     def get_num_new_matched_tokens(
         self, request: "Request", num_computed_tokens: int
     ) -> tuple[int | None, bool]:
-        digests = _request_prefix_digests(request)
+        digests = request_prefix_digests(request)
         if not digests:
             return 0, False
         resident = self._client.batch_lookup(digests)
@@ -120,14 +121,3 @@ class CognitoraConnector(KVConnectorBase_V1):
     def take_events(self) -> Iterable[Any]:
         return []
 
-
-def _request_prefix_digests(request: Any) -> list[bytes]:
-    extra = getattr(request, "kv_transfer_params", None) or {}
-    raw = extra.get("cgn_prefix_digests") or extra.get("prefix_hashes") or []
-    out: list[bytes] = []
-    for item in raw:
-        if isinstance(item, (bytes, bytearray)) and len(item) == 32:
-            out.append(bytes(item))
-        elif isinstance(item, str) and len(item) == 64:
-            out.append(bytes.fromhex(item))
-    return out

@@ -22,7 +22,19 @@ byte-identically against every mode: by default 60% of prompts share a
 prefill pay off) and 40% are fully unique (no reuse), interleaved so
 every concurrency window contains both kinds.
 
-## Prerequisites
+## Local validation (no GPU)
+
+On a Mac or CI host without GPUs, smoke-test the harness scripts only:
+
+```bash
+bash scripts/bench/validate-local.sh
+```
+
+This checks workload generation, summarize paths, energy math, and
+`cgn-kv-connector` unit tests. It does **not** produce publishable TTFT
+numbers — those require the GPU run below.
+
+## Prerequisites (GPU host)
 
 * **2 GPUs** (24 GiB+ each) for the disagg recipe; agg needs 1.
 * **vLLM with NIXL support** — the disagg recipe passes
