@@ -43,5 +43,6 @@ python3 "$HERE/energy/summarize.py" \
 
 log "cgn-kv-connector unit tests"
 python3 "$ROOT/python/cgn-kv-connector/tests/test_connector.py"
+python3 "$ROOT/python/cgn-kv-connector/tests/test_kv_client.py"
 
 log "ok — harness scripts validated (GPU runs still require a Linux GPU host)"

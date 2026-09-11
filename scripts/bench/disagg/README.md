@@ -63,7 +63,11 @@ Single topology:
 ```bash
 bash scripts/bench/disagg/run.sh                # disagg only
 bash scripts/bench/disagg/run.sh --mode agg     # agg only
+bash scripts/bench/disagg/run.sh --mode disagg-cgn  # CognitoraConnector (preview)
 ```
+
+GPU runbook and published-results template:
+[`docs/benchmarks/README.md`](../../../docs/benchmarks/README.md).
 
 Knobs (env): `N` (requests, default 32), `CONC` (concurrency, default
 8), `MAX_TOKENS` (default 128), `PROMPT_TOKENS` (shared-prefix length

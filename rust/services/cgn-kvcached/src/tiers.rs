@@ -317,6 +317,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn put_ram_roundtrip_via_lookup() {
+        let (store, _dir) = tiny_store(1 << 20).await;
+        let a = addr(42);
+        store
+            .put_ram(a, bytes::Bytes::from_static(b"kv-block-bytes"), "llama")
+            .unwrap();
+        assert!(store.lookup_with_promote(&a).await.is_some());
+    }
+
+    #[tokio::test]
     async fn evict_pass_expires_old_ssd_blocks() {
         let (store, _dir) = tiny_store(1 << 20).await;
         store

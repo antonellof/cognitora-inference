@@ -230,6 +230,7 @@ deployment, and operations content lives in the docs tree:
 | Security model           | [`SECURITY.md`](SECURITY.md), [`docs/architecture/security.md`](docs/architecture/security.md) |
 | Observability + alerts   | [`docs/operations/observability.md`](docs/operations/observability.md)    |
 | SLOs + perf targets      | [`docs/operations/slo.md`](docs/operations/slo.md)                        |
+| Benchmark harnesses      | [`docs/benchmarks/README.md`](docs/benchmarks/README.md)                   |
 | Runbooks                 | [`docs/operations/runbooks/`](docs/operations/runbooks/)                  |
 | Quickstart               | [`docs/guides/quickstart.md`](docs/guides/quickstart.md)                  |
 | Bare-metal install       | [`docs/guides/baremetal.md`](docs/guides/baremetal.md)                    |

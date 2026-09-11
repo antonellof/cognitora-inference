@@ -387,7 +387,7 @@ cognitora/
 
 **Operations**
 
-- [Observability](docs/operations/observability.md) · [SLOs](docs/operations/slo.md) · [Runbooks](docs/operations/runbooks/)
+- [Observability](docs/operations/observability.md) · [SLOs](docs/operations/slo.md) · [Runbooks](docs/operations/runbooks/) · [Benchmarks](docs/benchmarks/README.md)
 
 **Reference**
 

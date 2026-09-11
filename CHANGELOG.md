@@ -21,6 +21,9 @@ each one is called out under **Breaking** below.
   CognitoraConnector + NIXL (GPU host required to run).
 - **`scripts/bench/validate-local.sh`**: Mac/CPU smoke test for disagg/energy
   harness scripts (no GPU required).
+- **`docs/benchmarks/README.md`**: GPU runbook and published-results template.
+- **Disagg bench `--mode disagg-cgn`**: optional CognitoraConnector topology
+  for GPU hosts (`scripts/bench/disagg/run.sh`).
 - **`engine.kv_offload = "cgn"`** (preview): vLLM `CognitoraConnector` via the
   `python/cgn-kv-connector` package spills blocks into `cgn-kvcached` through
   a new gRPC `PutBlock` RPC. Reference recipe: `recipes/llama3-8b/vllm/agg-cgn/`.

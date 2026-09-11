@@ -15,6 +15,7 @@
 #   bash scripts/bench/disagg/run.sh                 # disagg only
 #   bash scripts/bench/disagg/run.sh --compare       # disagg then agg
 #   bash scripts/bench/disagg/run.sh --mode agg      # agg only
+#   bash scripts/bench/disagg/run.sh --mode disagg-cgn  # CognitoraConnector (preview)
 #
 # Knobs (env):
 #   N              requests per scenario           (default 32)
@@ -56,6 +57,7 @@ MODEL=${MODEL:-meta-llama/Meta-Llama-3.1-8B-Instruct}
 ROUTER_URL=${ROUTER_URL:-http://127.0.0.1:8080}
 
 DISAGG_RECIPE="$ROOT/recipes/llama3-8b/vllm/disagg-single-node"
+DISAGG_CGN_RECIPE="$ROOT/recipes/llama3-8b/vllm/disagg-cgn"
 AGG_RECIPE="$ROOT/recipes/llama3-8b/vllm/agg"
 
 COMPARE=0
@@ -64,7 +66,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --compare) COMPARE=1; MODES=(disagg agg); shift ;;
     --mode)
-      [ $# -ge 2 ] || { echo "--mode needs an argument (disagg|agg)" >&2; exit 64; }
+      [ $# -ge 2 ] || { echo "--mode needs an argument (disagg|agg|disagg-cgn)" >&2; exit 64; }
       MODES=("$2"); shift 2 ;;
     -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1 (see --help)" >&2; exit 64 ;;
@@ -115,8 +117,9 @@ run_mode() {
   local mode=$1 recipe
   case "$mode" in
     disagg) recipe=$DISAGG_RECIPE ;;
-    agg)    recipe=$AGG_RECIPE ;;
-    *) fail "unknown mode: $mode (want disagg|agg)" ;;
+    disagg-cgn) recipe=$DISAGG_CGN_RECIPE ;;
+    agg) recipe=$AGG_RECIPE ;;
+    *) fail "unknown mode: $mode (want disagg|disagg-cgn|agg)" ;;
   esac
 
   log "=== mode: $mode — bringing up $(basename "$recipe") ==="

@@ -7,7 +7,10 @@ from typing import Iterable
 
 import grpc
 
+from cgn_kv_connector.digests import validate_prefix_hash
 from cognitora.v1 import kv_pb2, kv_pb2_grpc
+
+__all__ = ["KvCachedClient", "validate_prefix_hash"]
 
 
 def _endpoint() -> str:
@@ -30,8 +33,7 @@ class KvCachedClient:
     def put_block(
         self, prefix_hash: bytes, payload: bytes, model: str, layer: int = 0
     ) -> bool:
-        if len(prefix_hash) != 32:
-            raise ValueError("prefix_hash must be 32 bytes")
+        validate_prefix_hash(prefix_hash)
         resp = self._stub.PutBlock(
             kv_pb2.PutBlockSpec(
                 prefix_hash=prefix_hash,
