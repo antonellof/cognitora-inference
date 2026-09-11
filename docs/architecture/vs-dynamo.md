@@ -187,7 +187,8 @@ Differentiators where Cognitora is currently ahead:
    rocm-smi on AMD) and feeds into the router scoring weight; a soft
    per-node watt cap (`[agent].watt_limit`) steers traffic to under-cap
    nodes, and the autoscaler drains nodes that hit thermal or power
-   caps while the operator closes the loop.
+   caps while the operator closes the loop. `[carbon]` adds grid-intensity
+   polling and defers low-priority HTTP requests during high-carbon periods.
 7. **Multi-model SLM → LLM cascade.** `cascade::Cascade::run` runs
    the cheap model first and only escalates when the log-probability
    of the cheap answer falls below threshold.

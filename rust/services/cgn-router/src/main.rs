@@ -12,6 +12,7 @@
 
 mod admission;
 mod autoscaler;
+mod carbon;
 mod cascade;
 mod cluster;
 mod cluster_metrics;
@@ -58,6 +59,7 @@ async fn main() -> Result<()> {
     state.bootstrap_cluster_watch().await?;
     autoscaler::spawn(state.clone());
     cluster_metrics::spawn(state.clone());
+    carbon::spawn(state.clone());
 
     let listen_http: SocketAddr = cfg
         .router

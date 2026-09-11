@@ -39,6 +39,7 @@ non-goals, and an index into the rest of the docs.
 | Federation              | `cgn-router::federation` proxies OpenAI requests to peer routers     |
 | Energy-aware autoscaler | `cgn-router::autoscaler` writes drain hints to etcd; operator scales replicas |
 | SLO admission           | `cgn-router::deadline` rejects fast when the estimated TTFT exceeds the per-tenant deadline |
+| Carbon-aware admission  | `cgn-router::carbon` polls grid intensity and defers low-priority HTTP requests during high-carbon periods |
 
 ## Operating principles
 

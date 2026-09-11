@@ -70,6 +70,19 @@ confidence_threshold = -1.0   # mean logprob; below this -> escalate
 enabled                 = false
 colocate_below_tokens   = 256
 
+# ---- Carbon-aware admission (optional) -------------------------------------
+# Polls grid carbon intensity and rejects low-priority HTTP requests
+# (X-CGN-Priority: low) while intensity exceeds the threshold.
+
+# [carbon]
+# enabled             = false
+# provider            = "static"          # static | electricitymaps | watttime
+# zone                = "DE"
+# api_token           = ""
+# static_intensity    = 300.0             # gCO2/kWh when provider = "static"
+# intensity_threshold = 450.0
+# poll_interval       = "5m"
+
 # ---- Agent (per-GPU-host engine supervisor) --------------------------------
 
 [agent]

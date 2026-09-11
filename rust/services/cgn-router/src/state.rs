@@ -12,6 +12,7 @@ use cgn_proto::v1::agent_client::AgentClient;
 use serde::{Deserialize, Serialize};
 use tonic::transport::{Channel, Endpoint};
 
+use crate::carbon::CarbonTracker;
 use crate::cluster::NodeRegistry;
 
 pub struct SharedState {
@@ -21,6 +22,8 @@ pub struct SharedState {
     pub started: std::time::Instant,
     /// Hot-swappable routing policy (etcd-driven).
     pub policy: Arc<ArcSwap<RoutingPolicy>>,
+    /// Latest grid carbon intensity sample (background-polled).
+    pub carbon: Arc<CarbonTracker>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +49,7 @@ impl SharedState {
             prefix: Arc::new(prefix),
             started: std::time::Instant::now(),
             policy: Arc::new(ArcSwap::from_pointee(policy)),
+            carbon: Arc::new(CarbonTracker::new()),
         })
     }
 

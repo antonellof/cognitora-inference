@@ -22,6 +22,7 @@ Per-binary narrative docs (features, ports, dependencies): see
 | `[engine.*]`       | `cgn-agent`         | `cgn-agent` (which engine to spawn / proxy)  |
 | `[kv.*]`           | `cgn-kv`            | `cgn-kvcached`                               |
 | `[metrics.*]`      | `cgn-metrics`       | `cgn-metrics`                                |
+| `[carbon]`         | `cgn-router`        | `cgn-router` (grid-intensity admission)      |
 | `[models.<name>]`  | `cgn-core::config`  | `cgn-router` (declarative model registry)    |
 
 ## `[cluster]`: state backend and discovery
@@ -173,6 +174,39 @@ its cap, the router routes only to under-cap nodes; when *every*
 candidate is over, routing proceeds anyway: serving beats browning out
 a request. Combine with the autoscaler's `high_watt_threshold` for
 drain-based enforcement.
+
+#### `[carbon]`: grid-intensity aware admission
+
+When enabled, the router polls a pluggable grid carbon intensity provider
+on a background interval and rejects **low-priority** OpenAI HTTP requests
+while the observed gCO₂/kWh exceeds `intensity_threshold`. Normal- and
+high-priority traffic is always admitted. Mark deferrable work with the
+`X-CGN-Priority: low` request header.
+
+```toml
+[carbon]
+enabled = true
+provider = "electricitymaps"   # static | electricitymaps | watttime
+zone = "DE"
+api_token = "..."              # required for remote providers
+static_intensity = 300.0       # gCO2/kWh when provider = "static"
+intensity_threshold = 450.0    # reject low-priority above this
+poll_interval = "5m"
+```
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `enabled` | bool | `false` | Turn on carbon-aware admission. |
+| `provider` | enum | `"static"` | Intensity source (`static`, `electricitymaps`, `watttime`). |
+| `zone` | string | `""` | Grid zone / region code (provider-specific). Required for remote providers. |
+| `api_token` | string | `""` | API credential for `electricitymaps` / `watttime`. |
+| `static_intensity` | f64 | `300.0` | Fixed intensity (gCO₂/kWh) when `provider = "static"`. |
+| `intensity_threshold` | f64 | `450.0` | Reject low-priority requests above this intensity. |
+| `poll_interval` | duration | `"5m"` | How often the router refreshes the intensity reading. |
+
+The latest reading is exported as `cgn_carbon_intensity_gco2_per_kwh{zone}`.
+Low-priority rejections increment `cgn_router_carbon_admission_rejected_total`.
+Until the first poll succeeds, admission fails open (requests are admitted).
 
 #### `[router.federation]`: cross-cluster fallback
 

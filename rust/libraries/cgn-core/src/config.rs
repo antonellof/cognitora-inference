@@ -27,6 +27,7 @@ pub struct Config {
     pub security: SecurityConfig,
     pub metrics: MetricsConfig,
     pub auth: AuthConfig,
+    pub carbon: CarbonConfig,
     pub models: HashMap<String, ModelConfig>,
 }
 
@@ -259,6 +260,94 @@ impl Default for AutoscalerConfig {
             high_watt_threshold: 350.0,
             deadline_admission: false,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Carbon (grid-intensity aware admission)
+// ---------------------------------------------------------------------------
+
+/// Grid carbon intensity polling and low-priority admission gating.
+///
+/// When enabled, the router polls a pluggable intensity provider on a
+/// background interval and rejects **low-priority** HTTP requests while
+/// the observed gCO₂/kWh exceeds `intensity_threshold`. Normal- and
+/// high-priority traffic is always admitted.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CarbonConfig {
+    pub enabled: bool,
+    pub provider: CarbonProviderKind,
+    /// Electricity grid zone / region code (provider-specific).
+    pub zone: String,
+    /// API credential for remote providers (`electricitymaps`, `watttime`).
+    pub api_token: String,
+    /// Fixed intensity when `provider = "static"` (gCO₂/kWh).
+    pub static_intensity: f64,
+    /// Reject low-priority requests when intensity exceeds this (gCO₂/kWh).
+    pub intensity_threshold: f64,
+    #[serde(with = "humantime_serde")]
+    pub poll_interval: Duration,
+}
+
+impl Default for CarbonConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: CarbonProviderKind::Static,
+            zone: String::new(),
+            api_token: String::new(),
+            static_intensity: 300.0,
+            intensity_threshold: 450.0,
+            poll_interval: Duration::from_secs(300),
+        }
+    }
+}
+
+impl CarbonConfig {
+    pub fn validate(&self) -> Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if self.intensity_threshold <= 0.0 {
+            return Err(crate::Error::Config(
+                "[carbon].intensity_threshold must be > 0 when carbon admission is enabled".into(),
+            ));
+        }
+        if self.poll_interval.is_zero() {
+            return Err(crate::Error::Config(
+                "[carbon].poll_interval must be > 0 when carbon admission is enabled".into(),
+            ));
+        }
+        match self.provider {
+            CarbonProviderKind::Static => {}
+            CarbonProviderKind::ElectricityMaps | CarbonProviderKind::WattTime => {
+                if self.zone.is_empty() {
+                    return Err(crate::Error::Config(format!(
+                        "[carbon].zone is required for provider {:?}",
+                        self.provider
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CarbonProviderKind {
+    /// Fixed intensity from `[carbon].static_intensity` (tests / offline).
+    Static,
+    /// [Electricity Maps](https://www.electricitymaps.com/) latest intensity.
+    ElectricityMaps,
+    /// [WattTime](https://www.watttime.org/) marginal emissions index.
+    WattTime,
+}
+
+impl Default for CarbonProviderKind {
+    fn default() -> Self {
+        Self::Static
     }
 }
 
@@ -900,6 +989,7 @@ impl Config {
 
     fn validate(&self) -> Result<()> {
         self.router.score_weights.validate()?;
+        self.carbon.validate()?;
         Ok(())
     }
 }
@@ -1072,5 +1162,42 @@ capacity = 0.1
         )
         .unwrap();
         assert!(Config::load(&p).is_err());
+    }
+
+    #[test]
+    fn carbon_enabled_requires_zone_for_remote_providers() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("c.toml");
+        std::fs::write(
+            &p,
+            r#"
+[carbon]
+enabled = true
+provider = "electricitymaps"
+        "#,
+        )
+        .unwrap();
+        assert!(Config::load(&p).is_err());
+    }
+
+    #[test]
+    fn carbon_static_provider_parses() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("c.toml");
+        std::fs::write(
+            &p,
+            r#"
+[carbon]
+enabled = true
+provider = "static"
+static_intensity = 275.0
+intensity_threshold = 400.0
+poll_interval = "1m"
+        "#,
+        )
+        .unwrap();
+        let cfg = Config::load(&p).unwrap();
+        assert!(cfg.carbon.enabled);
+        assert!((cfg.carbon.static_intensity - 275.0).abs() < f64::EPSILON);
     }
 }

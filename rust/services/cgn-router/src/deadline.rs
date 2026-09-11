@@ -133,6 +133,7 @@ mod tests {
                     capacity: 0.10,
                 },
             )),
+            carbon: std::sync::Arc::new(crate::carbon::CarbonTracker::new()),
         };
         let req = GenerateRequest::default();
         assert_eq!(
@@ -161,6 +162,7 @@ mod tests {
                     capacity: 0.10,
                 },
             )),
+            carbon: std::sync::Arc::new(crate::carbon::CarbonTracker::new()),
         };
         let req = GenerateRequest {
             deadline_ms: 200,

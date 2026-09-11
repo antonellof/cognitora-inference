@@ -8,6 +8,18 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 releases may make small breaking changes between minor versions;
 each one is called out under **Breaking** below.
 
+## [Unreleased]
+
+### Added
+
+- **Carbon-aware admission** (`[carbon]` config section): the router polls
+  a pluggable grid-intensity provider (`static`, `electricitymaps`, or
+  `watttime`) on a background interval and rejects low-priority OpenAI HTTP
+  requests (`X-CGN-Priority: low`) while observed gCO₂/kWh exceeds
+  `intensity_threshold`. Exposes `cgn_carbon_intensity_gco2_per_kwh{zone}`
+  and `cgn_router_carbon_admission_rejected_total`. Fails open until the
+  first successful poll.
+
 ## [0.8.0] - 2026-09-11
 
 The "etcd-optional" release. Multi-node clusters can now discover each

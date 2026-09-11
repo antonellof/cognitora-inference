@@ -248,6 +248,7 @@ mod tests {
                 power: 0.10,
                 capacity: 0.10,
             })),
+            carbon: Arc::new(crate::carbon::CarbonTracker::new()),
         }
     }
 

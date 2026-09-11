@@ -71,9 +71,11 @@ every 5 s, plus `cgn_cluster_nodes_total` and
 | `cgn_kvcached_blocks`                     | gauge     | `tier`                       |
 | `cgn_kvcached_bytes`                      | gauge     | `tier`                       |
 | `cgn_power_watts`                         | gauge     | `component`                  |
+| `cgn_carbon_intensity_gco2_per_kwh`       | gauge     | `zone`                       |
+| `cgn_router_carbon_admission_rejected_total` | counter | —                         |
 
 `outcome` ∈ {`ok`, `error`, `rate_limited`, `admission_rejected`}.
-`reason` ∈ {`queue_full`, `ttft_violation`, `unavailable`}.
+`reason` ∈ {`queue_full`, `ttft_violation`, `unavailable`, `carbon_intensity`}.
 `component` ∈ {`chassis`, `psu0`, `gpu0`, …}.
 
 ### Recording rules

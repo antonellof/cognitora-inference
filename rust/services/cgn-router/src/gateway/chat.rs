@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -21,6 +21,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info, warn};
 
+use crate::carbon::{self, CarbonAdmission, RequestPriority};
 use crate::cascade::{Cascade, StepOutcome};
 use crate::routing;
 use crate::state::SharedState;
@@ -34,8 +35,32 @@ use super::types::{
 
 pub async fn completions(
     State(state): State<Arc<SharedState>>,
+    headers: HeaderMap,
     Json(req): Json<ChatRequest>,
 ) -> Response {
+    let priority = headers
+        .get("x-cgn-priority")
+        .and_then(|v| v.to_str().ok())
+        .map(RequestPriority::parse_header)
+        .unwrap_or(RequestPriority::Normal);
+    match carbon::check_admission(
+        &state.cfg.carbon,
+        state.carbon.snapshot().as_ref(),
+        priority,
+    ) {
+        CarbonAdmission::Admit => {}
+        CarbonAdmission::Reject {
+            intensity,
+            threshold,
+        } => {
+            carbon::record_rejection();
+            CHAT_REQUESTS
+                .with_label_values(&[&req.model, "429"])
+                .inc();
+            return carbon_reject_response(intensity, threshold);
+        }
+    }
+
     let stream_mode = req.stream.unwrap_or(false);
     let id = format!(
         "chatcmpl-{}",
@@ -861,6 +886,24 @@ async fn run_prefill(
     // side-channel so the router can drive the QUIC push between agents.
     let _ = stream.next().await;
     Some(vec![])
+}
+
+fn carbon_reject_response(intensity: f64, threshold: f64) -> Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        Json(json!({
+            "error": {
+                "message": format!(
+                    "grid carbon intensity {:.0} gCO2/kWh exceeds threshold {:.0}; \
+                     low-priority requests deferred until intensity drops",
+                    intensity, threshold
+                ),
+                "type": "server_error",
+                "code": "carbon_intensity",
+            }
+        })),
+    )
+        .into_response()
 }
 
 fn error_json(e: &cgn_core::Error) -> Response {
