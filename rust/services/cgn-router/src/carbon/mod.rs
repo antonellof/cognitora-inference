@@ -12,7 +12,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use arc_swap::ArcSwap;
-use cgn_core::config::{CarbonConfig, CarbonProviderKind, Config};
+use cgn_core::config::{CarbonConfig, Config};
 use cgn_core::Result;
 use cgn_telemetry::prometheus::{GaugeVec, IntCounter};
 use cgn_telemetry::{counter, float_gauge_vec};
@@ -205,6 +205,7 @@ async fn poll_once(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cgn_core::config::CarbonProviderKind;
 
     fn cfg(threshold: f64) -> CarbonConfig {
         CarbonConfig {

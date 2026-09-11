@@ -112,6 +112,7 @@ mod tests {
             gpu_vendor: String::new(),
             vram_total_mb: 0,
             cordoned: false,
+            kv_epoch: 0,
             last_heartbeat: std::time::Instant::now(),
         }
     }

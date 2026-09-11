@@ -1,5 +1,6 @@
 //! Cluster membership + policy distribution.
 
+pub mod cache_state;
 mod gossip;
 mod registry;
 mod watcher;

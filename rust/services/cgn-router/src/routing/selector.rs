@@ -281,6 +281,7 @@ mod tests {
             },
             vram_total_mb: vram_mb,
             cordoned: false,
+            kv_epoch: 0,
             last_heartbeat: std::time::Instant::now(),
         }
     }

@@ -87,10 +87,11 @@ impl PrefixIndex {
     /// `older_than` ago, keeping only its freshest claims.
     ///
     /// Used when a node's heartbeat reports KV-cache pressure (free
-    /// blocks near zero): the engine is evicting LRU blocks, so our
-    /// older optimistic claims for that node are the ones most likely
-    /// to be stale. This keeps the index *truth-adjacent* without an
-    /// engine KV-event feed (which is tracked as follow-up work).
+    /// blocks near zero), an eviction burst (large `free_blocks` drop),
+    /// or a `kv_epoch` bump (engine restart / cache reset). Together
+    /// with confirmed-KV etcd keys this keeps the index truth-adjacent
+    /// without consuming engine block-hash KV events (which do not map
+    /// to Cognitora's BLAKE3 prefix digests).
     pub fn forget_node_stale(&self, node_id: &str, older_than: Duration) {
         let now = Instant::now();
         for mut e in self.inner.iter_mut() {

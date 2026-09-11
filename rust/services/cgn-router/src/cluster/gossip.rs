@@ -51,6 +51,8 @@ pub async fn run_gossip_watcher(
     .map_err(|e| Error::Gossip(format!("spawn: {e}")))?;
     tracing::info!(%listen, %advertise, seeds = ?cluster.gossip_seeds, "gossip member joined");
 
+    super::cache_state::warm_up_metrics();
+    let cache_state = super::cache_state::CacheStateTracker::default();
     let mut tick = tokio::time::interval(SYNC_INTERVAL);
     loop {
         tick.tick().await;
@@ -62,6 +64,7 @@ pub async fn run_gossip_watcher(
             match serde_json::from_str::<NodeEntry>(json) {
                 Ok(entry) => {
                     live.insert(entry.node_id.clone());
+                    cache_state.reconcile(&prefix, &entry);
                     nodes.upsert(entry);
                 }
                 Err(e) => {
@@ -77,6 +80,7 @@ pub async fn run_gossip_watcher(
             if !live.contains(&entry.node_id) {
                 tracing::info!(node_id = %entry.node_id, "gossip member gone; forgetting");
                 nodes.forget(&entry.node_id);
+                cache_state.forget_node(&entry.node_id);
                 prefix.forget_node(&entry.node_id);
             }
         }

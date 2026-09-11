@@ -12,6 +12,13 @@ each one is called out under **Breaking** below.
 
 ### Added
 
+- **KV-cache epoch + eviction-burst prefix reconciliation**: agents publish
+  a monotonic `kv_epoch` in heartbeats (bumped on engine restart, block-pool
+  resize, or large free-block jumps) and the router prunes stale prefix
+  claims on epoch changes, eviction bursts, and pressure. Metric:
+  `cgn_router_prefix_index_pruned_total{node,reason}`. Honest alternative
+  to consuming engine block-hash KV events, which do not map to Cognitora's
+  BLAKE3 prefix digests.
 - **Carbon-aware admission** (`[carbon]` config section): the router polls
   a pluggable grid-intensity provider (`static`, `electricitymaps`, or
   `watttime`) on a background interval and rejects low-priority OpenAI HTTP

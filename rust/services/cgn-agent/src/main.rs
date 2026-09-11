@@ -14,6 +14,7 @@
 mod engine;
 mod grpc;
 mod health;
+mod kv_cache_state;
 mod supervisor;
 mod telemetry;
 

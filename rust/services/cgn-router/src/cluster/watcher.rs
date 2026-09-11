@@ -35,6 +35,8 @@ pub async fn run_etcd_watcher(
     policy: Arc<ArcSwap<RoutingPolicy>>,
     prefix: Arc<cgn_core::prefix::PrefixIndex>,
 ) -> Result<()> {
+    super::cache_state::warm_up_metrics();
+    let cache_state = Arc::new(super::cache_state::CacheStateTracker::default());
     let mut client = Client::connect(&endpoints, None)
         .await
         .map_err(|e| Error::Etcd(format!("connect: {e}")))?;
@@ -46,6 +48,7 @@ pub async fn run_etcd_watcher(
         .map_err(|e| Error::Etcd(format!("get nodes: {e}")))?;
     for kv in snap.kvs() {
         if let Ok(entry) = serde_json::from_slice::<super::NodeEntry>(kv.value()) {
+            cache_state.reconcile(&prefix, &entry);
             nodes.upsert(entry);
         }
     }
@@ -193,15 +196,7 @@ pub async fn run_etcd_watcher(
             match ev.event_type() {
                 EventType::Put => {
                     if let Ok(entry) = serde_json::from_slice::<super::NodeEntry>(kv.value()) {
-                        // KV-cache pressure: when the engine reports < 5%
-                        // free blocks it is LRU-evicting, so our older
-                        // optimistic prefix claims for this node are the
-                        // ones most likely gone. Prune the stale half.
-                        if entry.total_blocks > 0
-                            && (entry.free_blocks as f32 / entry.total_blocks as f32) < 0.05
-                        {
-                            prefix.forget_node_stale(&entry.node_id, prefix.ttl() / 2);
-                        }
+                        cache_state.reconcile(&prefix, &entry);
                         nodes.upsert(entry);
                     } else {
                         tracing::warn!(key = %kv.key_str().unwrap_or("?"), "bad node entry");
@@ -210,6 +205,7 @@ pub async fn run_etcd_watcher(
                 EventType::Delete => {
                     if let Some(id) = kv.key_str().ok().and_then(|s| s.strip_prefix(NODES_PREFIX)) {
                         nodes.forget(id);
+                        cache_state.forget_node(id);
                         // Node went away (lease expired or drained): its KV
                         // blocks are no longer routable; purge it from the
                         // prefix index so overlap scoring stops chasing it.

@@ -25,10 +25,11 @@ zero-cost on the hot path.
 
 The router hashes the prompt's first ~64 tokens to a chain of
 BLAKE3 digests (one per 16-token block). For each candidate node it
-asks `cgn-kvcached` (over the local UDS) how many leading blocks are
-present in the warm tier. The fraction of matched blocks is the
-overlap signal. This is the single most-important term; it's why
-KV-aware routing exists.
+walks the in-memory prefix index (fed by confirmed-KV etcd keys,
+optimistic post-dispatch inserts, and agent-reported `kv_epoch` /
+eviction-burst pruning) to find the longest contiguous cached prefix.
+The fraction of matched blocks is the overlap signal. This is the
+single most-important term; it's why KV-aware routing exists.
 
 ### `util(n)`
 

@@ -39,6 +39,11 @@ pub struct NodeEntry {
     /// continue until they finish or the agent is drained explicitly.
     #[serde(default)]
     pub cordoned: bool,
+    /// Monotonic KV-cache epoch bumped by the agent on engine restarts
+    /// and cache resets. The router purges prefix claims when this
+    /// changes.
+    #[serde(default)]
+    pub kv_epoch: u64,
     #[serde(skip, default = "Instant::now")]
     pub last_heartbeat: Instant,
 }

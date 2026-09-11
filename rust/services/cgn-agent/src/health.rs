@@ -81,6 +81,7 @@ async fn loop_emit_gossip(supervisor: Arc<Supervisor>) -> Result<()> {
     .map_err(|e| Error::Gossip(format!("spawn: {e}")))?;
     info!(%listen, %advertise, seeds = ?cluster.gossip_seeds, "gossip member joined");
 
+    let mut kv_cache_state = crate::kv_cache_state::KvCacheState::default();
     loop {
         let ready = supervisor.engine.ready().await;
         let gpu = read_gpu_blocking().unwrap_or_default();
@@ -88,8 +89,9 @@ async fn loop_emit_gossip(supervisor: Arc<Supervisor>) -> Result<()> {
             crate::telemetry::scrape(supervisor.engine.name(), &supervisor.engine_cfg.url)
                 .await
                 .unwrap_or_default();
-        debug!(ready, ?gpu, ?engine_stats, "health snapshot (gossip)");
-        let record = node_record_json(&supervisor, ready, &gpu, &engine_stats);
+        let kv_epoch = kv_cache_state.observe(ready, &engine_stats);
+        debug!(ready, ?gpu, ?engine_stats, kv_epoch, "health snapshot (gossip)");
+        let record = node_record_json(&supervisor, ready, &gpu, &engine_stats, kv_epoch);
         member.publish_node_record(&record.to_string()).await;
         tokio::time::sleep(HEARTBEAT_INTERVAL).await;
     }
@@ -120,6 +122,7 @@ async fn emit_with_lease(supervisor: &Supervisor, endpoints: &[String]) -> Resul
     // Confirmed-KV keys this session has published, oldest first. Used
     // to evict our own claims when the engine reports cache pressure.
     let mut published_kv: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+    let mut kv_cache_state = crate::kv_cache_state::KvCacheState::default();
 
     loop {
         let ready = supervisor.engine.ready().await;
@@ -128,7 +131,8 @@ async fn emit_with_lease(supervisor: &Supervisor, endpoints: &[String]) -> Resul
             crate::telemetry::scrape(supervisor.engine.name(), &supervisor.engine_cfg.url)
                 .await
                 .unwrap_or_default();
-        debug!(ready, ?gpu, ?engine_stats, "health snapshot");
+        let kv_epoch = kv_cache_state.observe(ready, &engine_stats);
+        debug!(ready, ?gpu, ?engine_stats, kv_epoch, "health snapshot");
 
         if let Err(e) = publish_one(
             &mut client,
@@ -137,6 +141,7 @@ async fn emit_with_lease(supervisor: &Supervisor, endpoints: &[String]) -> Resul
             ready,
             &gpu,
             &engine_stats,
+            kv_epoch,
         )
         .await
         {
@@ -415,6 +420,7 @@ fn node_record_json(
     ready: bool,
     gpu: &GpuSnapshot,
     engine_stats: &crate::telemetry::EngineStats,
+    kv_epoch: u64,
 ) -> serde_json::Value {
     let scheme = if supervisor.cfg.security.require_mtls {
         "https"
@@ -438,6 +444,7 @@ fn node_record_json(
         "gpu_name": gpu.gpu_name,
         "gpu_vendor": gpu.gpu_vendor,
         "vram_total_mb": gpu.vram_total_mb,
+        "kv_epoch": kv_epoch,
         "ready": ready,
         "servable": true,
         "version": env!("CARGO_PKG_VERSION"),
@@ -453,9 +460,10 @@ async fn publish_one(
     ready: bool,
     gpu: &GpuSnapshot,
     engine_stats: &crate::telemetry::EngineStats,
+    kv_epoch: u64,
 ) -> Result<()> {
     use cgn_core::Error;
-    let value = node_record_json(supervisor, ready, gpu, engine_stats);
+    let value = node_record_json(supervisor, ready, gpu, engine_stats, kv_epoch);
     let key = format!(
         "{}{}",
         cgn_core::etcd_keys::NODES,
