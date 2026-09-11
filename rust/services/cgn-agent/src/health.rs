@@ -22,6 +22,9 @@ use crate::supervisor::Supervisor;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
 pub async fn loop_emit(supervisor: Arc<Supervisor>) -> Result<()> {
+    if supervisor.cfg.cluster.gossip_enabled() {
+        return loop_emit_gossip(supervisor).await;
+    }
     let endpoints = supervisor.cfg.cluster.etcd_endpoints.clone();
     if endpoints.is_empty() {
         info!("no etcd endpoints configured; running in single-node mode");
@@ -43,6 +46,51 @@ pub async fn loop_emit(supervisor: Arc<Supervisor>) -> Result<()> {
                 warn!(error=?e, "etcd publisher died; reconnecting in 5s");
             }
         }
+        tokio::time::sleep(HEARTBEAT_INTERVAL).await;
+    }
+}
+
+/// Gossip-mode publisher (`[cluster].state_backend = "gossip"`): join
+/// the gossip cluster once, then refresh our node record every
+/// heartbeat. There is no lease; peers detect our death through
+/// phi-accrual failure detection on the gossip heartbeat, which is the
+/// etcd-lease equivalent for this backend.
+///
+/// Gossip-mode limitations (see `docs/architecture/gossip.md`):
+/// confirmed-KV claims and pipeline-worker visibility entries are
+/// etcd-only, so they are skipped here.
+async fn loop_emit_gossip(supervisor: Arc<Supervisor>) -> Result<()> {
+    use cgn_core::Error;
+    let cluster = &supervisor.cfg.cluster;
+    let listen = cluster
+        .gossip_listen
+        .parse()
+        .map_err(|e| Error::Config(format!("cluster.gossip_listen: {e}")))?;
+    let advertise = cluster
+        .gossip_advertise_or_listen()
+        .parse()
+        .map_err(|e| Error::Config(format!("cluster.gossip_advertise: {e}")))?;
+    let member = cgn_gossip::GossipMember::spawn(cgn_gossip::GossipConfig {
+        cluster_name: cluster.name.clone(),
+        node_id: supervisor.cfg.agent.node_id.clone(),
+        listen,
+        advertise,
+        seeds: cluster.gossip_seeds.clone(),
+    })
+    .await
+    .map_err(|e| Error::Gossip(format!("spawn: {e}")))?;
+    info!(%listen, %advertise, seeds = ?cluster.gossip_seeds, "gossip member joined");
+
+    loop {
+        let ready = supervisor.engine.ready().await;
+        let gpu = read_gpu_blocking().unwrap_or_default();
+        let engine_stats =
+            crate::telemetry::scrape(supervisor.engine.name(), &supervisor.engine_cfg.url)
+                .await
+                .unwrap_or_default();
+        debug!(ready, ?gpu, ?engine_stats, "health snapshot (gossip)");
+        let record = node_record_json(&supervisor, ready, &gpu, &engine_stats);
+        member.publish_node_record(&record.to_string()).await;
         tokio::time::sleep(HEARTBEAT_INTERVAL).await;
     }
 }
@@ -358,30 +406,29 @@ pub(crate) fn parse_rocm_smi(json: &str) -> Option<GpuSnapshot> {
     Some(out)
 }
 
-/// Write the node-health entry under the lease, so it disappears
-/// automatically if the agent dies or partitions away.
-async fn publish_one(
-    client: &mut etcd_client::Client,
+/// Build the node record published to the cluster: the single source
+/// of truth for both backends (etcd `/cognitora/nodes/<id>` value and
+/// the gossip `cgn.node` key). The router deserializes it into
+/// `NodeEntry`.
+fn node_record_json(
     supervisor: &Supervisor,
-    lease_id: i64,
     ready: bool,
     gpu: &GpuSnapshot,
     engine_stats: &crate::telemetry::EngineStats,
-) -> Result<()> {
-    use cgn_core::Error;
+) -> serde_json::Value {
     let scheme = if supervisor.cfg.security.require_mtls {
         "https"
     } else {
         "http"
     };
-    let value = serde_json::json!({
+    serde_json::json!({
         "node_id": supervisor.cfg.agent.node_id,
         "address": format!("{scheme}://{}", supervisor.cfg.agent.listen),
         "role":    role_to_int(&supervisor.cfg.agent.role),
         "gpu_index": supervisor.cfg.agent.gpu_index,
         "model": supervisor.cfg.models.keys().next().cloned(),
         // Real engine telemetry (vLLM / SGLang /metrics). Engines without
-        // a Prometheus endpoint report zeros — the router treats
+        // a Prometheus endpoint report zeros; the router treats
         // total_blocks == 0 as "capacity unknown".
         "queue_depth": engine_stats.queue_depth,
         "free_blocks": engine_stats.free_blocks,
@@ -394,7 +441,21 @@ async fn publish_one(
         "ready": ready,
         "servable": true,
         "version": env!("CARGO_PKG_VERSION"),
-    });
+    })
+}
+
+/// Write the node-health entry under the lease, so it disappears
+/// automatically if the agent dies or partitions away.
+async fn publish_one(
+    client: &mut etcd_client::Client,
+    supervisor: &Supervisor,
+    lease_id: i64,
+    ready: bool,
+    gpu: &GpuSnapshot,
+    engine_stats: &crate::telemetry::EngineStats,
+) -> Result<()> {
+    use cgn_core::Error;
+    let value = node_record_json(supervisor, ready, gpu, engine_stats);
     let key = format!(
         "{}{}",
         cgn_core::etcd_keys::NODES,
@@ -412,7 +473,7 @@ async fn publish_one(
 /// Register locally spawned cgn-infer pipeline workers as
 /// **non-servable** nodes: they appear in cluster state (for
 /// visibility and whole-pipeline health) but carry no `model` and
-/// `servable = false`, so the router never targets them — only the
+/// `servable = false`, so the router never targets them; only the
 /// coordinator (the main node entry above) receives traffic.
 async fn publish_pipeline_workers(
     client: &mut etcd_client::Client,

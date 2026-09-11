@@ -12,6 +12,7 @@ members = [
     "rust/libraries/cgn-k8s",
     "rust/libraries/cgn-helm",
     "rust/libraries/cgn-power",
+    "rust/libraries/cgn-gossip",
 
     # Services (binary crates)
     "rust/services/cgn-router",
@@ -63,6 +64,7 @@ cgn-ratelimit  = { path = "rust/libraries/cgn-ratelimit", version = "0.7.0" }
 cgn-k8s        = { path = "rust/libraries/cgn-k8s",       version = "0.7.0" }
 cgn-helm       = { path = "rust/libraries/cgn-helm",      version = "0.7.0" }
 cgn-power      = { path = "rust/libraries/cgn-power",     version = "0.7.0" }
+cgn-gossip     = { path = "rust/libraries/cgn-gossip",    version = "0.7.0" }
 
 # Async runtime
 tokio = { version = "1.40", features = ["full"] }
@@ -131,7 +133,7 @@ io-uring = "0.7"
 
 # Cluster state
 etcd-client = { version = "0.14", features = ["tls", "tls-roots"] }
-chitchat = "0.9"
+chitchat = "0.13"
 
 # Auth
 openidconnect = { version = "3.5", default-features = false, features = ["reqwest", "rustls-tls"] }

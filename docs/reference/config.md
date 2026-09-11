@@ -24,6 +24,24 @@ Per-binary narrative docs (features, ports, dependencies): see
 | `[metrics.*]`      | `cgn-metrics`       | `cgn-metrics`                                |
 | `[models.<name>]`  | `cgn-core::config`  | `cgn-router` (declarative model registry)    |
 
+## `[cluster]`: state backend and discovery
+
+`[cluster]` selects how nodes find each other. The default backend is etcd;
+setting `state_backend = "gossip"` switches the cluster to a UDP gossip mesh
+(no external services). See
+[`docs/architecture/gossip.md`](../architecture/gossip.md) for the trade-offs:
+control-plane features such as cordon/drain, the confirmed-KV prefix feed, and
+routing-policy hot-reload stay etcd-only.
+
+| Key                | Type     | Default          | Notes |
+|--------------------|----------|------------------|-------|
+| `name`             | string   | `"cognitora"`    | Cluster name; gossip members with different names ignore each other. |
+| `state_backend`    | enum     | `"etcd"`         | `"etcd"` or `"gossip"`. |
+| `etcd`             | [string] | `["127.0.0.1:2379"]` | etcd endpoints (etcd mode only). |
+| `gossip_seeds`     | [string] | `[]`             | Seed members (`host:port`). Any subset of live members works; leave empty on the first node. |
+| `gossip_listen`    | string   | `"0.0.0.0:7946"` | UDP socket the gossip member binds (gossip mode only). |
+| `gossip_advertise` | string   | `""`             | Address peers use to reach this member. Required for multi-host clusters when `gossip_listen` binds a wildcard address; defaults to `gossip_listen` when empty. |
+
 ## `[engine]`: pluggable inference engine
 
 Cognitora's `cgn-agent` is engine-agnostic: any process that exposes the

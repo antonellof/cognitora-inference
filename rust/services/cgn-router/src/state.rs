@@ -64,6 +64,33 @@ impl SharedState {
             }
         });
 
+        // Gossip backend: etcd-free discovery. The watcher joins the
+        // gossip cluster and reconciles the registry from live-member
+        // records; failure detection replaces the etcd lease.
+        if self.cfg.cluster.gossip_enabled() {
+            let cfg = self.cfg.clone();
+            let nodes = self.nodes.clone();
+            let prefix = self.prefix.clone();
+            tokio::spawn(async move {
+                loop {
+                    match crate::cluster::run_gossip_watcher(
+                        cfg.clone(),
+                        nodes.clone(),
+                        prefix.clone(),
+                    )
+                    .await
+                    {
+                        Ok(()) => tracing::warn!("gossip watcher ended; restarting in 5s"),
+                        Err(e) => {
+                            tracing::error!(error=?e, "gossip watcher exited; restarting in 5s")
+                        }
+                    }
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+            });
+            return Ok(());
+        }
+
         if self.cfg.cluster.etcd_endpoints.is_empty() {
             tracing::warn!("no etcd endpoints; running in single-node mode");
             return Ok(());

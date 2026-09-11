@@ -59,6 +59,9 @@ pub mod ports {
     pub const VLLM_HTTP: u16 = 8000;
     /// `mlx_lm.server` HTTP (Apple Silicon MLX-LM; private to the agent).
     pub const MLX_LM_HTTP: u16 = 8090;
+    /// Gossip membership UDP port (`state_backend = "gossip"`). 7946 is
+    /// the conventional gossip port (memberlist / Serf).
+    pub const GOSSIP_UDP: u16 = 7946;
 }
 
 /// Build / version metadata.

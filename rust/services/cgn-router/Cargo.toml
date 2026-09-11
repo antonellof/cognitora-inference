@@ -43,7 +43,7 @@ crossbeam-channel = { workspace = true }
 tokenizers     = { workspace = true }
 radix_trie     = { workspace = true }
 etcd-client    = { workspace = true }
-chitchat       = { workspace = true }
+cgn-gossip     = { workspace = true }
 tracing        = { workspace = true }
 clap           = { workspace = true }
 anyhow         = { workspace = true }

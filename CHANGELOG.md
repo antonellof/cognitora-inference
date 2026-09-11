@@ -10,6 +10,20 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+### Added
+
+- **Gossip discovery backend** (`state_backend = "gossip"`): multi-node
+  clusters without etcd. New `cgn-gossip` library crate wraps
+  [chitchat](https://github.com/quickwit-oss/chitchat) (scuttlebutt
+  gossip with phi-accrual failure detection) over UDP (default port
+  7946). Agents republish the same JSON node record they write to etcd;
+  the router joins as a record-less member and reconciles live members
+  into its `NodeRegistry` every 2.5s. New `[cluster]` keys:
+  `gossip_seeds`, `gossip_listen`, `gossip_advertise`. Etcd-backed
+  control-plane features (confirmed-KV claims, cordon flags, routing
+  policy hot-reload, autoscaler hints) stay etcd-only by design; see
+  `docs/architecture/gossip.md`.
+
 ## [0.7.0] - 2026-09-10
 
 The "OpenAI parity + truth-fed routing" release. Tool calling,

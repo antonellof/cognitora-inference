@@ -28,6 +28,9 @@ pub enum Error {
     #[error("etcd: {0}")]
     Etcd(String),
 
+    #[error("gossip: {0}")]
+    Gossip(String),
+
     #[error("invalid argument: {0}")]
     InvalidArgument(String),
 
@@ -56,6 +59,7 @@ pub fn exit_code(err: &Error) -> i32 {
         Error::InvalidArgument(_) => 2,
         Error::Tls(_) => 5,
         Error::Etcd(_) => 4,
+        Error::Gossip(_) => 4,
         Error::Unavailable(_) => 4,
         Error::NotFound(_) => 4,
         Error::Io(e) if e.kind() == std::io::ErrorKind::AddrInUse => 7,

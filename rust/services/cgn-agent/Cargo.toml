@@ -17,6 +17,7 @@ cgn-core      = { workspace = true }
 cgn-proto     = { workspace = true }
 cgn-tls       = { workspace = true }
 cgn-telemetry = { workspace = true }
+cgn-gossip    = { workspace = true }
 
 tokio          = { workspace = true }
 tokio-stream   = { workspace = true }

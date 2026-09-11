@@ -1,4 +1,4 @@
-# Cognitora — example configuration.
+# Cognitora example configuration.
 #
 # All sections are optional. Values shown below are the built-in defaults
 # (see rust/libraries/cgn-core/src/config.rs).
@@ -11,6 +11,17 @@ name      = "default"
 data_dir  = "/var/lib/cognitora"
 etcd      = ["127.0.0.1:2379"]
 # node_id is derived from a stable file on first boot if unset.
+#
+# State backend: "etcd" (default) or "gossip". Gossip mode discovers nodes
+# over a UDP mesh (chitchat) and needs no external services. Control-plane
+# features (cordon/drain, confirmed-KV feed, policy hot-reload) stay
+# etcd-only; see docs/architecture/gossip.md.
+# state_backend    = "etcd"
+# gossip_seeds     = []                # any subset of live members, e.g. ["10.0.0.1:7946"]
+# gossip_listen    = "0.0.0.0:7946"    # UDP socket the gossip member binds
+# gossip_advertise = ""                # address peers use to reach this member
+                                       # (required when gossip_listen is a wildcard
+                                       # on multi-host clusters; defaults to gossip_listen)
 
 [security]
 require_mtls   = true

@@ -40,7 +40,15 @@ pub struct ClusterConfig {
     pub name: String,
     pub state_backend: StateBackend,
     pub etcd_endpoints: Vec<String>,
+    /// Seed members (`host:port`) for `state_backend = "gossip"`. Any
+    /// subset of live members works; leave empty on the first node.
     pub gossip_seeds: Vec<String>,
+    /// UDP socket the gossip member binds (gossip mode only).
+    pub gossip_listen: String,
+    /// Address peers use to reach this member. Required for multi-host
+    /// clusters when `gossip_listen` binds a wildcard address; defaults
+    /// to `gossip_listen` when empty.
+    pub gossip_advertise: String,
 }
 impl Default for ClusterConfig {
     fn default() -> Self {
@@ -49,6 +57,25 @@ impl Default for ClusterConfig {
             state_backend: StateBackend::Etcd,
             etcd_endpoints: vec![],
             gossip_seeds: vec![],
+            gossip_listen: format!("0.0.0.0:{}", crate::ports::GOSSIP_UDP),
+            gossip_advertise: String::new(),
+        }
+    }
+}
+
+impl ClusterConfig {
+    /// Whether this deployment coordinates over gossip instead of etcd.
+    pub fn gossip_enabled(&self) -> bool {
+        self.state_backend == StateBackend::Gossip
+    }
+
+    /// Advertise address for the gossip member: explicit
+    /// `gossip_advertise` when set, otherwise `gossip_listen`.
+    pub fn gossip_advertise_or_listen(&self) -> &str {
+        if self.gossip_advertise.is_empty() {
+            &self.gossip_listen
+        } else {
+            &self.gossip_advertise
         }
     }
 }

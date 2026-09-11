@@ -362,12 +362,12 @@ jobs:
         run: |
           set -euo pipefail
           # Roots first, then everything that depends on them:
-          #   cgn-proto, cgn-core          (no internal deps)
+          #   cgn-proto, cgn-core, cgn-gossip  (no internal deps)
           #   cgn-tls/telemetry/auth/helm/k8s/power  (→ core)
           #   cgn-kv                        (→ core + proto)
           #   cgn-ratelimit                 (→ core + telemetry)
           CRATES=(
-            cgn-proto cgn-core
+            cgn-proto cgn-core cgn-gossip
             cgn-tls cgn-telemetry cgn-auth cgn-helm cgn-k8s cgn-power
             cgn-kv cgn-ratelimit
           )

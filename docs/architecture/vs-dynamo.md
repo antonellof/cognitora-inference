@@ -104,9 +104,9 @@ sits above all of them**.
 | Concern | Cognitora | Dynamo |
 |---------|-----------|--------|
 | Runtime artefact | Six single-file binaries; no Python control plane, JVM, or operator runtime | Rust core + Python frontend / extensibility |
-| Service discovery | etcd (optional; single-node needs nothing, gossip fallback planned) | K8s-native, etcd, or file backends (etcd/NATS optional as of 1.x) |
-| Coordination plane | etcd only (`nodes`, `routing/policy` keys) | pluggable planes (TCP/NATS request, ZMQ/NATS events) |
-| External hard dependencies | etcd (multi-node only) | none on Kubernetes; etcd/NATS on Slurm/bare-metal paths |
+| Service discovery | etcd, or UDP gossip with `state_backend = "gossip"` (single-node needs nothing) | K8s-native, etcd, or file backends (etcd/NATS optional as of 1.x) |
+| Coordination plane | etcd (`nodes`, `routing/policy` keys) or gossip membership (`docs/architecture/gossip.md`) | pluggable planes (TCP/NATS request, ZMQ/NATS events) |
+| External hard dependencies | none (etcd optional; gossip mode is dependency-free) | none on Kubernetes; etcd/NATS on Slurm/bare-metal paths |
 | Kubernetes | optional Helm chart (`deploy/kubernetes/helm/cognitora`) | first-class operator + CRDs |
 | Bare metal | first-class systemd units (`deploy/systemd/`) | not the focus |
 | Cloud Terraform | `deploy/terraform/{aws,gcp,azure,hetzner}` | not shipped |
