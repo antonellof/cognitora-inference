@@ -26,17 +26,20 @@
 //! | `cgn_cluster_node_vram_total_mb`   | `node`                          |
 //! | `cgn_cluster_node_info`            | `node`, `address`, `model`, `role`, `gpu`, `gpu_vendor` (always 1) |
 //! | `cgn_cluster_nodes_total`          | —                               |
+//! | `cgn_cluster_power_watts_total`    | —                               |
+//! | `cgn_cluster_tokens_per_watt`      | —                               |
 //! | `cgn_router_prefix_index_digests`  | —                               |
 //!
 //! The vectors are `reset()` before each refresh so series for departed
 //! nodes disappear instead of lingering at their last value.
 
 use std::sync::{Arc, LazyLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cgn_proto::v1::NodeRole;
-use cgn_telemetry::prometheus::{GaugeVec, IntGauge, IntGaugeVec};
+use cgn_telemetry::prometheus::{Gauge, GaugeVec, IntGauge, IntGaugeVec};
 use cgn_telemetry::{float_gauge_vec, gauge, gauge_vec};
+use parking_lot::Mutex;
 
 use crate::state::SharedState;
 
@@ -128,6 +131,28 @@ static PREFIX_DIGESTS: LazyLock<IntGauge> = LazyLock::new(|| {
     )
 });
 
+static POWER_TOTAL: LazyLock<Gauge> = LazyLock::new(|| {
+    let g = Gauge::new(
+        "cgn_cluster_power_watts_total",
+        "Sum of cgn_cluster_node_power_watts across live nodes.",
+    )
+    .expect("gauge create");
+    cgn_telemetry::registry().register(Box::new(g.clone())).ok();
+    g
+});
+
+static TOKENS_PER_WATT: LazyLock<Gauge> = LazyLock::new(|| {
+    let g = Gauge::new(
+        "cgn_cluster_tokens_per_watt",
+        "Recent completion-token throughput divided by fleet power draw (tokens/s per watt).",
+    )
+    .expect("gauge create");
+    cgn_telemetry::registry().register(Box::new(g.clone())).ok();
+    g
+});
+
+static LAST_ENERGY: LazyLock<Mutex<Option<(u64, Instant)>>> = LazyLock::new(|| Mutex::new(None));
+
 fn role_str(role: NodeRole) -> &'static str {
     match role {
         NodeRole::Prefill => "prefill",
@@ -154,6 +179,7 @@ fn refresh(state: &SharedState) {
     NODES_TOTAL.set(nodes.len() as i64);
     PREFIX_DIGESTS.set(state.prefix.len() as i64);
 
+    let mut power_sum = 0.0_f64;
     for n in &nodes {
         let id = n.node_id.as_str();
         // Registry entries exist while the etcd lease is alive; a live
@@ -171,9 +197,9 @@ fn refresh(state: &SharedState) {
         NODE_KV_TOTAL
             .with_label_values(&[id])
             .set(n.total_blocks as i64);
-        NODE_POWER
-            .with_label_values(&[id])
-            .set(n.power_watts as f64);
+        let watts = n.power_watts as f64;
+        power_sum += watts;
+        NODE_POWER.with_label_values(&[id]).set(watts);
         NODE_WATT_LIMIT
             .with_label_values(&[id])
             .set(n.watt_limit as f64);
@@ -191,6 +217,22 @@ fn refresh(state: &SharedState) {
             ])
             .set(1);
     }
+    refresh_energy(power_sum);
+}
+
+fn refresh_energy(total_power: f64) {
+    POWER_TOTAL.set(total_power);
+    let tokens = crate::gateway::metrics::total_completion_tokens();
+    let now = Instant::now();
+    let mut last = LAST_ENERGY.lock();
+    if let Some((prev_tokens, prev_at)) = *last {
+        let dt = now.duration_since(prev_at).as_secs_f64();
+        if dt > 0.0 && total_power > 0.0 {
+            let rate = tokens.saturating_sub(prev_tokens) as f64 / dt;
+            TOKENS_PER_WATT.set(rate / total_power);
+        }
+    }
+    *last = Some((tokens, now));
 }
 
 /// Spawn the background refresher. Called once at router startup.
@@ -207,6 +249,8 @@ pub fn spawn(state: Arc<SharedState>) {
     LazyLock::force(&NODE_WATT_LIMIT);
     LazyLock::force(&NODE_VRAM_TOTAL);
     LazyLock::force(&NODE_INFO);
+    LazyLock::force(&POWER_TOTAL);
+    LazyLock::force(&TOKENS_PER_WATT);
 
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(REFRESH_INTERVAL);
@@ -272,6 +316,7 @@ mod tests {
         assert_eq!(NODE_QUEUE_DEPTH.with_label_values(&["n1"]).get(), 3);
         assert_eq!(NODE_CORDONED.with_label_values(&["n2"]).get(), 1);
         assert!((NODE_POWER.with_label_values(&["n1"]).get() - 250.0).abs() < f64::EPSILON);
+        assert!((POWER_TOTAL.get() - 340.5).abs() < f64::EPSILON);
 
         // Node departs → its series must disappear on the next refresh.
         state.nodes.forget("n2");

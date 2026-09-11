@@ -62,3 +62,19 @@ pub fn warm_up() {
     LazyLock::force(&CHAT_TTFT);
     LazyLock::force(&FEDERATION_FORWARDS);
 }
+
+/// Sum completion tokens across all model labels.
+pub fn total_completion_tokens() -> u64 {
+    LazyLock::force(&CHAT_COMPLETION_TOKENS);
+    cgn_telemetry::registry()
+        .gather()
+        .iter()
+        .find(|mf| mf.get_name() == "cgn_router_chat_completion_tokens_total")
+        .map(|mf| {
+            mf.get_metric()
+                .iter()
+                .map(|m| m.get_counter().get_value() as u64)
+                .sum()
+        })
+        .unwrap_or(0)
+}

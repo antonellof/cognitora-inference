@@ -46,6 +46,17 @@ pub async fn embeddings(
     }
 
     let token_ids = routing::prompt::approximate_token_ids(&inputs.join(" "));
+    let prompt_tokens = token_ids.len() as u32;
+    let _permit = match crate::admission::try_admit_request(&state, &req.model, prompt_tokens) {
+        Ok(p) => p,
+        Err(e) => {
+            return error_with(
+                StatusCode::TOO_MANY_REQUESTS,
+                "server_error",
+                &e.to_string(),
+            );
+        }
+    };
     let decision = match routing::pick(&state, &req.model, NodeRole::Both, &token_ids).await {
         Ok(d) => d,
         Err(e) => {

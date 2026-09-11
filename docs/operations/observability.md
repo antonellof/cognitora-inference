@@ -74,6 +74,13 @@ every 5 s, plus `cgn_cluster_nodes_total` and
 | `cgn_carbon_intensity_gco2_per_kwh`       | gauge     | `zone`                       |
 | `cgn_router_carbon_admission_rejected_total` | counter | —                         |
 | `cgn_router_prefix_index_pruned_total`    | counter   | `node`, `reason`             |
+| `cgn_cluster_power_watts_total`           | gauge     | —                            |
+| `cgn_cluster_tokens_per_watt`             | gauge     | —                            |
+
+`cgn_cluster_power_watts_total` sums `cgn_cluster_node_power_watts` across
+live nodes (refreshed every 5 s). `cgn_cluster_tokens_per_watt` is the
+recent completion-token rate divided by fleet power — use it with
+`scripts/bench/energy/` for published J/token and tokens/s per W numbers.
 
 `outcome` ∈ {`ok`, `error`, `rate_limited`, `admission_rejected`}.
 `reason` ∈ {`queue_full`, `ttft_violation`, `unavailable`, `carbon_intensity`}.

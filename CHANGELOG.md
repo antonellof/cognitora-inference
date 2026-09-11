@@ -10,15 +10,27 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-11
+
+The "admission + energy metrics" release. Per-model inflight caps are
+enforced on every gateway path, and the router exposes fleet-level power
+and tokens-per-watt gauges plus a bench harness for publishing J/token.
+
 ### Added
 
 - **Router-side admission control wired**: per-(model, role) inflight caps
   from `[router.admission].max_queue` are now enforced on the HTTP gateway
-  and gRPC `Generate` path. Metrics:
+  (chat + embeddings), and gRPC `Generate`. Metrics:
   `cgn_router_admission_inflight{model,role}` and
   `cgn_router_admission_rejected_total{model,reason}`. Deadline admission
   (`[router.autoscaler].deadline_admission`) rejects after routing when the
   estimated TTFT exceeds the request deadline.
+- **Cluster energy gauges**: `cgn_cluster_power_watts_total` (sum of node
+  power) and `cgn_cluster_tokens_per_watt` (recent completion-token rate /
+  fleet watts, refreshed every 5 s).
+- **Energy benchmark harness** (`scripts/bench/energy/`): samples router
+  `/metrics` before/after `bench_client.py` and writes tokens/s per W and
+  J/token to `summary.md`.
 
 ## [0.9.0] - 2026-09-11
 
