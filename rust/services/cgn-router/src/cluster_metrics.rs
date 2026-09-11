@@ -264,6 +264,7 @@ mod tests {
                 },
             )),
             carbon: Arc::new(crate::carbon::CarbonTracker::new()),
+            admission: Arc::new(crate::admission::Admission::new()),
         };
 
         refresh(&state);

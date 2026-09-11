@@ -62,11 +62,14 @@ traffic.
 
 ## Admission
 
-After scoring, the router calls `Admission::try_admit(model, role)`.
-The admission counter is per-(model, role) and bounded by
+After scoring, the router calls `Admission::try_admit(model, role)` on
+the HTTP gateway and gRPC `Generate` paths before dispatch. The
+admission counter is per-(model, role) and bounded by
 `[router.admission].max_queue`. A `Permit` is held for the lifetime
 of the request and decrements on drop (RAII). When the queue is
-full the router returns `503` immediately without calling the agent.
+full the router returns `429` immediately without calling the agent.
+When `[router.autoscaler].deadline_admission = true`, requests whose
+estimated TTFT exceeds their deadline are rejected after routing.
 
 We deliberately don't queue: queueing inflates TTFT and the
 client's deadline budget is more useful at the source. The queue

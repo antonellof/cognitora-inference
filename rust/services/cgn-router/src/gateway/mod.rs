@@ -36,6 +36,7 @@ pub async fn serve(state: Arc<SharedState>, addr: SocketAddr) -> Result<()> {
     // Eagerly register every metric so /metrics returns the full schema
     // even before any request has been served.
     metrics::warm_up();
+    crate::admission::warm_up_metrics();
     let app = router(state.clone()).layer(TraceLayer::new_for_http());
     tracing::info!(%addr, "openai surface listening");
     let listener = tokio::net::TcpListener::bind(addr)

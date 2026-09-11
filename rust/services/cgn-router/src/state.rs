@@ -12,6 +12,7 @@ use cgn_proto::v1::agent_client::AgentClient;
 use serde::{Deserialize, Serialize};
 use tonic::transport::{Channel, Endpoint};
 
+use crate::admission::Admission;
 use crate::carbon::CarbonTracker;
 use crate::cluster::NodeRegistry;
 
@@ -24,6 +25,8 @@ pub struct SharedState {
     pub policy: Arc<ArcSwap<RoutingPolicy>>,
     /// Latest grid carbon intensity sample (background-polled).
     pub carbon: Arc<CarbonTracker>,
+    /// Per-(model, role) inflight admission counters.
+    pub admission: Arc<Admission>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +53,7 @@ impl SharedState {
             started: std::time::Instant::now(),
             policy: Arc::new(ArcSwap::from_pointee(policy)),
             carbon: Arc::new(CarbonTracker::new()),
+            admission: Arc::new(Admission::new()),
         })
     }
 

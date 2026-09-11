@@ -102,6 +102,12 @@ async fn forward(
     let token_ids =
         super::prompt::approximate_token_ids(&super::prompt::join_messages(&req.messages));
 
+    let _permit = crate::admission::try_admit_request(
+        &state,
+        &req.model,
+        token_ids.len() as u32,
+    )?;
+
     let role = if state.cfg.router.disagg.enabled
         && (token_ids.len() as u32) >= state.cfg.router.disagg.colocate_below_tokens
     {

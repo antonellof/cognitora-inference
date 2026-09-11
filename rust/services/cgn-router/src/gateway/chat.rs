@@ -468,6 +468,9 @@ async fn stream_tokens(
     model: String,
     created: i64,
 ) -> cgn_core::Result<()> {
+    let token_ids =
+        routing::prompt::approximate_token_ids(&routing::prompt::join_messages(&proto.messages));
+    let _permit = crate::admission::try_admit_request(&state, &proto.model, token_ids.len() as u32)?;
     let dispatch_started = std::time::Instant::now();
     let mut stream = run_to_token_stream(state, proto).await?;
     let mut completion_tokens = 0u64;
@@ -556,6 +559,9 @@ async fn buffered_run(
     state: Arc<SharedState>,
     proto: GenerateRequest,
 ) -> cgn_core::Result<(String, u32, String, Option<serde_json::Value>)> {
+    let token_ids =
+        routing::prompt::approximate_token_ids(&routing::prompt::join_messages(&proto.messages));
+    let _permit = crate::admission::try_admit_request(&state, &proto.model, token_ids.len() as u32)?;
     let mut stream = run_to_token_stream(state, proto).await?;
     let mut text = String::new();
     let mut count = 0u32;
@@ -788,6 +794,26 @@ async fn dispatch_once(
         "openai → routing decision"
     );
 
+    match crate::deadline::check(state, req, &decode_decision.node) {
+        crate::deadline::AdmissionOutcome::Admit => {}
+        crate::deadline::AdmissionOutcome::DeadlineExceeded { .. } => {
+            crate::admission::record_rejection(&req.model, "ttft_violation");
+            return Err((
+                Some(decode_decision.node.node_id.clone()),
+                cgn_core::Error::Unavailable(
+                    "deadline exceeded given current queue depth".into(),
+                ),
+            ));
+        }
+        crate::deadline::AdmissionOutcome::QueueFull => {
+            crate::admission::record_rejection(&req.model, "queue_full");
+            return Err((
+                Some(decode_decision.node.node_id.clone()),
+                cgn_core::Error::Unavailable("admission queue full".into()),
+            ));
+        }
+    }
+
     let decode_node_id = decode_decision.node.node_id.clone();
 
     // Phase 1: prefill (only when split *and* prefill node ≠ decode node).
@@ -910,6 +936,11 @@ fn error_json(e: &cgn_core::Error) -> Response {
     let (status, code) = match e {
         cgn_core::Error::InvalidArgument(_) => (StatusCode::BAD_REQUEST, "invalid_request_error"),
         cgn_core::Error::NotFound(_) => (StatusCode::NOT_FOUND, "not_found_error"),
+        cgn_core::Error::Unavailable(msg)
+            if msg.contains("admission queue full") || msg.contains("deadline exceeded") =>
+        {
+            (StatusCode::TOO_MANY_REQUESTS, "server_error")
+        }
         cgn_core::Error::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, "server_error"),
         _ => (StatusCode::INTERNAL_SERVER_ERROR, "server_error"),
     };

@@ -135,6 +135,7 @@ mod tests {
                 },
             )),
             carbon: std::sync::Arc::new(crate::carbon::CarbonTracker::new()),
+            admission: std::sync::Arc::new(crate::admission::Admission::new()),
         };
         let req = GenerateRequest::default();
         assert_eq!(
@@ -164,6 +165,7 @@ mod tests {
                 },
             )),
             carbon: std::sync::Arc::new(crate::carbon::CarbonTracker::new()),
+            admission: std::sync::Arc::new(crate::admission::Admission::new()),
         };
         let req = GenerateRequest {
             deadline_ms: 200,

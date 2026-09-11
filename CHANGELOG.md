@@ -10,6 +10,16 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+### Added
+
+- **Router-side admission control wired**: per-(model, role) inflight caps
+  from `[router.admission].max_queue` are now enforced on the HTTP gateway
+  and gRPC `Generate` path. Metrics:
+  `cgn_router_admission_inflight{model,role}` and
+  `cgn_router_admission_rejected_total{model,reason}`. Deadline admission
+  (`[router.autoscaler].deadline_admission`) rejects after routing when the
+  estimated TTFT exceeds the request deadline.
+
 ## [0.9.0] - 2026-09-11
 
 The "carbon + truth-fed prefix" release. Grid-intensity aware admission
