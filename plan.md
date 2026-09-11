@@ -41,6 +41,9 @@ non-goals, and an index into the rest of the docs.
 | SLO admission           | `cgn-router::deadline` rejects fast when the estimated TTFT exceeds the per-tenant deadline |
 | Carbon-aware admission  | `cgn-router::carbon` polls grid intensity and defers low-priority HTTP requests during high-carbon periods |
 | Eviction-aware prefix index | Agent `kv_epoch` + eviction-burst signals; router `cache_state` reconciles prefix claims without engine block-hash events |
+| Router admission control    | Per-(model, role) inflight caps on HTTP chat/embeddings and gRPC `Generate` |
+| Cluster energy metrics      | `cgn_cluster_power_watts_total`, `cgn_cluster_tokens_per_watt`; bench harness at `scripts/bench/energy/` |
+| cgn-kvcached engine connector (preview) | `kv_offload = "cgn"` + `python/cgn-kv-connector` + `PutBlock` gRPC |
 
 ## Operating principles
 

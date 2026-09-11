@@ -1,0 +1,39 @@
+# cgn-agent for llama3-8b · vllm · aggregated · Cognitora KV offload.
+
+[cluster]
+name           = "cognitora-llama3-8b-agg-cgn"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7080"
+role     = "both"
+node_id  = "agent-llama3-8b-cgn"
+kv_uds   = "/tmp/cognitora-kv.sock"
+
+[engine]
+kind       = "vllm"
+url        = "http://127.0.0.1:8001"
+# `cgn` makes cgn-agent inject the CognitoraConnector into vLLM, pointing
+# at the `cgn_kv_connector.connector` Python module.
+kv_offload = "cgn"
+
+[engine.vllm]
+binary     = "vllm"
+extra_args = [
+  "--enable-chunked-prefill",
+  "--block-size", "16",
+  "--gpu-memory-utilization", "0.85",
+  "--port", "8001",
+  "--host", "127.0.0.1",
+]
+
+[models."meta-llama/Meta-Llama-3.1-8B-Instruct"]
+tp            = 1
+max_model_len = 8192

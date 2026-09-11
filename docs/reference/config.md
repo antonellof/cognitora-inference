@@ -52,7 +52,7 @@ OpenAI HTTP surface (`/v1/completions`, `/health`, `/v1/models`) plugs in.
 |-------------------------|--------|----------------------------------|-------|
 | `engine.kind`           | enum   | `"vllm"`                         | One of `vllm`, `sglang`, `llama_cpp`, `mlx`, `cgn_infer`, `openai_compat`. |
 | `engine.url`            | string | `http://127.0.0.1:8000`          | OpenAI HTTP base URL. |
-| `engine.kv_offload`     | enum   | `"none"`                         | Engine-side KV offload backend. One of `none`, `nixl`, `lmcache`, `hicache`, `kvbm`. See [Engine-side KV offload](#engine-side-kv-offload) below. |
+| `engine.kv_offload`     | enum   | `"none"`                         | Engine-side KV offload backend. One of `none`, `nixl`, `lmcache`, `hicache`, `kvbm`, `cgn`. See [Engine-side KV offload](#engine-side-kv-offload) below. |
 | `engine.vllm.binary`    | string | `"vllm"`                         | Path or PATH-name of the `vllm` CLI. |
 | `engine.vllm.extra_args`| array  | `["--enable-chunked-prefill"]`   | Appended after the auto-rendered argv. |
 | `engine.sglang.binary`             | string | `"python"`                | Python interpreter that runs `-m sglang.launch_server`. |
@@ -125,6 +125,7 @@ backends is a one-line change.
 | `lmcache` | `LMCacheConnectorV1` (agg) or `PdConnector(LMCache+NIXL)` (disagg, prefill role)                     | (rejected: LMCache is vLLM-side)                                                         |
 | `hicache` | (rejected: vLLM has no HiCache)                                                                     | `--enable-hierarchical-cache --hicache-ratio 2 --hicache-write-policy write_through --hicache-storage-backend nixl` |
 | `kvbm`    | `--kv-transfer-config '{"kv_connector":"DynamoConnector","kv_connector_module_path":"kvbm.vllm_integration.connector",...}'` | (rejected: KVBM has no SGLang support)                                                   |
+| `cgn`     | `--kv-transfer-config '{"kv_connector":"CognitoraConnector","kv_connector_module_path":"cgn_kv_connector.connector",...}'` (preview) | (rejected: Cognitora connector is vLLM-side)                                      |
 
 Disagg topologies (`[agent].role = "prefill"` or `"decode"`) compose
 the chosen backend with NIXL automatically. The full table, including

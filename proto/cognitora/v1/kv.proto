@@ -14,6 +14,7 @@ service Kv {
   rpc Lookup(Hash) returns (BlockInfo);
   rpc BatchLookup(HashList) returns (BlockInfoList);
   rpc Promote(Hash) returns (Status);
+  rpc PutBlock(PutBlockSpec) returns (Status);
   rpc Push(PushSpec) returns (Status);
   rpc Pull(PullSpec) returns (Status);
   rpc Stats(StatsRequest) returns (StatsResponse);
@@ -22,6 +23,13 @@ service Kv {
 message Hash      { bytes value = 1; }
 message HashList  { repeated bytes values = 1; }
 message BlockInfoList { repeated BlockInfo entries = 1; }
+
+message PutBlockSpec {
+  bytes  prefix_hash = 1;  // 32-byte BLAKE3 digest (layer folded in index key)
+  bytes  payload     = 2;  // raw KV block bytes
+  string model       = 3;
+  uint32 layer       = 4;
+}
 
 message PushSpec {
   bytes  prefix_hash    = 1;

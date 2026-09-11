@@ -34,6 +34,7 @@ left untouched; it's the engine's internal accounting.
 | Layer 2: `LMCacheConnectorV1` for vLLM (agg + disagg)               | yes (auto-wired by `kv_offload = "lmcache"`) | mature |
 | Layer 2: SGLang HiCache (`--enable-hierarchical-cache`)             | yes (auto-wired by `kv_offload = "hicache"`) | mature |
 | Layer 2: `DynamoConnector` (KVBM)                                   | yes (auto-wired by `kv_offload = "kvbm"`, for parity benchmarks) | benchmarking |
+| Layer 2: `CognitoraConnector` (`cgn-kvcached` RAM/SSD)              | yes (auto-wired by `kv_offload = "cgn"`, preview)              | preview      |
 | Layer 2: FlexKV                                                     | no    | considering     |
 | Mooncake-backed shared HiCache pool                                  | no, but the recipe TOML can pass through `--hicache-storage-backend mooncake` | compatible |
 
@@ -68,7 +69,7 @@ Three reasons:
 ```toml
 [engine]
 kind       = "vllm"        # or "sglang", "llama_cpp", "mlx", "openai_compat"
-kv_offload = "lmcache"     # or "none" | "nixl" | "hicache" | "kvbm"
+kv_offload = "lmcache"     # or "none" | "nixl" | "hicache" | "kvbm" | "cgn"
 ```
 
 `cgn-agent` translates this to the right CLI flags at engine launch.

@@ -10,6 +10,12 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+### Added
+
+- **`engine.kv_offload = "cgn"`** (preview): vLLM `CognitoraConnector` via the
+  `python/cgn-kv-connector` package spills blocks into `cgn-kvcached` through
+  a new gRPC `PutBlock` RPC. Reference recipe: `recipes/llama3-8b/vllm/agg-cgn/`.
+
 ## [0.9.1] - 2026-09-11
 
 The "admission + energy metrics" release. Per-model inflight caps are

@@ -7,7 +7,8 @@ use cgn_core::{config::Config, Error, Result};
 use cgn_proto::v1::{
     block_info::Tier as PTier,
     kv_server::{Kv, KvServer},
-    BlockInfo, BlockInfoList, Hash, HashList, PullSpec, PushSpec, StatsRequest, StatsResponse,
+    BlockInfo, BlockInfoList, Hash, HashList, PullSpec, PutBlockSpec, PushSpec, StatsRequest,
+    StatsResponse,
     Status as PStatus,
 };
 use tonic::{transport::Server, Request, Response, Status};
@@ -112,6 +113,32 @@ impl Kv for KvSvc {
             },
         };
         Ok(Response::new(resp))
+    }
+
+    async fn put_block(&self, req: Request<PutBlockSpec>) -> Result<Response<PStatus>, Status> {
+        let spec = req.into_inner();
+        let digest = digest_from_bytes(&spec.prefix_hash)?;
+        let addr = cgn_kv::BlockAddress {
+            digest,
+            layer: spec.layer,
+        };
+        let bytes = bytes::Bytes::from(spec.payload);
+        if bytes.is_empty() {
+            return Ok(Response::new(PStatus {
+                code: 3,
+                message: "empty payload".into(),
+            }));
+        }
+        match self.store.put_ram(addr, bytes, &spec.model) {
+            Ok(()) => Ok(Response::new(PStatus {
+                code: 0,
+                message: "stored".into(),
+            })),
+            Err(e) => Ok(Response::new(PStatus {
+                code: 13,
+                message: format!("put: {e}"),
+            })),
+        }
     }
 
     async fn push(&self, req: Request<PushSpec>) -> Result<Response<PStatus>, Status> {

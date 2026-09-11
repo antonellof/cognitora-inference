@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cgn-kv-connector"
+version = "0.1.0"
+description = "vLLM KV connector that offloads blocks to cgn-kvcached"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+  "grpcio>=1.60",
+  "protobuf>=4.25",
+  "torch",
+]
+
+[project.optional-dependencies]
+vllm = ["vllm>=0.8"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cgn_kv_connector*", "cognitora*"]

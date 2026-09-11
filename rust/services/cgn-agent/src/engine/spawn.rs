@@ -33,6 +33,9 @@
 //! | vllm    | both     | lmcache     | `--kv-transfer-config '{LMCacheConnectorV1,kv_both}'`  |
 //! | vllm    | prefill  | lmcache     | `--kv-transfer-config '{PdConnector(LMCache+Nixl)}'`   |
 //! | vllm    | decode   | lmcache     | `--kv-transfer-config '{NixlConnector,kv_consumer}'`   |
+//! | vllm    | both     | cgn         | `--kv-transfer-config '{CognitoraConnector,kv_both}'`  |
+//! | vllm    | prefill  | cgn         | `--kv-transfer-config '{PdConnector(Cgn+Nixl)}'`       |
+//! | vllm    | decode   | cgn         | `--kv-transfer-config '{NixlConnector,kv_consumer}'`   |
 //! | vllm    | both     | kvbm        | `--kv-transfer-config '{DynamoConnector(kvbm),kv_both}'`|
 //! | sglang  | both     | hicache     | `--enable-hierarchical-cache --hicache-* ...`          |
 //! | llama_cpp / mlx / tensorrt_llm / cgn_infer / openai_compat | * | only `none` is valid |
@@ -397,13 +400,14 @@ fn validate_kv_offload(kind: EngineKind, offload: KvOffload) -> Result<()> {
             | (EngineKind::Vllm, KvOffload::Nixl)
             | (EngineKind::Vllm, KvOffload::Lmcache)
             | (EngineKind::Vllm, KvOffload::Kvbm)
+            | (EngineKind::Vllm, KvOffload::Cgn)
             | (EngineKind::Sglang, KvOffload::Hicache)
             | (EngineKind::Sglang, KvOffload::Nixl)
     );
     if !ok {
         return Err(Error::Config(format!(
             "engine.kv_offload = \"{}\" is not supported with engine.kind = \"{}\". \
-             Valid pairings: vllm × {{none,nixl,lmcache,kvbm}}, sglang × {{none,nixl,hicache}}, \
+             Valid pairings: vllm × {{none,nixl,lmcache,kvbm,cgn}}, sglang × {{none,nixl,hicache}}, \
              llama_cpp/mlx/tensorrt_llm/cgn_infer/openai_compat × {{none}}.",
             offload.as_str(),
             match kind {
@@ -449,6 +453,9 @@ pub(crate) fn vllm_kv_transfer_config(role: NodeRoleCfg, offload: KvOffload) -> 
         (Both, Kvbm) => r#"{"kv_connector":"DynamoConnector","kv_role":"kv_both","kv_connector_module_path":"kvbm.vllm_integration.connector"}"#.to_string(),
         (Prefill, Kvbm) => r#"{"kv_connector":"DynamoConnector","kv_role":"kv_producer","kv_connector_module_path":"kvbm.vllm_integration.connector"}"#.to_string(),
         (Decode, Kvbm) => r#"{"kv_connector":"DynamoConnector","kv_role":"kv_consumer","kv_connector_module_path":"kvbm.vllm_integration.connector"}"#.to_string(),
+        (Both, Cgn) => r#"{"kv_connector":"CognitoraConnector","kv_role":"kv_both","kv_connector_module_path":"cgn_kv_connector.connector"}"#.to_string(),
+        (Prefill, Cgn) => r#"{"kv_connector":"PdConnector","kv_role":"kv_both","kv_connector_extra_config":{"connectors":[{"kv_connector":"CognitoraConnector","kv_role":"kv_both","kv_connector_module_path":"cgn_kv_connector.connector"},{"kv_connector":"NixlConnector","kv_role":"kv_both"}]}}"#.to_string(),
+        (Decode, Cgn) => r#"{"kv_connector":"NixlConnector","kv_role":"kv_both"}"#.to_string(),
     };
     Some(json)
 }
@@ -747,6 +754,47 @@ mod tests {
         let json = &argv[i + 1];
         assert!(json.contains("DynamoConnector"));
         assert!(json.contains("kvbm.vllm_integration.connector"));
+    }
+
+    #[test]
+    fn vllm_cgn_aggregated_uses_cognitora_connector() {
+        let mut cfg = vllm_cfg();
+        cfg.kv_offload = KvOffload::Cgn;
+        let argv = render_argv(
+            &cfg,
+            &spec("Qwen/Qwen2.5-0.5B", None),
+            NodeRoleCfg::Both,
+            None,
+        )
+        .unwrap();
+        let i = argv
+            .iter()
+            .position(|a| a == "--kv-transfer-config")
+            .unwrap();
+        let json = &argv[i + 1];
+        assert!(json.contains("CognitoraConnector"));
+        assert!(json.contains("cgn_kv_connector.connector"));
+    }
+
+    #[test]
+    fn vllm_cgn_prefill_uses_pd_connector_with_nixl() {
+        let mut cfg = vllm_cfg();
+        cfg.kv_offload = KvOffload::Cgn;
+        let argv = render_argv(
+            &cfg,
+            &spec("Qwen/Qwen2.5-0.5B", None),
+            NodeRoleCfg::Prefill,
+            None,
+        )
+        .unwrap();
+        let i = argv
+            .iter()
+            .position(|a| a == "--kv-transfer-config")
+            .unwrap();
+        let json = &argv[i + 1];
+        assert!(json.contains("PdConnector"));
+        assert!(json.contains("CognitoraConnector"));
+        assert!(json.contains("NixlConnector"));
     }
 
     #[test]

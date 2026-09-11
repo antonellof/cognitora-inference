@@ -484,15 +484,15 @@ pub enum EngineKind {
 ///
 /// Compatibility:
 ///
-/// | Engine        | `none` | `nixl` | `lmcache` | `hicache` | `kvbm` |
-/// |---------------|--------|--------|-----------|-----------|--------|
-/// | `vllm`        | yes    | yes    | yes       | no        | yes    |
-/// | `sglang`      | yes    | yes    | no        | yes       | no     |
-/// | `llama_cpp`   | yes    | no     | no        | no        | no     |
-/// | `mlx`         | yes    | no     | no        | no        | no     |
-/// | `tensorrt_llm`| yes    | no     | no        | no        | no     |
-/// | `cgn_infer`   | yes    | no     | no        | no        | no     |
-/// | `openai_compat` | yes  | no     | no        | no        | no     |
+/// | Engine        | `none` | `nixl` | `lmcache` | `hicache` | `kvbm` | `cgn` |
+/// |---------------|--------|--------|-----------|-----------|--------|-------|
+/// | `vllm`        | yes    | yes    | yes       | no        | yes    | yes   |
+/// | `sglang`      | yes    | yes    | no        | yes       | no     | no    |
+/// | `llama_cpp`   | yes    | no     | no        | no        | no     | no    |
+/// | `mlx`         | yes    | no     | no        | no        | no     | no    |
+/// | `tensorrt_llm`| yes    | no     | no        | no        | no     | no    |
+/// | `cgn_infer`   | yes    | no     | no        | no        | no     | no    |
+/// | `openai_compat` | yes  | no     | no        | no        | no     | no    |
 ///
 /// In disaggregated topologies (`[agent].role = "prefill"` or `"decode"`)
 /// the renderer automatically composes the offload backend with NIXL so
@@ -519,6 +519,10 @@ pub enum KvOffload {
     /// `kvbm.vllm_integration.connector`). Requires the `kvbm` Python
     /// package on the engine host.
     Kvbm,
+    /// Cognitora `cgn-kvcached` tier (`CognitoraConnector` from the
+    /// `cgn-kv-connector` Python package). Spills engine KV blocks into
+    /// the host-local RAM/SSD tiers and feeds the router prefix index.
+    Cgn,
 }
 
 impl KvOffload {
@@ -530,6 +534,7 @@ impl KvOffload {
             Self::Lmcache => "lmcache",
             Self::Hicache => "hicache",
             Self::Kvbm => "kvbm",
+            Self::Cgn => "cgn",
         }
     }
 }
