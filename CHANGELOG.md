@@ -14,7 +14,11 @@ each one is called out under **Breaking** below.
 
 - **Router → vLLM prefix digest passthrough**: agents forward sequence-chained
   BLAKE3 digests as `kv_transfer_params.cgn_prefix_digests` on chat requests
-  so `CognitoraConnector` can probe `cgn-kvcached`.
+  so `CognitoraConnector` can probe `cgn-kvcached`. When `kv_offload = "cgn"`,
+  the agent also BatchLookups local kvcached and passes
+  `cgn_resident_digests` for scheduler-side hits.
+- **`recipes/llama3-8b/vllm/disagg-cgn/`**: disaggregated prefill/decode with
+  CognitoraConnector + NIXL (GPU host required to run).
 - **`scripts/bench/validate-local.sh`**: Mac/CPU smoke test for disagg/energy
   harness scripts (no GPU required).
 - **`engine.kv_offload = "cgn"`** (preview): vLLM `CognitoraConnector` via the

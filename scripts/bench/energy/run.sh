@@ -30,7 +30,6 @@ fail() { printf '\033[1;31m[energy-bench] fail:\033[0m %s\n' "$*" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || fail "python3 not found"
 mkdir -p "$OUT_DIR"
 
-METRICS_PY="$HERE/metrics.py"
 BENCH="$ROOT/scripts/bench/bench_client.py"
 [ -f "$BENCH" ] || fail "missing $BENCH"
 

@@ -21,6 +21,20 @@ class PrefixDigestParsing(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0], raw)
 
+    def test_prefers_resident(self) -> None:
+        raw = bytes(range(32))
+        req = type(
+            "R",
+            (),
+            {
+                "kv_transfer_params": {
+                    "cgn_prefix_digests": ["00" * 32],
+                    "cgn_resident_digests": [raw.hex()],
+                }
+            },
+        )()
+        self.assertEqual(request_prefix_digests(req), [raw])
+
     def test_empty(self) -> None:
         req = type("R", (), {"kv_transfer_params": {}})()
         self.assertEqual(request_prefix_digests(req), [])

@@ -95,6 +95,9 @@ pub struct GenerateReq {
     /// engine-side connectors (e.g. `CognitoraConnector`) can probe
     /// `cgn-kvcached` for resident prefixes.
     pub prefix_digests: Vec<Vec<u8>>,
+    /// Subset of `prefix_digests` confirmed resident in host-local
+    /// `cgn-kvcached` (populated when `kv_offload = "cgn"`).
+    pub resident_digests: Vec<Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]

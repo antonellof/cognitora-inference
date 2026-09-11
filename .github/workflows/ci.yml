@@ -112,6 +112,15 @@ jobs:
         with: { version: v3.15.0 }
       - run: helm lint deploy/kubernetes/helm/cognitora
 
+  bench-validate:
+    name: bench harness (no GPU)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: bash scripts/bench/validate-local.sh
+
   shellcheck:
     name: shellcheck
     runs-on: ubuntu-24.04
@@ -122,6 +131,8 @@ jobs:
           shellcheck \
             deploy/installer/install.sh \
             scripts/bench/disagg/run.sh \
+            scripts/bench/energy/run.sh \
+            scripts/bench/validate-local.sh \
             scripts/e2e-gpu.sh \
             tests/e2e/single_node.sh \
             tests/e2e/multi_node_kv.sh
