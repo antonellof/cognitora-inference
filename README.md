@@ -2,7 +2,7 @@
 
 # Cognitora
 
-**The open-source LLM inference stack — from a local AI cluster to a datacenter fleet.**
+**The open-source LLM inference stack, from a local AI cluster to a datacenter fleet.**
 
 Run vLLM, SGLang, TensorRT-LLM, llama.cpp, or **MLX** (Apple Silicon) as a coordinated multi-node cluster (KV-aware, disaggregation-ready, energy-aware) on anything from a few DGX Sparks, AMD boxes, or Mac Studios on your desk to a full datacenter fleet — bare metal, Kubernetes, or any major cloud, installed with a single curl line.
 
