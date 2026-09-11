@@ -71,6 +71,7 @@ supports Llama-family GGUF models with sequential request serving; only
 | [**Energy-aware scheduling**](docs/operations/observability.md) | `cgn-power` reads Redfish + NVML + ROCm (`rocm-smi`); the routing score has a power term, per-node `watt_limit` soft caps steer traffic away from hot nodes, and the autoscaler drains them. | Lower W-per-token and fewer SLA breaches under thermal stress, on NVIDIA and AMD fleets. |
 | [**Heterogeneous fleets**](docs/reference/config.md) | Agents publish GPU name / vendor / VRAM in the heartbeat; per-model `min_vram_mb` + `require_gpu` constraints filter routing candidates. | Mix H100s, A10s, and MI300Xs in one cluster; each model lands only on hardware that can serve it. |
 | [**Cross-cluster federation**](docs/reference/config.md) | When no local node serves a model, the gateway forwards to the lowest-latency reachable peer cluster (`[router.federation]`); `cgn-kvcached` peers across QUIC. | Multi-region inference without Kubernetes-of-Kubernetes. |
+| [**Gossip discovery**](docs/architecture/gossip.md) | `state_backend = "gossip"`: agents and router form a UDP scuttlebutt mesh (chitchat, phi-accrual failure detection); no etcd required for multi-node clusters. | Zero external services from a laptop to a rack; etcd remains available for confirmed-KV claims and policy hot-reload. |
 | [**One-line install**](https://inference.cognitora.dev/install) ([`deploy/installer/install.sh`](deploy/installer/install.sh)) | Cosign-verified release tarballs, six binaries dropped into `/usr/local/bin`. Short URL redirects to the installer script. | Same artifact bare-metal / VM / container / Kubernetes. |
 | [**Recipes**](recipes/README.md) | Flat TOML profiles per `<model>/<engine>/<topology>` plus a 3-line `up.sh`. | Reproducible bring-up of a real model in <30 s. |
 | [**Cluster dashboard**](dashboard/README.md) | Standalone zero-dependency web dashboard: live req/s, tokens/s, latency + TTFT percentiles, per-node status, KV utilisation, power, and J/token, driven purely by the CORS-enabled Prometheus `/metrics` endpoints. | Instant fleet visibility with no Grafana setup; the same series feed any Prometheus stack. |
@@ -107,15 +108,15 @@ NVIDIA Dynamo is the closest peer in this space. We agree on most fundamentals (
 | **Tool calling / structured output** | Yes: passthrough to engine (vLLM/SGLang tool parsing + guided decoding), streaming included | Yes (engine-level) |
 | **Multimodal / video** | Image inputs (OpenAI content parts, passthrough); video pipelines not yet | Yes: image E/P/D, FastVideo, SGLang Diffusion |
 | **Topology-aware gang scheduling** | Basic (cgn-operator + node selectors) | Grove (NVL72-aware) |
-| **Energy / power telemetry** | Yes: Redfish + NVML in the routing score (IPMI/DCGM on the roadmap) | No routing-level power term |
-| **Service discovery** | etcd (optional; single-node needs nothing) | K8s-native / etcd / file backends |
+| **Energy / power telemetry** | Yes: Redfish + NVML (rocm-smi on AMD) in the routing score, per-node soft watt caps (IPMI/DCGM on the roadmap) | No routing-level power term |
+| **Service discovery** | etcd or dependency-free UDP gossip (`state_backend = "gossip"`); single-node needs nothing | K8s-native / etcd / file backends |
 | **Deployment surfaces** | Bare metal (systemd) · Kubernetes (Helm) · Terraform (AWS / GCP / Azure / Hetzner), same binaries | Kubernetes-first (operator + CRDs); local dev via container |
 | **Install surface** | One curl line, six static binaries, no runtime | `pip install ai-dynamo`, container, or operator |
 | **License** | Apache-2.0 | Apache-2.0 |
 
 The full deep-dive is in [`docs/architecture/vs-dynamo.md`](docs/architecture/vs-dynamo.md).
 
-What we have that Dynamo doesn't: bare-metal-first deployment with one-curl install · llama.cpp + MLX + OpenAI-compat as first-class engines · energy-aware scheduling wired into routing and autoscaling · positionally-correct KV digests · cross-cluster QUIC peer fetch · multi-model SLM→LLM cascade (streaming included) · single-binary runtime with no Python control plane.
+What we have that Dynamo doesn't: bare-metal-first deployment with one-curl install · llama.cpp + MLX + OpenAI-compat as first-class engines · energy-aware scheduling wired into routing and autoscaling · capability-aware routing for mixed NVIDIA/AMD fleets · etcd-free gossip discovery · positionally-correct KV digests · cross-cluster QUIC peer fetch · multi-model SLM→LLM cascade (streaming included) · single-binary runtime with no Python control plane.
 
 What Dynamo has that we don't yet: video pipelines & multimodal E/P/D disaggregation · ModelExpress GPU-to-GPU weight streaming · Grove NVL72 gang scheduling · AIConfigurator deployment search · in-flight request migration · zero-config DGDR deployment.
 

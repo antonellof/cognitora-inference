@@ -8,7 +8,12 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 releases may make small breaking changes between minor versions;
 each one is called out under **Breaking** below.
 
-## [Unreleased]
+## [0.8.0] - 2026-09-11
+
+The "etcd-optional" release. Multi-node clusters can now discover each
+other over a UDP gossip mesh with no external services, and the fleet
+gets power capping, cross-cluster federation, capability-aware routing,
+ROCm support, and a standalone monitoring dashboard.
 
 ### Added
 
@@ -23,6 +28,57 @@ each one is called out under **Breaking** below.
   control-plane features (confirmed-KV claims, cordon flags, routing
   policy hot-reload, autoscaler hints) stay etcd-only by design; see
   `docs/architecture/gossip.md`.
+- **Soft power cap** (`[agent].watt_limit`): the limit rides the
+  heartbeat and is mirrored to `cgn_cluster_node_watt_limit`; the
+  selector prefers under-cap nodes and only routes to over-cap nodes
+  when every candidate is over (serving beats brown-out). The agent
+  Health RPC reports the real rack watt limit instead of a hardcoded 0.
+- **Cross-cluster federation, actually wired**: when local routing finds
+  no eligible node and `[router.federation]` is enabled, the gateway
+  forwards to a peer cluster. Peers are probed concurrently and the
+  lowest-connect-latency reachable peer wins. Forwards are counted in
+  `cgn_router_federation_forwards_total{model,peer}`. Single-hop by
+  construction: the peer's gRPC surface only routes locally.
+- **Capability-aware routing** for heterogeneous fleets: agents publish
+  `gpu_name` / `gpu_vendor` / `vram_total_mb` (NVML, or rocm-smi on
+  AMD); per-model `min_vram_mb` and `require_gpu` constraints filter
+  candidates. Nodes reporting no GPU identity are never filtered, so
+  older agents keep working.
+- **ROCm support**: `cgn-power` gains a rocm-smi reader feeding
+  `cgn_power_watts_gpu` on AMD hosts; the agent GPU snapshot falls back
+  from NVML to rocm-smi; engine spawn pins `CUDA_VISIBLE_DEVICES` and
+  `HIP_VISIBLE_DEVICES` from `[agent].gpu_index` (ambient values win).
+- **Standalone monitoring dashboard** (`dashboard/`): zero-dependency
+  web app that polls any `/metrics` endpoint; in-browser ring buffers
+  and canvas charts for req/s, tokens/s, latency p50/p95, TTFT p95,
+  queue depth, power draw vs cap, KV used %, J/token, plus a live node
+  table with GPU identity. Deep-linkable via `?endpoint=` and
+  `?interval=`. A stdlib-only mock fleet generator
+  (`dashboard/mock_metrics.py`) simulates a 16-node mixed GPU fleet for
+  demos.
+- **Cluster gauges and TTFT histogram**: the router mirrors its node
+  registry into `cgn_cluster_node_*` gauges every 5s, and
+  `cgn_router_chat_ttft_seconds` is observed on the first streamed
+  token. `/metrics` now answers CORS preflight so browser apps can
+  scrape any Cognitora listener directly.
+- Release workflow publishes the library crates to crates.io in
+  dependency order (skips with a warning until the `CRATES_IO_TOKEN`
+  secret is configured).
+
+### Fixed
+
+- Agent OpenAI HTTP driver: SSE frames delimited by CRLF blank lines
+  never completed and grew the buffer without bound; the frame parser
+  now handles LF and CRLF and extracts the `data:` line from multi-line
+  frames.
+- Router: the etcd watcher reconnects with 5s backoff when its watch
+  stream ends instead of leaving the registry stale forever.
+- Agent: re-confirmed KV digests are deduplicated before queueing so
+  eviction can't delete a key still tracked by a newer twin; the NVML
+  handle is cached instead of re-initialised every heartbeat.
+- Router: one shared prompt-flattening and approximate-tokenisation
+  module for the HTTP gateway, gRPC surface, and embeddings (the gRPC
+  copy ignored multimodal `content_json`).
 
 ## [0.7.0] - 2026-09-10
 

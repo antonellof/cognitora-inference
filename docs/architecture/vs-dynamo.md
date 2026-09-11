@@ -50,7 +50,9 @@ not the internal module names of either project.
 | KV-aware prefix routing | yes | yes |
 | Hashing scheme | **Sequence-chained BLAKE3**: each chunk's hash covers all preceding tokens, so identical chunks at different positions never collide | RadixTree of chained block hashes |
 | Scoring metric | **Longest-prefix overlap** + `load` + `power` + `capacity`, weights live in etcd, hot-reloaded via `arc_swap` | Overlap + load |
-| Power / energy term | yes (Redfish + NVML; IPMI/DCGM planned) | no |
+| Power / energy term | yes (Redfish + NVML, rocm-smi on AMD; IPMI/DCGM planned) | no |
+| Soft power cap | yes: `[agent].watt_limit` rides the heartbeat; under-cap nodes preferred, over-cap nodes still serve when nothing else can | no |
+| Capability filtering | yes: per-model `min_vram_mb` / `require_gpu` matched against GPU identity (name, vendor, VRAM) in the heartbeat | no (homogeneous workers assumed per deployment) |
 | Load / capacity signals | live engine telemetry: vLLM/SGLang `/metrics` queue depth + KV occupancy scraped into the heartbeat | engine KV events + forward-pass metrics |
 | SLO / deadline propagation | yes (`cgn-router::deadline`) | yes (Planner SLA targets) |
 | Admission control | per-(model, role) inflight counters; queue caps; rate limiting | similar |
@@ -121,9 +123,10 @@ sits above all of them**.
 | SLA planner | reactive: ModelPool SLOs (`maxQueuePerReplica`, min/max replicas, cooldown) scale decode replicas from live queue depth | predictive (SLA/TCO Planner) |
 | Workload simulator | not yet | AIConfigurator (search 10K configs) |
 | Topology-aware gang scheduling | basic (cgn-operator + node selectors) | Grove (NVL72-aware) |
-| Federation (cross-cluster) | `cgn-router::federation` + `cgn-kvcached` QUIC peer fetch | not shipped |
+| Federation (cross-cluster) | `cgn-router::federation` (concurrent peer probe, lowest-latency reachable peer wins, single-hop) + `cgn-kvcached` QUIC peer fetch | not shipped |
 | Multi-tenancy | OIDC SSO + group → scope mapping; in-process and Redis rate-limit | similar |
-| Energy / power telemetry | yes (Redfish + NVML; IPMI/DCGM planned) | no |
+| Energy / power telemetry | yes (Redfish + NVML, rocm-smi on AMD; IPMI/DCGM planned) | no |
+| Heterogeneous fleets (mixed GPU vendors / sizes) | yes: agents publish GPU identity, router filters per-model | assumes homogeneous workers per deployment |
 
 ### Modalities
 
@@ -154,7 +157,9 @@ sits above all of them**.
 | Prometheus metrics | yes | yes |
 | OpenTelemetry traces | yes | yes |
 | Per-tier KV metrics | yes (`cgn_kvcached_*`) | yes (KVBM + planner) |
-| Power metrics | yes (`cgn_power_watts`) | no |
+| Power metrics | yes (`cgn_power_watts`, `cgn_cluster_node_watt_limit` draw-vs-cap) | no |
+| Cluster gauges + TTFT histogram | yes (`cgn_cluster_node_*`, `cgn_router_chat_ttft_seconds`) | planner metrics |
+| Bundled dashboard | yes (`dashboard/`: zero-dependency, polls any `/metrics` endpoint) | Grafana reference dashboards |
 | LMCache / HiCache passthrough metrics | yes (engine `/metrics` proxied) | yes |
 
 ## What we have that Dynamo doesn't
@@ -163,8 +168,8 @@ Differentiators where Cognitora is currently ahead:
 
 1. **Engine breadth.** llama.cpp + OpenAI-compatible engines are
    first-class drivers, not adapters. This means the same control
-   plane runs on a laptop, a CPU edge box, an NVIDIA H100 cluster,
-   and an Ollama-backed dev sandbox.
+   plane runs on a laptop, a CPU edge box, an NVIDIA H100 or AMD
+   MI300X cluster, and an Ollama-backed dev sandbox.
 2. **Bare-metal-first deployment.** `deploy/systemd/` units, a
    one-line installer with cosign-verified release tarballs, and
    Terraform recipes for the four major clouds, without requiring
@@ -178,15 +183,21 @@ Differentiators where Cognitora is currently ahead:
 5. **Cross-cluster federation.** `cgn-router::federation` forwards
    across clusters; `cgn-kvcached` peers across QUIC. Multi-region
    inference doesn't need a Kubernetes-of-Kubernetes.
-6. **Energy-aware admission.** `cgn-power` reads Redfish + NVML and
-   feeds into the router scoring weight; the autoscaler drains nodes
-   that hit thermal or power caps and the operator closes the loop.
+6. **Energy-aware admission.** `cgn-power` reads Redfish + NVML (or
+   rocm-smi on AMD) and feeds into the router scoring weight; a soft
+   per-node watt cap (`[agent].watt_limit`) steers traffic to under-cap
+   nodes, and the autoscaler drains nodes that hit thermal or power
+   caps while the operator closes the loop.
 7. **Multi-model SLM → LLM cascade.** `cascade::Cascade::run` runs
    the cheap model first and only escalates when the log-probability
    of the cheap answer falls below threshold.
 8. **Single TOML knob for KV offload.** `engine.kv_offload` swaps
    `none / nixl / lmcache / hicache / kvbm` without editing the
    engine argv yourself.
+9. **Capability-aware routing for mixed fleets.** Agents publish GPU
+   identity (name, vendor, VRAM); per-model `min_vram_mb` /
+   `require_gpu` constraints keep a 70B model off the L40S in the
+   corner without separate deployments per hardware class.
 
 ## What Dynamo has that we don't yet
 
@@ -243,7 +254,8 @@ operator-visible behaviour is comparable:
 | You want bare-metal or hybrid (some bare-metal, some cloud) topologies | **Cognitora** |
 | You want to mix engines in one cluster (e.g. SGLang for chat, llama.cpp at the edge, OpenAI passthrough for fallback) | **Cognitora** |
 | You want a single static binary install with no Python control plane | **Cognitora** |
-| You care about energy / power as a routing dimension | **Cognitora** |
+| You care about energy / power as a routing dimension, or need per-node watt caps | **Cognitora** |
+| You run a heterogeneous fleet (mixed vendors, mixed VRAM, AMD + NVIDIA) | **Cognitora** |
 | You need cross-cluster federation with KV peer fetch | **Cognitora** |
 | You're benchmarking different KV offload strategies (LMCache, HiCache, KVBM) without rewriting deployment YAML | **Cognitora** (one TOML knob) |
 | You're operating at NVIDIA InferenceX scale on GB200 / GB300 NVL72 | **Dynamo** (today) |
