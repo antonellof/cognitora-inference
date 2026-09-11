@@ -2,9 +2,9 @@
 
 # Cognitora
 
-**The open-source, datacenter-scale LLM inference stack.**
+**The open-source LLM inference stack — from a local AI cluster to a datacenter fleet.**
 
-Run vLLM, SGLang, TensorRT-LLM, llama.cpp, or **MLX** (Apple Silicon) as a coordinated multi-node cluster (KV-aware, disaggregation-ready, energy-aware) on bare metal, Kubernetes, or any major cloud, installed with a single curl line.
+Run vLLM, SGLang, TensorRT-LLM, llama.cpp, or **MLX** (Apple Silicon) as a coordinated multi-node cluster (KV-aware, disaggregation-ready, energy-aware) on anything from a few DGX Sparks, AMD boxes, or Mac Studios on your desk to a full datacenter fleet — bare metal, Kubernetes, or any major cloud, installed with a single curl line.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![CI](https://img.shields.io/badge/ci-passing-brightgreen.svg)](.github/workflows/ci.yml)
@@ -13,6 +13,26 @@ Run vLLM, SGLang, TensorRT-LLM, llama.cpp, or **MLX** (Apple Silicon) as a coord
 </div>
 
 ---
+
+## Contents
+
+- [What is Cognitora?](#what-is-cognitora)
+- [When to use Cognitora](#when-to-use-cognitora)
+- [Engine support at a glance](#engine-support-at-a-glance)
+- [Core capabilities](#core-capabilities)
+- [How Cognitora compares to NVIDIA Dynamo](#how-cognitora-compares-to-nvidia-dynamo)
+- [The binaries](#the-binaries)
+- [Quick start](#quick-start)
+  - [One-liner install](#one-liner-install-linux-x86_64--aarch64)
+  - [From source](#from-source)
+  - [Kubernetes](#kubernetes)
+  - [Releases](#releases)
+- [Repository layout](#repository-layout)
+- [Performance targets (CI gates)](#performance-targets-ci-gates)
+- [Documentation](#documentation)
+- [Changelog](CHANGELOG.md)
+- [Status](#status)
+- [License](#license)
 
 ## What is Cognitora?
 

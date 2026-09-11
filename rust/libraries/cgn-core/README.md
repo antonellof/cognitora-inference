@@ -9,7 +9,8 @@ workspace `Error` enum, BLAKE3 prefix hashing, and the concurrent prefix
 index. Telemetry, TLS, and Kubernetes helpers live in dedicated `cgn-*`
 crates so this one stays free of heavy transitive dependencies.
 
-Cognitora is the open-source datacenter-scale LLM inference stack.
+Cognitora is the open-source LLM inference stack that manages anything
+from a small local AI cluster to a full datacenter fleet.
 `cgn-core` is its smallest internal crate: cross-cutting types and a few
 constants that the routing, agent, kvcached, metrics, ctl, and operator
 binaries all depend on.
