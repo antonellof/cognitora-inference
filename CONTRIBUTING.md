@@ -35,7 +35,7 @@ recent macOS SDKs). Linux production builds use the full feature set.
 - **Logging**: `tracing::{info,debug,warn,error}` with key=value
   fields. No `println!` in shipped code.
 - **Async**: tokio everywhere. No blocking calls inside async
-  functions — wrap with `spawn_blocking` if unavoidable.
+  functions; wrap with `spawn_blocking` if unavoidable.
 - **Locks across awaits**: forbidden. `parking_lot::Mutex` guards
   must be dropped before any `.await`.
 - **Unsafe**: only behind a named module, with a comment block
@@ -50,14 +50,14 @@ recent macOS SDKs). Linux production builds use the full feature set.
 - `buf lint` and `buf breaking --against '.git#branch=main'` run in
   CI; backwards-incompatible changes must use `reserved` and a new
   field number.
-- Run `buf generate` locally before committing — the Rust stubs are
+- Run `buf generate` locally before committing; the Rust stubs are
   checked in for fast clean builds.
 
 ## Tests
 
 - Unit tests live next to the code (`#[cfg(test)] mod tests`).
 - Integration tests under `tests/integration/<crate>/`.
-- End-to-end smoke under `tests/e2e/` — start with
+- End-to-end smoke under `tests/e2e/`. Start with
   [`single_node.sh`](tests/e2e/single_node.sh).
 - Performance regression checks run from `tests/perf/`.
 

@@ -2,7 +2,7 @@
 
 `cgn-router` listens on `[router].listen_http` (default `:8080`) and
 speaks the OpenAI HTTP/SSE protocol. Any OpenAI SDK can target it
-unchanged — point `OPENAI_BASE_URL` at the router and use any API
+unchanged: point `OPENAI_BASE_URL` at the router and use any API
 key from `cgn-ctl key create`.
 
 ```python
@@ -40,11 +40,11 @@ threads, tool calls, fine-tunes, audio, image, batch.
 
 Every `/v1/*` request goes through `cgn-auth::middleware`. Two flows:
 
-- **API key** — `Authorization: Bearer cgn-<32hex>`. The token's
+- **API key**: `Authorization: Bearer cgn-<32hex>`. The token's
   sha256 is matched against `[auth].api_keys_file`. Use
   `cgn-ctl key create --scopes "chat,embed"` to issue one. Tokens are
   shown once; the file stores hashes.
-- **OIDC** — same header but with a JWT. `cgn-auth` validates the
+- **OIDC**: same header but with a JWT. `cgn-auth` validates the
   signature against the issuer's JWKS (rotated every
   `[auth].oidc_jwks_ttl`, default 10m). The `sub` claim becomes the
   rate-limit subject.
@@ -63,7 +63,7 @@ data: {"id":"chatcmpl-…","object":"chat.completion.chunk","created":1714566600
 data: [DONE]
 ```
 
-The router never buffers a streaming response — tokens flow directly
+The router never buffers a streaming response; tokens flow directly
 from `Agent.Generate` through `gateway::sse::SseEncoder` to the
 client.
 
@@ -93,7 +93,7 @@ All errors return the OpenAI-shaped JSON:
 |--------------------------|-----------|------------------------------------------------------|
 | `x-request-id`           | both      | propagated to traces and `cgn-agent` logs            |
 | `x-cgn-subject`          | inbound\* | set by `cgn-auth`; downstream rate limit reads this  |
-| `x-cgn-cache-hit`        | outbound  | `true`/`false` — was the prefix found in `cgn-kvcached` |
+| `x-cgn-cache-hit`        | outbound  | `true`/`false`: was the prefix found in `cgn-kvcached` |
 | `x-cgn-node`             | outbound  | which node id served the request                     |
 | `x-cgn-cascade-step`     | outbound  | which model in a cascade chain produced the response |
 

@@ -33,10 +33,10 @@ and the auth flow for the OpenAI HTTP surface.
 
 Two paths:
 
-* `cgn-ctl pki bootstrap` — generates a dev CA + leaf cert with rcgen
+* `cgn-ctl pki bootstrap` generates a dev CA + leaf cert with rcgen
   and writes them under `/etc/cognitora/pki/`. Suitable for dev /
   single-node, **not for production**.
-* External CA — set `[security] ca_file = ...` and provide leaf
+* External CA: set `[security] ca_file = ...` and provide leaf
   certs via your usual issuer (cert-manager, HashiCorp Vault, ACM PCA).
 
 The internal CA must include all hostnames that other Cognitora nodes

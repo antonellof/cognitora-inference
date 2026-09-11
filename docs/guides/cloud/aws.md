@@ -10,7 +10,7 @@ applies the Cognitora Helm chart on top.
 
 - AWS account and credentials (`aws sso login` or static keys).
 - Terraform 1.5+, kubectl, helm.
-- A model artifact bucket — defaults to a HuggingFace Hub pull, but
+- A model artifact bucket. Defaults to a HuggingFace Hub pull, but
   S3 (`s3://your-bucket/llama3-8b/`) cuts cold start to seconds.
 
 ## Apply
@@ -41,14 +41,14 @@ After ~12 minutes you'll have:
 | 100 B+ models              | `p4d.24xlarge`     | 8× A100, TP=8 (multi-instance pod)   |
 | Long-context (>16k)        | `p5.48xlarge`      | H100, NVLink for KV transfer         |
 
-The router scales separately — `router.replicas: 2` on
+The router scales separately: `router.replicas: 2` on
 `m5.large` is plenty for tens of thousands of QPS because the routing
 fast-path is sub-ms.
 
 ## Storage
 
 `cgn-kvcached` SSD tier wants fast NVMe. On the GPU instance types
-above, the local NVMe is exposed at `/dev/nvme1n1` — mount it at
+above, the local NVMe is exposed at `/dev/nvme1n1`; mount it at
 `/var/lib/cognitora/kv/ssd` via a `local-storage`
 `StorageClassName` in `values.yaml`:
 
@@ -105,4 +105,4 @@ terraform destroy
 
 This drops the chart first (Helm release as a Terraform resource),
 then the cluster. EBS volumes detach but persist for one billing
-cycle — `aws ec2 delete-volume` once you're sure.
+cycle: `aws ec2 delete-volume` once you're sure.

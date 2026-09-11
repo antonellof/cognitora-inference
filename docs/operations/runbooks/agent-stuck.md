@@ -21,7 +21,7 @@ live node serving model …`.
      wait for `[agent].ready_timeout` (default 120s) and then
      restart the engine.
    - `engine exited with code N` → vLLM crashed. Look one frame
-     deeper — usually OOM or a bad model spec.
+     deeper, usually OOM or a bad model spec.
    - `nvml: insufficient permissions` → the pod is missing the
      `nvidia.com/gpu` resource request or the agent's user lacks
      `video`/`render` group membership on the host.
@@ -48,5 +48,5 @@ live node serving model …`.
   true` does this).
 - Set generous `livenessProbe.timeoutSeconds` on the agent for
   multi-tens-of-GB models.
-- Run NVML telemetry alongside the engine — `cgn_agent_gpu_mem_used`
+- Run NVML telemetry alongside the engine; `cgn_agent_gpu_mem_used`
   near max for > 1 min is the canary for OOM crashes.

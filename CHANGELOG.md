@@ -10,7 +10,7 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
-## [0.7.0] — 2026-09-10
+## [0.7.0] - 2026-09-10
 
 The "OpenAI parity + truth-fed routing" release. Tool calling,
 structured output, and multimodal image inputs now pass through the
@@ -20,7 +20,7 @@ actually cached; the operator grows a reactive SLA planner; multi-node
 e2e runs in default CI; and the Helm chart is turnkey.
 
 ### Added
-- **Tool calling & structured output passthrough** — `tools`,
+- **Tool calling & structured output passthrough**: `tools`,
   `tool_choice`, and `response_format` on `/v1/chat/completions` are
   forwarded verbatim to the engine (vLLM/SGLang implement tool parsing
   and guided decoding), via a new `extensions_json` field on the
@@ -30,34 +30,34 @@ e2e runs in default CI; and the Helm chart is turnkey.
   proper `finish_reason`. Assistant `tool_calls` and tool-role
   `tool_call_id` messages round-trip. Cascade is bypassed for tool
   requests (tool formats are not portable across cascade models).
-- **Multimodal image passthrough** — OpenAI content-parts arrays
+- **Multimodal image passthrough**: OpenAI content-parts arrays
   (`type: image_url`, …) are accepted on messages and carried verbatim
   to the engine (`content_json` on the `Message` proto). Prefix
   hashing uses only the text parts, so images don't pollute KV-overlap
   scoring.
-- **Confirmed KV prefix feed** — after a generation completes, the
+- **Confirmed KV prefix feed**: after a generation completes, the
   agent publishes the request's prefix digests as lease-bound etcd
   keys under `/cognitora/kv/<node>/<digest>`; the router watcher
   mirrors PUT/DELETE into the `PrefixIndex`
   (`PrefixIndex::forget_claim`). Claims are confirmed-by-completion,
   die with the node's heartbeat lease, and the agent prunes its oldest
   claims under KV-cache pressure (<5 % free blocks) and beyond a
-  4096-key cap — the overlap score now tracks engine truth instead of
+  4096-key cap. The overlap score now tracks engine truth instead of
   router optimism.
-- **SLA planner-lite** (`cgn-operator::planner`) — `ModelPool` SLOs
+- **SLA planner-lite** (`cgn-operator::planner`): `ModelPool` SLOs
   (`maxQueuePerReplica`, `minReplicas`, `maxReplicas`,
   `scaleCooldownSecs`) drive reactive scaling of `decode_replicas`
   from live queue depths, with cooldown and status reporting
   (`desiredReplicas`, `lastScaleTime`).
-- **Multi-node e2e in default CI** — `tests/e2e/multi_node_kv.sh`
+- **Multi-node e2e in default CI**: `tests/e2e/multi_node_kv.sh`
   rewritten around a stub OpenAI engine (`tests/e2e/stub_engine.py`):
   4 phases including a real 2-agent prefix-affinity assertion, wired
   into the default GitHub Actions run (`e2e-multinode` job).
 - **GPU disaggregation bench harness** (`scripts/bench/disagg/` +
-  `bench-disagg.yml` workflow_dispatch) — reproducible prefill/decode
+  `bench-disagg.yml` workflow_dispatch): reproducible prefill/decode
   split benchmarks for GPU hosts; numbers to follow once run on GPU
   hardware.
-- **Turnkey Helm** — chart deploys a working cluster out of the box:
+- **Turnkey Helm**: the chart deploys a working cluster out of the box:
   engine sidecar block (`agent.engine.*`), `cluster.etcdEndpoints`,
   mTLS off by default for first contact (`security.require_mtls`),
   `hostNetwork` opt-in, chart README.
@@ -67,10 +67,10 @@ e2e runs in default CI; and the Helm chart is turnkey.
   `tool_call_id`; `Token` gains `tool_calls_json`; `GenerateRequest` /
   `AgentGenerateRequest` gain `extensions_json`, and the agent request
   carries the router's prefix `digests` for confirmed-claim publishing.
-  All additions are append-only field numbers — wire-compatible with
+  All additions are append-only field numbers, wire-compatible with
   0.6 clients.
 
-## [0.6.0] — 2026-09-10
+## [0.6.0] - 2026-09-10
 
 The "make the routing score true" release. Every term of the KV-aware
 routing score is now fed by real signals, the energy-aware autoscaling
@@ -78,7 +78,7 @@ loop is closed end-to-end, the SLM→LLM cascade covers streaming
 traffic, and TensorRT-LLM joins the spawn-managed engine roster.
 
 ### Added
-- **Engine telemetry scraper** (`cgn-agent::telemetry`) — polls the
+- **Engine telemetry scraper** (`cgn-agent::telemetry`): polls the
   engine's Prometheus `/metrics` (vLLM `num_requests_waiting/running`,
   `gpu_cache_usage_perc`; SGLang `num_queue_reqs/num_running_reqs`,
   `token_usage`) and feeds real `queue_depth` / `free_blocks` /
@@ -87,28 +87,28 @@ traffic, and TensorRT-LLM joins the spawn-managed engine roster.
   (hardcoded zeros); they now differentiate workers. Engines without a
   metrics endpoint honestly report zeros (`total_blocks == 0` means
   "capacity unknown").
-- **Closed autoscaler loop** (`cgn-operator::autoscaler`) — the
+- **Closed autoscaler loop** (`cgn-operator::autoscaler`): the
   operator now consumes the router's energy-aware drain hints from
   `/cognitora/autoscaler/<node>` and translates them into cordon flags,
   which the router's watcher already honors. Cordons set by the
   autoscaler are tagged and never clobber manual `cgn-ctl` cordons;
   capacity is restored automatically when the drain hint clears.
-- **Streaming cascade** — `stream_run_cascade` runs early cascade
+- **Streaming cascade**: `stream_run_cascade` runs early cascade
   steps buffered (confidence gating needs complete output), emits an
   accepted cheap answer as SSE chunks, and streams the final model
   live token-by-token when every early step escalates. The cascade now
   applies to real (streaming) traffic, not just buffered requests.
-- **Gateway dispatch retry / failover** — dispatch failures (agent
+- **Gateway dispatch retry / failover**: dispatch failures (agent
   unreachable, gRPC setup error) are retried against the next-best
   node with the failed node excluded, up to 3 attempts, strictly
   before the first token so retries are invisible to clients.
   `routing::pick_excluding` supports node exclusion; failed nodes no
   longer accrue optimistic prefix claims.
-- **TensorRT-LLM engine driver** (`engine.kind = "tensorrt_llm"`) —
+- **TensorRT-LLM engine driver** (`engine.kind = "tensorrt_llm"`):
   the agent spawns `trtllm-serve <model> --host … --port … --tp_size …`
   and supervises it like any other engine. `[engine.tensorrt_llm]`
   carries binary/host/port/extra_args.
-- **Prefix-index truth maintenance** — periodic GC of expired entries
+- **Prefix-index truth maintenance**: periodic GC of expired entries
   (30 s), plus pressure-aware pruning: when a node's heartbeat reports
   <5 % free KV blocks, its older optimistic prefix claims are dropped
   (the engine is LRU-evicting, so they are the ones most likely gone).
@@ -121,12 +121,12 @@ traffic, and TensorRT-LLM joins the spawn-managed engine roster.
   (`docs/architecture/vs-dynamo.md`) is updated to Dynamo 1.x reality
   (etcd/NATS optional there) and to Cognitora's new 0.6 capabilities.
 
-## [0.5.0] — 2026-07-02
+## [0.5.0] - 2026-07-02
 
 The "native inference engine" release. Cognitora previously only
 orchestrated external OpenAI-compatible engines (vLLM, SGLang,
 llama.cpp, MLX). It now ships its own first-party inference engine,
-`cgn-infer` — a seventh binary that loads and runs local GGUF models
+`cgn-infer`: a seventh binary that loads and runs local GGUF models
 directly, making Cognitora self-sufficient rather than purely a
 control plane.
 
@@ -180,7 +180,7 @@ control plane.
   quantized path, and end-to-end generation has not been exercised in
   CI (no model weights available there).
 
-## [0.4.0] — 2026-06-11
+## [0.4.0] - 2026-06-11
 
 The "make the KV layer live" release. The cross-node KV cache design
 (tiered store, prefix-overlap routing, peer transfer) existed as
@@ -206,7 +206,7 @@ no eviction loop ran, cache stats were hardcoded zeros, and the agent's
   - *SSD TTL*: blocks not accessed for `kv.ssd_ttl_secs`
     (default 86400, `0` disables) are deleted from disk and the index.
   - New `KvConfig` fields: `ssd_ttl_secs`, `evict_interval_ms`,
-    `ram_high_watermark` — all defaulted, existing configs unchanged.
+    `ram_high_watermark`, all defaulted, so existing configs are unchanged.
 - **Real KV cache observability.** The `Kv.Stats` RPC now reports live
   hit / miss / eviction / spill counters and bytes pushed / pulled over
   the QUIC transport (previously hardcoded zeros), plus an accurate
@@ -226,7 +226,7 @@ no eviction loop ran, cache stats were hardcoded zeros, and the agent's
 
 ### Added (MLX / examples)
 
-- **`examples/apple-mlx/download-model.sh`** — pre-downloads an MLX-LM model from Hugging Face with a real progress bar so users don't sit silent through `mlx_lm.server`'s lazy first-load.
+- **`examples/apple-mlx/download-model.sh`** pre-downloads an MLX-LM model from Hugging Face with a real progress bar so users don't sit silent through `mlx_lm.server`'s lazy first-load.
 - **`examples/apple-mlx/demo.sh` and `verify-engine.sh`** now auto-pre-warm the model via `download-model.sh` before hitting the engine. Set `CGN_NO_AUTOPULL=1` to skip when the weights are already cached.
 
 ### Fixed
@@ -235,17 +235,17 @@ no eviction loop ran, cache stats were hardcoded zeros, and the agent's
 - **Engine subprocess stdio** now **inherits** the agent's stdout/stderr instead of anonymous pipes. Piped stdio with no reader caused `mlx_lm.server` (and other chatty engines) to **block once the pipe buffer filled**, so MLX never bound to `:8090`, `ready` stayed false, and chat hung with no output.
 - **`examples/apple-mlx/` model id** corrected from the non-existent `mlx-community/Meta-Llama-3.2-3B-Instruct-4bit` to the real `mlx-community/Llama-3.2-3B-Instruct-4bit` (HF returned 401 for the previous id, blocking pre-download).
 
-## [0.3.1] — 2026-05-08
+## [0.3.1] - 2026-05-08
 
 ### Added
 
-- **`engine.kind = "mlx"`** — `cgn-agent` spawns `python3 -m mlx_lm.server` ([mlx-lm](https://github.com/ml-explore/mlx-lm)) on **Apple Silicon** with OpenAI-compatible HTTP. New `[engine.mlx_lm]` config block. Example profile: `examples/apple-mlx/`.
+- **`engine.kind = "mlx"`**: `cgn-agent` spawns `python3 -m mlx_lm.server` ([mlx-lm](https://github.com/ml-explore/mlx-lm)) on **Apple Silicon** with OpenAI-compatible HTTP. New `[engine.mlx_lm]` config block. Example profile: `examples/apple-mlx/`.
 
 ### Fixed
 
 - **`cgn-proto` build script** now reads `CARGO_MANIFEST_DIR` at runtime instead of embedding it with `env!()`, so `protoc` no longer follows a stale absolute path after moving or copying the repository.
 
-## [0.3.0] — 2026-05-07
+## [0.3.0] - 2026-05-07
 
 The "make every plan.md claim runnable end-to-end" release. Five of the
 0.3 milestone items shipped over PRs #1, #3, #4, #5, #6: real `cgn-ctl`
@@ -269,7 +269,7 @@ treated as broken for chat-template models.
   `/v1/chat/completions` and parses the chat-style SSE
   (`delta.content`) response. The legacy `/v1/completions` plain
   prompt path is preserved as a fallback. Verified end-to-end on
-  GKE Autopilot with TinyLlama-1.1B (CPU) — sample latency 1.3s
+  GKE Autopilot with TinyLlama-1.1B (CPU): sample latency 1.3s
   buffered, streaming SSE deltas working cleanly.
 
 ### Added
@@ -282,7 +282,7 @@ treated as broken for chat-template models.
   See `deploy/kubernetes/quickstart/README.md` and
   `docs/guides/cloud/gcp.md`.
 - **`.dockerignore`.** Excludes `target/`, `.git/`, `.temp/`, and
-  IDE caches from the docker build context — cuts the build context
+  IDE caches from the docker build context. Cuts the build context
   from ≈ 19 GiB to a few MiB and prevents
   `no space left on device` failures on Docker Desktop.
 - **Real `/v1/embeddings`.** `Agent.Embed` is now defined on the proto,
@@ -325,7 +325,7 @@ treated as broken for chat-template models.
 - The router no longer carries the obsolete `embed_via_router_compat`
   extension trait.
 
-## [0.2.1] — 2026-05-07
+## [0.2.1] - 2026-05-07
 
 First release where `cgn-ctl cluster` and `cgn-ctl model` are real
 clients instead of placeholders. Also bumps the workspace version
@@ -363,7 +363,7 @@ back in line with the git tag history (the v0.2.0 tag shipped from a
 - The `ignored()` placeholder in `cgn-agent::supervisor` and its
   associated `tracing::error` import.
 
-## [0.2.0] — 2026-05-02
+## [0.2.0] - 2026-05-02
 
 ### Added
 - **SGLang engine support.** Configure with `engine.kind = "sglang"`;
@@ -380,9 +380,9 @@ back in line with the git tag history (the v0.2.0 tag shipped from a
   `agg`, `agg-lmcache`, `agg-hicache`, `agg-kvbm`, `disagg`, and
   `disagg-lmcache` topology variants. `cgn-ctl recipe ls/show/up/down`
   drives them.
-- **`docs/architecture/kv-strategy.md`** — Cognitora's four-layer KV
+- **`docs/architecture/kv-strategy.md`**: Cognitora's four-layer KV
   strategy and the engine-side connector matrix.
-- **`docs/architecture/vs-dynamo.md`** — detailed comparison with
+- **`docs/architecture/vs-dynamo.md`**: detailed comparison with
   NVIDIA Dynamo across 18 concerns.
 - **Sequence-chained prefix hashing** (`cgn_core::hash::hash_seq_chunks`)
   and **longest-prefix overlap** (`PrefixIndex::longest_prefix_overlap`)
@@ -403,10 +403,10 @@ back in line with the git tag history (the v0.2.0 tag shipped from a
 
 ### Fixed
 - Release tarballs include all six binaries (`cgn-router`, `cgn-agent`,
-  `cgn-kvcached`, `cgn-metrics`, `cgn-ctl`, `cgn-operator`) — the 0.1.x
+  `cgn-kvcached`, `cgn-metrics`, `cgn-ctl`, `cgn-operator`); the 0.1.x
   tarballs shipped only a subset.
 
-## [0.1.1] — 2026-05-01
+## [0.1.1] - 2026-05-01
 
 ### Added
 - Multi-arch Linux release tarballs (x86_64, aarch64), cosign-signed,
@@ -420,7 +420,7 @@ back in line with the git tag history (the v0.2.0 tag shipped from a
 - Per-crate `README.md` files for every workspace member.
 
 ### Changed
-- Release workflow drops macOS targets — Linux is the supported
+- Release workflow drops macOS targets; Linux is the supported
   release target. macOS is fine for development; we just don't ship
   signed binaries for it.
 
@@ -428,7 +428,7 @@ back in line with the git tag history (the v0.2.0 tag shipped from a
 - Router: dropped a handful of unused imports under
   `routing::selector` that triggered `-D warnings`.
 
-## [0.1.0] — initial public release
+## [0.1.0] - initial public release
 
 - All-Rust workspace with six binaries (router, agent, kvcached,
   metrics, ctl, operator).

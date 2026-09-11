@@ -1,17 +1,17 @@
-# cgn-agent — Engine supervisor
+# cgn-agent: Engine supervisor
 
 **Per-GPU-host daemon** that exposes `Agent.Generate` over gRPC, drives a pluggable inference engine, reports **NodeHealth** to etcd, and coordinates KV residency with `cgn-kvcached`.
 
 ## Overview
 
-`cgn-agent` sits between `cgn-router` and the engine process. The `Engine` trait abstracts **vLLM**, **SGLang**, **llama.cpp**, and **openai_compat** (proxy-only — no subprocess). It renders engine argv from `[engine.*]` and `[models.*]`, including KV offload connectors selected by `engine.kv_offload`.
+`cgn-agent` sits between `cgn-router` and the engine process. The `Engine` trait abstracts **vLLM**, **SGLang**, **llama.cpp**, and **openai_compat** (proxy-only, no subprocess). It renders engine argv from `[engine.*]` and `[models.*]`, including KV offload connectors selected by `engine.kv_offload`.
 
 ## Features
 
 - Spawns or proxies an OpenAI HTTP-compatible engine (`/v1/chat/completions`, `/v1/models`, health)
 - Configurable **prefill** / **decode** / **both** roles for disaggregated serving + NIXL handoff
 - Heartbeats to etcd on `[agent].heartbeat` (default 5s) with load and capacity signals
-- KV offload knob: `none`, `nixl`, `lmcache`, `hicache`, `kvbm` — see [KV strategy](../architecture/kv-strategy.md)
+- KV offload knob: `none`, `nixl`, `lmcache`, `hicache`, `kvbm`; see [KV strategy](../architecture/kv-strategy.md)
 - Admin + Prometheus on `[agent].listen_admin` (see example config)
 - NVML-backed metrics for utilization (surfaced on `:9091/metrics` when enabled)
 
@@ -19,7 +19,7 @@
 
 `cgn-router → gRPC :7071 → cgn-agent → Engine → HTTP engine subprocess (or proxy)`.
 
-KV events flow to **`cgn-kvcached`** over the Unix socket configured in your profile (`kv_uds` / shared `[kv]` paths — see examples under [`examples/`](../../examples/)).
+KV events flow to **`cgn-kvcached`** over the Unix socket configured in your profile (`kv_uds` / shared `[kv]` paths; see examples under [`examples/`](../../examples/)).
 
 ## Configuration (highlights)
 
@@ -62,7 +62,7 @@ tp      = 4
 
 ## Dependencies
 
-- **etcd** — registration and health
+- **etcd**: registration and health
 - **Inference engine** subprocess or sidecar (unless `openai_compat`)
 - **cgn-kvcached** (optional but required for cross-node KV routing signals)
 

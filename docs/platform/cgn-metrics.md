@@ -1,4 +1,4 @@
-# cgn-metrics — Telemetry and power aggregator
+# cgn-metrics: Telemetry and power aggregator
 
 **Prometheus scrape fan-in** plus chassis / GPU power probes. Exposes a single **`/metrics`** endpoint (default `:9092`) and optional **`/federate`** for upstream Prometheus; feeds the router’s **power** scoring term.
 
@@ -52,7 +52,7 @@ scrape_targets = [
 ## Dependencies
 
 - **Scrape targets** reachable from the metrics pod/host
-- **Prometheus** (or compatible) for long-term storage — optional but typical
+- **Prometheus** (or compatible) for long-term storage; optional but typical
 
 ## Related documentation
 

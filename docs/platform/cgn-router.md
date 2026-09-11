@@ -1,4 +1,4 @@
-# cgn-router — KV-aware request router
+# cgn-router: KV-aware request router
 
 **OpenAI-compatible HTTP gateway** with BLAKE3 prefix scoring, per-tenant admission, optional cascade and disaggregated dispatch, and policy loaded from etcd without blocking the hot path.
 
@@ -73,9 +73,9 @@ tp      = 4
 
 ## Dependencies
 
-- **etcd** — node registry and routing policy
-- **cgn-agent** — gRPC streaming backends
-- **cgn-metrics** (optional but recommended) — power term for scoring
+- **etcd**: node registry and routing policy
+- **cgn-agent**: gRPC streaming backends
+- **cgn-metrics** (optional but recommended): power term for scoring
 
 ## Operational targets
 

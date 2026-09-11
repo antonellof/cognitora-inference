@@ -1,8 +1,8 @@
-# Recipes — one-line cluster bring-up
+# Recipes: one-line cluster bring-up
 
 A **recipe** is a folder of TOML profiles plus a 3-line `up.sh` driver
-that brings up a complete Cognitora cluster — router, agents, optional
-KV daemon, and an embedded etcd — pointed at a specific model, engine,
+that brings up a complete Cognitora cluster (router, agents, optional
+KV daemon, and an embedded etcd) pointed at a specific model, engine,
 and topology. Recipes are inspired by NVIDIA Dynamo's per-model
 production folders, but adapt to Cognitora's profile-driven,
 single-binary runtime: there is no Python framework and no operator
@@ -91,7 +91,7 @@ recipes/<model>/<engine>/<topology>/
   up.sh                     # 3-line wrapper
 ```
 
-`agent-*.toml` is the marker the runner uses to pick up agents — each
+`agent-*.toml` is the marker the runner uses to pick up agents; each
 file becomes one `cgn-agent` process. Naming is arbitrary; we use
 `agent-prefill.toml` / `agent-decode.toml` for disaggregated
 deployments and `agent-<model>.toml` for aggregated ones.
@@ -119,7 +119,7 @@ $EDITOR README.md router.toml agent-*.toml
 ```
 
 Cognitora's [`scripts/run/up.sh`](../../scripts/run/up.sh) discovers
-agents by globbing `agent-*.toml` — there is no separate registry, so
+agents by globbing `agent-*.toml`; there is no separate registry, so
 new agents drop in automatically.
 
 The router's `[router.score_weights]` block is the main knob worth

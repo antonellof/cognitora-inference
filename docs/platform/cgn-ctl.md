@@ -1,26 +1,26 @@
-# cgn-ctl — Admin CLI
+# cgn-ctl: Admin CLI
 
 **Operations entrypoint** for PKI, API keys, cluster policy, recipe workflows, and installer rendering. Same binary ships in release tarballs beside the daemons.
 
 ## Overview
 
-`cgn-ctl` mirrors what automation would do against etcd and the filesystem: bootstrap TLS material, mint scoped API keys, push routing weights, discover and launch [Recipes](../guides/recipes.md), and apply Kubernetes manifests generated from live cluster settings (`install` subcommands — see `--help` and [Bare metal](../guides/baremetal.md)).
+`cgn-ctl` mirrors what automation would do against etcd and the filesystem: bootstrap TLS material, mint scoped API keys, push routing weights, discover and launch [Recipes](../guides/recipes.md), and apply Kubernetes manifests generated from live cluster settings (`install` subcommands; see `--help` and [Bare metal](../guides/baremetal.md)).
 
-It does **not** replace Helm for full GitOps flows — use [`cgn-operator`](cgn-operator.md) when you want CRD-driven reconciliation — but it is the supported tool for laptops, bring-up scripts, and emergency changes.
+It does **not** replace Helm for full GitOps flows (use [`cgn-operator`](cgn-operator.md) when you want CRD-driven reconciliation), but it is the supported tool for laptops, bring-up scripts, and emergency changes.
 
 ## Features (selected)
 
-- **`cgn-ctl pki`** — generate dev / lab certificates (`bootstrap`, SAN editing)
-- **`cgn-ctl key`** — API key issuance against `api_keys_file` format consumed by `[auth]`
-- **`cgn-ctl cluster`** — introspection and policy updates (`set-policy` writes etcd routing weights)
-- **`cgn-ctl recipe`** — list/show/up/down wrappers around `recipes/*/up.sh`
-- **`cgn-ctl install`** — render systemd / Kubernetes assets from the live configuration (see CLI help for current flags)
+- **`cgn-ctl pki`**: generate dev / lab certificates (`bootstrap`, SAN editing)
+- **`cgn-ctl key`**: API key issuance against `api_keys_file` format consumed by `[auth]`
+- **`cgn-ctl cluster`**: introspection and policy updates (`set-policy` writes etcd routing weights)
+- **`cgn-ctl recipe`**: list/show/up/down wrappers around `recipes/*/up.sh`
+- **`cgn-ctl install`**: render systemd / Kubernetes assets from the live configuration (see CLI help for current flags)
 
 Run `cgn-ctl --help` and `cgn-ctl <subcommand> --help` for the authoritative flag list (surface evolves faster than prose docs).
 
 ## Architecture
 
-`Operator / human → cgn-ctl → etcd | fs | kubectl | helm` depending on subcommand. No long-running server — pure CLI.
+`Operator / human → cgn-ctl → etcd | fs | kubectl | helm` depending on subcommand. No long-running server, pure CLI.
 
 ## Configuration
 
@@ -44,8 +44,8 @@ cgn-ctl recipe ls
 
 ## Dependencies
 
-- **etcd** — for cluster-wide commands
-- **Kubernetes API** — only when invoking install/render paths targeted at K8s
+- **etcd**: for cluster-wide commands
+- **Kubernetes API**: only when invoking install/render paths targeted at K8s
 
 ## Related documentation
 

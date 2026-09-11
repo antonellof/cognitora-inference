@@ -9,7 +9,7 @@ This document defines the canonical folder structure for the Cognitora monorepo,
 3. **Protos are source of truth.** Wire formats live in [proto/cognitora/v1/](../../proto/cognitora/v1/) and are compiled into Rust code by `cgn-proto/build.rs` (`tonic-build`) at compile time.
 4. **Deployment artefacts never mix with source.** Helm charts, systemd units, Terraform modules, Dockerfiles, and the installer all live under [deploy/](../../deploy/). Source code never imports from `deploy/`.
 5. **Docs are first-class.** Every architectural decision lands in [docs/architecture/](.); every operational procedure lands in [docs/operations/](../operations/); every API surface lands in [docs/api/](../api/).
-6. **Gateway and router are one binary.** OpenAI-compatible HTTP/SSE serving is implemented as a module inside `cgn-router`. There is no separate `cgn-gateway` daemon — eliminating an extra hop, an extra TLS context, and an extra failure mode.
+6. **Gateway and router are one binary.** OpenAI-compatible HTTP/SSE serving is implemented as a module inside `cgn-router`. There is no separate `cgn-gateway` daemon, which eliminates an extra hop, an extra TLS context, and an extra failure mode.
 
 ## Tree
 
@@ -96,7 +96,7 @@ cognitora/
 
 - Every crate name is `cgn-<role>`. Library crates expose a single `lib.rs`; binary crates expose `main.rs` and submodules under `src/<feature>/mod.rs`.
 - Service crates **must** depend on `cgn-core` (config + errors), `cgn-proto` (wire types), and `cgn-telemetry` (logging + metrics).
-- Inter-crate references go through the workspace `[workspace.dependencies]` table — never hard-code a relative path inside a leaf crate.
+- Inter-crate references go through the workspace `[workspace.dependencies]` table; never hard-code a relative path inside a leaf crate.
 - All public types are `Debug`. Public types crossing thread boundaries are `Send + Sync` unless explicitly justified.
 - `unsafe` is allowed only inside `cgn-kv`; everywhere else `#![forbid(unsafe_code)]` is the default.
 - One async runtime: tokio. One TLS stack: rustls. One serialization: serde + bincode for on-the-wire blobs.

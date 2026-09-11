@@ -1,4 +1,4 @@
-# cgn-infer — the native inference engine
+# cgn-infer: the native inference engine
 
 > **Status: experimental / preview.** `cgn-infer` ships alongside the
 > other Cognitora binaries. Phases 1–5 (single-node engine, platform
@@ -6,7 +6,7 @@
 > architecture breadth) are implemented; for production GPU workloads
 > vLLM or SGLang remain the battle-tested choices.
 
-`cgn-infer` is Cognitora's **first-party inference engine** — the
+`cgn-infer` is Cognitora's **first-party inference engine**, the
 seventh binary in the workspace. Where the other six binaries
 orchestrate *external* engines (vLLM, SGLang, llama.cpp, MLX,
 OpenAI-compatible), `cgn-infer` loads and runs local GGUF models
@@ -37,20 +37,20 @@ cgn-router ──OpenAI HTTP / gRPC──▶ cgn-agent ──spawns + supervises
 
 Key decisions:
 
-* **Model format — GGUF via mmap.** Weights are memory-mapped
+* **Model format: GGUF via mmap.** Weights are memory-mapped
   (page-cache resident, no heap copy), matching llama.cpp conventions
   so existing model files work unchanged. safetensors is not loaded at
   runtime; conversion to GGUF is an offline step.
-* **Wire protocol — OpenAI HTTP/SSE.** The engine exposes exactly the
+* **Wire protocol: OpenAI HTTP/SSE.** The engine exposes exactly the
   surface `cgn-agent` already assumes (`/v1/chat/completions`,
   `/v1/completions`, `/v1/models`, `/healthz`), so it integrates like
   any other engine and fits KV-aware routing and `cgn-kvcached`
   naturally as a first-party citizen.
-* **KV cache — paged with prefix reuse.** Block hashing aligns with
+* **KV cache: paged with prefix reuse.** Block hashing aligns with
   `cgn-kvcached`'s sequence-chained BLAKE3 block scheme, so the
   router's prefix-overlap scoring is positionally correct against
   `cgn-infer` replicas.
-* **Distribution — layer-pipeline parallelism.** Models are split by
+* **Distribution: layer-pipeline parallelism.** Models are split by
   layer ranges across processes/nodes; the coordinator streams hidden
   states to workers over tonic gRPC with mTLS (f16 activations,
   optional int8), reusing etcd for discovery instead of a bespoke TCP
@@ -61,10 +61,10 @@ Key decisions:
 The engine runs a dedicated scheduler thread (`src/scheduler/`) that
 multiplexes many sequences over one model:
 
-* **Chunked prefill** — prompts are processed `--prefill-chunk`
+* **Chunked prefill**: prompts are processed `--prefill-chunk`
   (default 512) tokens per step, so a long prompt cannot starve
   decoding sequences.
-* **Batched decode** — up to `--max-batch` (default 8) sequences
+* **Batched decode**: up to `--max-batch` (default 8) sequences
   advance one token per step. Candle's stock `quantized_llama` keeps
   a single KV cache *inside* the model, which forces sequential
   serving; `cgn-infer` therefore implements its own forward pass over
@@ -73,7 +73,7 @@ multiplexes many sequences over one model:
   (QKV, attention output, MLP, LM head) run once over the whole
   batch, while RoPE + attention run per sequence (each sequence has
   its own position and history length).
-* **Paged KV accounting with preemption** — KV space is reserved in
+* **Paged KV accounting with preemption**: KV space is reserved in
   16-token blocks (the cgn-kvcached granularity) against a
   `--kv-pool-tokens` budget. Blocks are logical: tensors stay
   contiguous per sequence, but admission and eviction are decided at
@@ -85,7 +85,7 @@ Batched decode covers GGUF architectures `llama` (including Mistral
 GGUFs, which declare `general.architecture = "llama"`) and `qwen2`.
 Other supported architectures fall back to a **sequential runtime**
 (stock candle-transformers models, one sequence at a time) behind the
-same scheduler — fairness and queueing still apply, only the batching
+same scheduler; fairness and queueing still apply, only the batching
 degree drops to 1.
 
 ## Distributed layer pipeline (Phase 4)
@@ -149,7 +149,7 @@ cgn-infer serve --model /models/llama-3.1-8b-q4_k_m.gguf \
 ```
 
 Under `cgn-agent`, set `engine.kind = "cgn_infer"` and the agent
-renders this argv automatically — see the
+renders this argv automatically; see the
 [configuration reference](../reference/config.md).
 
 ## Crate layout
@@ -174,11 +174,11 @@ The activation-streaming service for pipeline mode is defined in
 
 | Phase | Scope | Status |
 |-------|-------|--------|
-| **1 — Single-node MVP** | Llama-family GGUF via Candle, OpenAI chat/completions with SSE, greedy + standard sampling, per-request KV cache | **done** |
-| **2 — Platform integration** | `EngineKind::CgnInfer` in `cgn-core`, spawn/supervision in `cgn-agent`, recipes, same release tarball/image as the other binaries | **done** |
-| **3 — Continuous batching** | Scheduler admitting multiple sequences per forward pass (prefill chunking + batched decode), paged KV blocks with preemption | **done** |
-| **4 — Distributed layer pipeline** | Layer-range sharding across nodes, gRPC (mTLS) activation streaming, coordinator/worker topology from `[models.*.pipeline]`, etcd registration with non-servable worker role, whole-pipeline restart | **done** |
-| **5 — Breadth** | Qwen2 in the batched runtime; Qwen3 / Gemma3 / Phi-3 / MoE-llama via the sequential fallback | **done** (disk KV persistence + speculative decoding still open) |
+| **1. Single-node MVP** | Llama-family GGUF via Candle, OpenAI chat/completions with SSE, greedy + standard sampling, per-request KV cache | **done** |
+| **2. Platform integration** | `EngineKind::CgnInfer` in `cgn-core`, spawn/supervision in `cgn-agent`, recipes, same release tarball/image as the other binaries | **done** |
+| **3. Continuous batching** | Scheduler admitting multiple sequences per forward pass (prefill chunking + batched decode), paged KV blocks with preemption | **done** |
+| **4. Distributed layer pipeline** | Layer-range sharding across nodes, gRPC (mTLS) activation streaming, coordinator/worker topology from `[models.*.pipeline]`, etcd registration with non-servable worker role, whole-pipeline restart | **done** |
+| **5. Breadth** | Qwen2 in the batched runtime; Qwen3 / Gemma3 / Phi-3 / MoE-llama via the sequential fallback | **done** (disk KV persistence + speculative decoding still open) |
 
 ## Current limitations
 
@@ -198,11 +198,11 @@ The activation-streaming service for pipeline mode is defined in
 ## Non-goals (for now)
 
 * Custom hand-written GPU kernels (swappable later behind `Runtime`).
-* Tensor parallelism within a layer — pipeline parallelism only.
+* Tensor parallelism within a layer (pipeline parallelism only).
 * Training / fine-tuning, runtime safetensors loading.
 
 ## Related docs
 
-* [Configuration reference — `engine.cgn_infer`](../reference/config.md)
+* [Configuration reference: `engine.cgn_infer`](../reference/config.md)
 * [KV strategy](kv-strategy.md) · [KV tiering](kv-tiering.md)
 * [Routing](routing.md)

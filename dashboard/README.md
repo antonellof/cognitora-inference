@@ -38,7 +38,7 @@ deep-link an endpoint: `http://localhost:8088/?endpoint=http://<router>:9091/met
 
 ## No cluster? Generate mock data
 
-[`mock_metrics.py`](mock_metrics.py) serves a fake — but wire-identical —
+[`mock_metrics.py`](mock_metrics.py) serves a fake (but wire-identical)
 Prometheus endpoint that simulates a 16-node mixed GPU fleet
 (H100 / H200 / A100 / MI300X / L40S / A10) serving five models under a
 waving load, complete with latency/TTFT histograms, KV pressure, power
@@ -52,22 +52,22 @@ python3 -m http.server 8088 -d dashboard
 
 ## Charts
 
-- **requests / s** and **tokens / s** — rates derived from
+- **requests / s** and **tokens / s**: rates derived from
   `cgn_router_chat_requests_total` / `cgn_router_chat_completion_tokens_total`.
-- **latency p50 / p95** — interpolated from `cgn_router_chat_latency_seconds`
+- **latency p50 / p95**: interpolated from `cgn_router_chat_latency_seconds`
   histogram bucket deltas between scrapes (recent traffic, not lifetime).
-- **TTFT p95** — same technique on `cgn_router_chat_ttft_seconds`
+- **TTFT p95**: same technique on `cgn_router_chat_ttft_seconds`
   (time from dispatch to first streamed token).
-- **queue depth** — sum of `cgn_cluster_node_queue_depth` across nodes.
-- **power** — sum of `cgn_cluster_node_power_watts`.
-- **KV cache used %** — from `cgn_cluster_node_kv_free_blocks` /
+- **queue depth**: sum of `cgn_cluster_node_queue_depth` across nodes.
+- **power**: sum of `cgn_cluster_node_power_watts`.
+- **KV cache used %**: from `cgn_cluster_node_kv_free_blocks` /
   `cgn_cluster_node_kv_total_blocks`.
-- **energy (J / token)** — average watts over the scrape window × window
+- **energy (J / token)**: average watts over the scrape window × window
   seconds ÷ tokens generated in the window.
 
 The node table is driven by `cgn_cluster_node_info` plus the per-node
 gauges, refreshed every scrape; nodes that leave the cluster disappear
 automatically because the router resets the gauge vectors each pass.
 
-All of these series are also available to Grafana/Prometheus directly —
+All of these series are also available to Grafana/Prometheus directly;
 this dashboard is just the batteries-included view.

@@ -1,9 +1,9 @@
-# Quickstart — 5 minutes from zero
+# Quickstart: 5 minutes from zero
 
 This page walks from "I just heard about Cognitora" to "I'm
 streaming tokens through it" without committing to a Kubernetes
 cluster. We'll run **everything on one host**, with mTLS off and a
-fake engine that returns canned tokens — perfect for a demo, a
+fake engine that returns canned tokens: perfect for a demo, a
 laptop test, or a CI smoke check.
 
 ## Prerequisites
@@ -18,13 +18,13 @@ laptop test, or a CI smoke check.
 Pick one of:
 
 ```bash
-# Option A — prebuilt binaries (Linux x86_64 / aarch64).
+# Option A: prebuilt binaries (Linux x86_64 / aarch64).
 # Pulls a sha256-verified release tarball from GitHub. Override CGN_PREFIX
 # to install somewhere other than /usr/local/bin or ~/.cognitora/bin.
 # inference.cognitora.dev/install redirects to deploy/installer/install.sh on GitHub.
 curl -fsSL https://inference.cognitora.dev/install | sh
 
-# Option B — from source (any platform; required on macOS)
+# Option B: from source (any platform; required on macOS)
 git clone https://github.com/antonellof/cognitora-inference cognitora
 cd cognitora
 cargo build --release --no-default-features \
@@ -41,7 +41,7 @@ cgn-ctl pki bootstrap --out /tmp/pki --san localhost
 ```
 
 You'll get four PEM files in `/tmp/pki`. We won't enable mTLS for
-this run — but the files prove `cgn-ctl pki` works.
+this run, but the files prove `cgn-ctl pki` works.
 
 ## 3. Issue an API key
 
@@ -127,11 +127,11 @@ Ready-to-run profiles under [`examples/`](../../examples/):
 
 | Profile                                                | Engine                       | Best for |
 |--------------------------------------------------------|------------------------------|----------|
-| [`examples/local-mac`](../../examples/local-mac)       | `openai_compat` → Ollama     | macOS laptop; `ollama pull` only — no GGUF build. |
+| [`examples/local-mac`](../../examples/local-mac)       | `openai_compat` → Ollama     | macOS laptop; `ollama pull` only, no GGUF build. |
 | [`examples/apple-mlx`](../../examples/apple-mlx)        | `mlx` → `mlx_lm.server`      | macOS Apple Silicon; `pip install mlx-lm`. |
 | [`examples/multi-llm`](../../examples/multi-llm)       | `vllm` (GPU) or `llama_cpp` (CPU) | Linux box, server, or CI. |
 
-### macOS (Ollama — fastest)
+### macOS (Ollama, fastest)
 
 ```bash
 brew install jq unzip
@@ -146,7 +146,7 @@ bash scripts/run/up.sh examples/local-mac
 bash examples/local-mac/demo.sh
 ```
 
-### macOS (MLX — Apple Silicon)
+### macOS (MLX, Apple Silicon)
 
 ```bash
 brew install jq unzip
@@ -188,12 +188,12 @@ bash scripts/run/up.sh examples/multi-llm
 bash examples/multi-llm/demo.sh
 ```
 
-The same TOML profile boots a vLLM stack on a GPU host — only the
+The same TOML profile boots a vLLM stack on a GPU host; only the
 `[engine]` block in `agent-*.toml` changes.
 
 ## 8. Run the smoke tests
 
-These tests need only the binaries and Python 3 — no models, no GPUs:
+These tests need only the binaries and Python 3, no models, no GPUs:
 
 ```bash
 # Engine-plugin layer + auth + rate-limit middleware. ~3 s.

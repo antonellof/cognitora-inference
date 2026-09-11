@@ -24,7 +24,7 @@ Per-binary narrative docs (features, ports, dependencies): see
 | `[metrics.*]`      | `cgn-metrics`       | `cgn-metrics`                                |
 | `[models.<name>]`  | `cgn-core::config`  | `cgn-router` (declarative model registry)    |
 
-## `[engine]` — pluggable inference engine
+## `[engine]`: pluggable inference engine
 
 Cognitora's `cgn-agent` is engine-agnostic: any process that exposes the
 OpenAI HTTP surface (`/v1/completions`, `/health`, `/v1/models`) plugs in.
@@ -70,46 +70,46 @@ Kubernetes / a sidecar that owns the engine lifecycle.
 The supported engine kinds map to the same OpenAI HTTP surface, so they
 are fully interchangeable from the router's perspective:
 
-* **`vllm`** — `vllm serve <model> --tensor-parallel-size <N> ...`. Best
+* **`vllm`**: `vllm serve <model> --tensor-parallel-size <N> ...`. Best
   general-purpose GPU engine; supports continuous batching and chunked
   prefill out of the box.
-* **`sglang`** — `python -m sglang.launch_server --model-path <model>
+* **`sglang`**: `python -m sglang.launch_server --model-path <model>
   --tp <N> ...`. Adds RadixAttention prefix caching that complements
-  Cognitora's *cross-node* prefix routing — the router still picks the
+  Cognitora's *cross-node* prefix routing; the router still picks the
   node with the longest cached prefix, and SGLang then reuses cache
   inside that node.
-* **`llama_cpp`** — CPU-friendly fallback (and CUDA-offload via
+* **`llama_cpp`**: CPU-friendly fallback (and CUDA-offload via
   `n_gpu_layers`); useful for laptops, CI, and edge deployments.
-* **`mlx`** — `python3 -m mlx_lm.server --model <hf_or_path> --host <h> --port <p> …`.
+* **`mlx`**: `python3 -m mlx_lm.server --model <hf_or_path> --host <h> --port <p> …`.
   **Apple Silicon / macOS only** ([mlx-lm](https://github.com/ml-explore/mlx-lm)).
   Use `kv_offload = "none"` only.
-* **`cgn_infer`** *(experimental / preview)* — `cgn-infer serve --model
+* **`cgn_infer`** *(experimental / preview)*: `cgn-infer serve --model
   <gguf> --host <h> --port <p> --ctx <n> --threads <n>`. Cognitora's
   **first-party native engine** (Rust + Candle, GGUF via mmap) with
   continuous batching (llama/qwen2 GGUFs; qwen3/gemma3/phi3/MoE serve
   sequentially) and optional multi-node layer-pipeline mode via
   `[models.*.pipeline]`; only `kv_offload = "none"` is valid. See
   [`docs/architecture/cgn-infer.md`](../architecture/cgn-infer.md).
-* **`openai_compat`** — proxy-only.
+* **`openai_compat`**: proxy-only.
 
 ### Engine-side KV offload
 
 `engine.kv_offload` selects which connector `cgn-agent` injects when
-spawning the engine. The router is unaware of this dial — it only sees
-prefix-overlap signals via `cgn-kvcached` either way — so swapping
+spawning the engine. The router is unaware of this dial (it only sees
+prefix-overlap signals via `cgn-kvcached` either way), so swapping
 backends is a one-line change.
 
 | Value     | Effect (vLLM)                                                                                       | Effect (SGLang)                                                                          |
 |-----------|------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------|
 | `none`    | nothing injected                                                                                     | nothing injected                                                                          |
-| `nixl`    | `--kv-transfer-config '{"kv_connector":"NixlConnector",...}'` with role-aware `kv_role`              | (rejected — SGLang HiCache uses NIXL internally; pick `hicache` instead)                  |
-| `lmcache` | `LMCacheConnectorV1` (agg) or `PdConnector(LMCache+NIXL)` (disagg, prefill role)                     | (rejected — LMCache is vLLM-side)                                                         |
-| `hicache` | (rejected — vLLM has no HiCache)                                                                     | `--enable-hierarchical-cache --hicache-ratio 2 --hicache-write-policy write_through --hicache-storage-backend nixl` |
-| `kvbm`    | `--kv-transfer-config '{"kv_connector":"DynamoConnector","kv_connector_module_path":"kvbm.vllm_integration.connector",...}'` | (rejected — KVBM has no SGLang support)                                                   |
+| `nixl`    | `--kv-transfer-config '{"kv_connector":"NixlConnector",...}'` with role-aware `kv_role`              | (rejected: SGLang HiCache uses NIXL internally; pick `hicache` instead)                  |
+| `lmcache` | `LMCacheConnectorV1` (agg) or `PdConnector(LMCache+NIXL)` (disagg, prefill role)                     | (rejected: LMCache is vLLM-side)                                                         |
+| `hicache` | (rejected: vLLM has no HiCache)                                                                     | `--enable-hierarchical-cache --hicache-ratio 2 --hicache-write-policy write_through --hicache-storage-backend nixl` |
+| `kvbm`    | `--kv-transfer-config '{"kv_connector":"DynamoConnector","kv_connector_module_path":"kvbm.vllm_integration.connector",...}'` | (rejected: KVBM has no SGLang support)                                                   |
 
 Disagg topologies (`[agent].role = "prefill"` or `"decode"`) compose
-the chosen backend with NIXL automatically. The full table — including
-the exact JSON blobs — lives in [`docs/architecture/kv-strategy.md`](../architecture/kv-strategy.md).
+the chosen backend with NIXL automatically. The full table, including
+the exact JSON blobs, lives in [`docs/architecture/kv-strategy.md`](../architecture/kv-strategy.md).
 
 LMCache, HiCache, and KVBM all require the corresponding Python
 package to be installed in the engine's virtualenv. `cgn-agent` does
@@ -128,7 +128,7 @@ Per-model hardware constraints for clusters mixing GPU generations or
 vendors. The router filters routing candidates against the GPU identity
 each agent publishes in its heartbeat (NVML on NVIDIA, `rocm-smi` on
 AMD). Nodes that report **no** GPU identity (older agents, CPU boxes)
-are never filtered — the constraint only excludes nodes that
+are never filtered; the constraint only excludes nodes that
 affirmatively report incompatible hardware.
 
 ```toml
@@ -142,7 +142,7 @@ require_gpu = "h100"    # case-insensitive substring of GPU name or vendor
 | `min_vram_mb` | u64 | unset | Minimum total GPU memory (MiB) a node must report. |
 | `require_gpu` | string | unset | Substring the node's GPU name or vendor must contain (`"h100"`, `"mi300"`, `"nvidia"`, `"amd"`). |
 
-#### `[agent].watt_limit` — soft power cap
+#### `[agent].watt_limit`: soft power cap
 
 ```toml
 [agent]
@@ -152,11 +152,11 @@ watt_limit = 700.0   # watts; 0 (default) = uncapped
 Published in the heartbeat and mirrored to
 `cgn_cluster_node_watt_limit`. When at least one candidate node is under
 its cap, the router routes only to under-cap nodes; when *every*
-candidate is over, routing proceeds anyway — serving beats browning out
+candidate is over, routing proceeds anyway: serving beats browning out
 a request. Combine with the autoscaler's `high_watt_threshold` for
 drain-based enforcement.
 
-#### `[router.federation]` — cross-cluster fallback
+#### `[router.federation]`: cross-cluster fallback
 
 ```toml
 [router.federation]
@@ -169,11 +169,11 @@ When the local cluster has no eligible node for a request's model, the
 gateway forwards the request to a peer cluster's router over gRPC
 (mTLS). Peers are probed concurrently and the lowest-connect-latency
 reachable peer wins. Forwarding targets the peer's gRPC surface, which
-only routes locally — a request crosses at most one cluster boundary
+only routes locally, so a request crosses at most one cluster boundary
 and cannot loop. Forwards are counted in
 `cgn_router_federation_forwards_total{model,peer}`.
 
-### `[models.*.pipeline]` — cgn-infer layer pipeline
+### `[models.*.pipeline]`: cgn-infer layer pipeline
 
 With `engine.kind = "cgn_infer"`, a per-model `pipeline` block splits
 the model across processes/nodes by layer range. The agent spawns one

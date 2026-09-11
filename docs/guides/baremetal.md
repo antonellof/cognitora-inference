@@ -52,7 +52,7 @@ themselves stay owned by root.
 
 For HA, run `cgn-router` on at least two non-GPU hosts (or behind your
 load balancer). `cgn-agent` and `cgn-kvcached` always run **together**
-on every GPU host — they share a Unix socket for KV transfers.
+on every GPU host; they share a Unix socket for KV transfers.
 `cgn-metrics` can run anywhere reachable from the BMC and the Prom
 endpoints.
 

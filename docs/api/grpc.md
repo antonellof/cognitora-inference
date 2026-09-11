@@ -16,15 +16,15 @@ from there.
 
 ## Messages
 
-The proto package is intentionally small — every wire message has a
+The proto package is intentionally small; every wire message has a
 single, non-nullable canonical form. The full set is in
 `proto/cognitora/v1/`:
 
-- `common.proto` — `NodeRef`, `NodeRole`, `NodeHealth`, `Token`, `Status`
-- `router.proto` — `GenerateRequest`, `EmbedRequest`, `RoutingDecision`
-- `agent.proto` — `AgentGenerateRequest`, `ModelSpec`, `KvHandoffSpec`
-- `kv.proto` — `BlockAddress`, `BlockMeta`, `LookupRequest/Response`
-- `control.proto` — admin operations driven by `cgn-ctl`
+- `common.proto`: `NodeRef`, `NodeRole`, `NodeHealth`, `Token`, `Status`
+- `router.proto`: `GenerateRequest`, `EmbedRequest`, `RoutingDecision`
+- `agent.proto`: `AgentGenerateRequest`, `ModelSpec`, `KvHandoffSpec`
+- `kv.proto`: `BlockAddress`, `BlockMeta`, `LookupRequest/Response`
+- `control.proto`: admin operations driven by `cgn-ctl`
 
 ## TLS
 
@@ -59,7 +59,7 @@ buf generate --template buf.gen.ts.yaml
 
 Templates ship for Python, Go, and TypeScript when the corresponding
 release tag is cut. The Cognitora maintainers do not own those
-client libraries — pin the generated tarball to a Cognitora release
+client libraries: pin the generated tarball to a Cognitora release
 and you get reproducible types.
 
 ## Backwards-compatibility policy

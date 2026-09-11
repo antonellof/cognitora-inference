@@ -9,10 +9,10 @@ the addressing scheme, and the eviction strategy.
 
 Every KV block is identified by `BlockAddress { digest, layer }`:
 
-- `digest` — BLAKE3-256 of the (model, dtype, prefix tokens) tuple.
+- `digest`: BLAKE3-256 of the (model, dtype, prefix tokens) tuple.
   Stable across nodes, so a block hashed on host A has the same
   address on host B.
-- `layer` — the transformer layer index. We cache one block per
+- `layer`: the transformer layer index. We cache one block per
   layer so partial replays still benefit.
 
 The address is 36 bytes; we pack it into a 32-byte RocksDB key by
@@ -55,7 +55,7 @@ millions of blocks `ls` doesn't blow up.
 Reads use `O_DIRECT` + `io_uring` for zero-copy DMA into a pinned
 RAM buffer when the block is requested back to the GPU. The
 `io_uring` plumbing lives behind `unsafe` code in `cgn-kv` and is
-the **only** unsafe surface in the platform — it's gated behind a
+the **only** unsafe surface in the platform; it's gated behind a
 named module, not generic helpers.
 
 Lookup latency: <5 ms target.
@@ -65,7 +65,7 @@ Lookup latency: <5 ms target.
 A RocksDB column-family (`cf=kv`) maps `BlockAddress` →
 `BlockMeta { model, layer, bytes, created_unix, last_seen_unix,
 tier }`. The index is the source of truth for the warm and cold
-tiers — RAM is just the cached bytes.
+tiers; RAM is just the cached bytes.
 
 The index lives at `[kv].index_dir` and survives restarts. On boot,
 `Store::open` walks the SSD tier and reconciles missing/stale
@@ -85,11 +85,11 @@ model, layer, bytes }` with a bincode header, raw bytes payload.
 
 QUIC features we lean on:
 
-- **0-RTT for repeats** — a peer we've talked to in the last 30 s
+- **0-RTT for repeats**: a peer we've talked to in the last 30 s
   is a single round trip away.
-- **Multi-stream multiplexing** — one connection, many in-flight
+- **Multi-stream multiplexing**: one connection, many in-flight
   block requests; head-of-line blocking is per-block, not per-peer.
-- **mTLS-rooted peer auth** — the peer cert is verified against
+- **mTLS-rooted peer auth**: the peer cert is verified against
   the same cluster CA used for gRPC.
 
 When `--features rdma` is built, the same `Frame` codec runs over
@@ -106,7 +106,7 @@ state machine.
 | RAM  | approximate-LRU   | RAM tier reaches `[kv].ram_gib`         |
 | SSD  | TTL + capacity    | block age > `[kv].ssd_ttl` or > `ssd_gib` |
 
-Eviction is opportunistic — we **never** block a write to make room.
+Eviction is opportunistic: we **never** block a write to make room.
 The LRU walks happen in a background tokio task at 1 Hz.
 
 ## Observability

@@ -41,7 +41,7 @@ Each binary serves Prometheus on its admin port:
 on `:9092`, plus the power gauges from `cgn-power`.
 
 All `/metrics` listeners send `Access-Control-Allow-Origin: *`, so any
-browser app can scrape them directly — including the bundled
+browser app can scrape them directly, including the bundled
 [standalone cluster dashboard](../../dashboard/README.md), which charts
 req/s, tokens/s, latency + TTFT percentiles, per-node status, KV
 utilisation, power, and J/token with no Prometheus server required.

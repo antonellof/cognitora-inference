@@ -40,11 +40,11 @@ matching tier above.
 ## Error budgets
 
 A 30-day rolling window. Every SLO above gets a 99.5% target by
-default — that's 3.6 hours of error budget per month. The Helm
+default; that's 3.6 hours of error budget per month. The Helm
 chart's PrometheusRules emit:
 
-- `cgn:slo_burn_rate_5m{model=...}` — fast burn detector (1h, 14.4×)
-- `cgn:slo_burn_rate_1h{model=...}` — slow burn detector (6h, 6×)
+- `cgn:slo_burn_rate_5m{model=...}`: fast burn detector (1h, 14.4×)
+- `cgn:slo_burn_rate_1h{model=...}`: slow burn detector (6h, 6×)
 
 Alerts fire when both windows are burning above their multiplier.
 

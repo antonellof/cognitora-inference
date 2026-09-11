@@ -3,8 +3,8 @@
 This document explains *what* KV caching is in Cognitora, *which* third-party
 KV systems we integrate with (LMCache, SGLang HiCache, NVIDIA KVBM, NIXL),
 and *why* we don't reinvent any of them. It also positions us against
-[NVIDIA Dynamo](https://github.com/ai-dynamo/dynamo) — the closest
-analogue — and highlights the points where we are deliberately ahead.
+[NVIDIA Dynamo](https://github.com/ai-dynamo/dynamo) (the closest
+analogue) and highlights the points where we are deliberately ahead.
 
 If you are looking for the **runtime data plane** (RAM tier, SSD tier,
 cross-node QUIC fetch), see [`kv-tiering.md`](kv-tiering.md). This page
@@ -23,18 +23,18 @@ each with a different owner:
 | 4 | Cross-cluster KV-aware routing | **`cgn-kvcached` + `cgn-router`** | A persistent index of *which node holds which prefix*. Used to score candidate workers before a request is dispatched. | sub-ms (same DC)      |
 
 Cognitora **owns layer 4**. We **integrate** layers 2 and 3. Layer 1 is
-left untouched — it's the engine's internal accounting.
+left untouched; it's the engine's internal accounting.
 
 ## What we use today
 
 | Capability                        | Today | Future-work tag |
 |-----------------------------------|-------|-----------------|
-| Layer 4 — cross-cluster prefix index (Rust, RocksDB, QUIC peer fetch) | yes  | mature          |
-| Layer 3 — `NixlConnector` for vLLM disagg                            | yes  | mature          |
-| Layer 2 — `LMCacheConnectorV1` for vLLM (agg + disagg)               | yes (auto-wired by `kv_offload = "lmcache"`) | mature |
-| Layer 2 — SGLang HiCache (`--enable-hierarchical-cache`)             | yes (auto-wired by `kv_offload = "hicache"`) | mature |
-| Layer 2 — `DynamoConnector` (KVBM)                                   | yes (auto-wired by `kv_offload = "kvbm"`) — for parity benchmarks | benchmarking |
-| Layer 2 — FlexKV                                                     | no    | considering     |
+| Layer 4: cross-cluster prefix index (Rust, RocksDB, QUIC peer fetch) | yes  | mature          |
+| Layer 3: `NixlConnector` for vLLM disagg                            | yes  | mature          |
+| Layer 2: `LMCacheConnectorV1` for vLLM (agg + disagg)               | yes (auto-wired by `kv_offload = "lmcache"`) | mature |
+| Layer 2: SGLang HiCache (`--enable-hierarchical-cache`)             | yes (auto-wired by `kv_offload = "hicache"`) | mature |
+| Layer 2: `DynamoConnector` (KVBM)                                   | yes (auto-wired by `kv_offload = "kvbm"`, for parity benchmarks) | benchmarking |
+| Layer 2: FlexKV                                                     | no    | considering     |
 | Mooncake-backed shared HiCache pool                                  | no, but the recipe TOML can pass through `--hicache-storage-backend mooncake` | compatible |
 
 **No, we do not currently use LMCache by default.** It is now opt-in via
@@ -54,7 +54,7 @@ Three reasons:
    changes in those ABIs.
 2. **Diminishing returns.** Once you have a working connector
    (LMCache, KVBM, FlexKV, HiCache) the marginal gain from yet
-   another connector is small — they all hit the same ~3-10× TTFT
+   another connector is small; they all hit the same ~3-10× TTFT
    improvement on RAG workloads. The big wins come from *layer 4*
    (smart routing) and *layer 3* (disagg topologies), which we
    already own.
@@ -104,7 +104,7 @@ convenience:
 
 | Concern                                            | Dynamo                                          | Cognitora                                                                |
 |----------------------------------------------------|-------------------------------------------------|--------------------------------------------------------------------------|
-| Built-in offload backend                           | KVBM (Rust + Python)                            | None — we integrate LMCache / HiCache / KVBM as alternatives             |
+| Built-in offload backend                           | KVBM (Rust + Python)                            | None; we integrate LMCache / HiCache / KVBM as alternatives             |
 | Cross-cluster prefix index                         | `kv-router` + NATS events                       | `cgn-kvcached` + `cgn-router` (single-binary, RocksDB, QUIC peer fetch)   |
 | Routing correctness                                | Radix tree of GPU-resident blocks               | Same idea, plus **sequence-chained BLAKE3 digests** so the router never confuses repeated chunks at different positions (see `cgn-core::hash::hash_seq_chunks`) |
 | Engine support                                     | vLLM, TRT-LLM, SGLang                            | vLLM, **SGLang**, **llama.cpp**, **MLX**, openai-compat                            |
@@ -113,12 +113,12 @@ convenience:
 | Python footprint                                   | Required (frontend + most backends)              | None for the Rust binaries; engines bring their own                       |
 | LMCache support                                    | Yes (one-off launch script)                      | Yes (`kv_offload = "lmcache"`, agg & disagg)                              |
 | HiCache support                                    | Yes (Mooncake-backed)                            | Yes (`kv_offload = "hicache"`, NIXL backend by default; Mooncake via passthrough) |
-| KVBM support                                       | Yes (native)                                     | Yes (`kv_offload = "kvbm"`) — benchmark parity                            |
-| Single-binary install                              | No                                               | Yes — three Rust binaries, no Python                                      |
+| KVBM support                                       | Yes (native)                                     | Yes (`kv_offload = "kvbm"`, benchmark parity)                            |
+| Single-binary install                              | No                                               | Yes: three Rust binaries, no Python                                      |
 
 ## How "beating Dynamo" looks concretely
 
-We don't claim a faster KV offload backend in absolute terms — KVBM and
+We don't claim a faster KV offload backend in absolute terms; KVBM and
 LMCache are both well-tuned and our recipes piggyback on them. What we
 **do** claim:
 
@@ -147,16 +147,16 @@ LMCache are both well-tuned and our recipes piggyback on them. What we
 
 ## Future work
 
-* `kv_offload = "flexkv"` — Tencent's
+* `kv_offload = "flexkv"`: Tencent's
   [FlexKV](https://github.com/taco-project/FlexKV) connector. The
   rendering shape is the same as LMCache; we just need a renderer
   branch and a recipe.
-* `[engine.sglang].hicache_storage_backend` — first-class TOML for
+* `[engine.sglang].hicache_storage_backend`: first-class TOML for
   picking `nixl | mooncake | nvme | s3` instead of overriding via
   `extra_args`.
-* WSPT prefill scheduling in `cgn-router` — Dynamo's "weighted shortest
+* WSPT prefill scheduling in `cgn-router`: Dynamo's "weighted shortest
   predicted task" admission. The KV-overlap signal needed for it
   already exists; the queue restructure is what's missing.
-* Federated peer fetch policy — a routing knob for "prefer
+* Federated peer fetch policy: a routing knob for "prefer
   intra-cluster cache hit over remote LMCache hit" to bound egress
   cost.

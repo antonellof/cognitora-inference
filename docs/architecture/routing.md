@@ -1,4 +1,4 @@
-# Routing — KV-aware scoring deep dive
+# Routing: KV-aware scoring deep dive
 
 The router's job is to pick the best node for each request in
 sub-millisecond p99. "Best" is a four-term linear combination of
@@ -27,7 +27,7 @@ The router hashes the prompt's first ~64 tokens to a chain of
 BLAKE3 digests (one per 16-token block). For each candidate node it
 asks `cgn-kvcached` (over the local UDS) how many leading blocks are
 present in the warm tier. The fraction of matched blocks is the
-overlap signal. This is the single most-important term — it's why
+overlap signal. This is the single most-important term; it's why
 KV-aware routing exists.
 
 ### `util(n)`
@@ -55,7 +55,7 @@ breaks ties when two nodes are equally busy and equally cached.
 
 When two nodes score within ε (`0.01` default) the router falls back
 to a stable hash of `(node_id, prefix_hash)`. That keeps a
-prefix-bound request hitting the same node across retries — the
+prefix-bound request hitting the same node across retries; the
 stickiness is what makes KV-aware routing worth it under burst
 traffic.
 
@@ -67,7 +67,7 @@ The admission counter is per-(model, role) and bounded by
 of the request and decrements on drop (RAII). When the queue is
 full the router returns `503` immediately without calling the agent.
 
-We deliberately don't queue — queueing inflates TTFT and the
+We deliberately don't queue: queueing inflates TTFT and the
 client's deadline budget is more useful at the source. The queue
 parameter is therefore a **hard cap on concurrency**, not a buffer.
 

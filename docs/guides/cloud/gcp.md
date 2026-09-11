@@ -2,14 +2,14 @@
 
 Three paths, in order of how cheap and fast they are to validate:
 
-1. **Quickstart on GKE Autopilot** — single-pod, CPU-only, < 5 min to a
+1. **Quickstart on GKE Autopilot**: single-pod, CPU-only, < 5 min to a
    public OpenAI-compatible URL. Best for "does this thing actually
    run on Kubernetes?". Verified end-to-end on
    `gke_cognitora_us-central1_cognitora-test`.
-2. **Helm chart on GKE Standard with GPU** — production shape; one
+2. **Helm chart on GKE Standard with GPU**: production shape; one
    router replica + agent DaemonSet on a GPU node pool, your choice of
    engine.
-3. **Terraform module** — same as (2) but described declaratively.
+3. **Terraform module**: same as (2) but described declaratively.
    Currently a single GKE Standard regional cluster + GPU pool; future
    work will fold the chart install in too.
 
@@ -17,7 +17,7 @@ Three paths, in order of how cheap and fast they are to validate:
 demos)
 
 Costs roughly **$0.10 / hour** while running and tears down to zero.
-No GPU required, no quotas, no Helm. The model — TinyLlama 1.1B —
+No GPU required, no quotas, no Helm. The model (TinyLlama 1.1B)
 gets downloaded by an init container on first boot.
 
 ```bash
@@ -147,7 +147,7 @@ After ~10 minutes:
   `nvidia.com/gpu` taint.
 - The Cognitora chart installed in the `cognitora` namespace.
 
-The terraform module is intentionally minimal today — same caveat as
+The terraform module is intentionally minimal today, same caveat as
 the Helm path: bring your own engine container.
 
 ## Sizing for GPU paths

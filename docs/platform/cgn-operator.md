@@ -1,6 +1,6 @@
-# cgn-operator — Kubernetes controller
+# cgn-operator: Kubernetes controller
 
-**kube-rs reconciler** that watches Cognitora CRDs and mirrors desired state into etcd (`/cognitora/*`) so `cgn-router` and `cgn-agent` behave the same as in bare-metal profiles — no second control plane.
+**kube-rs reconciler** that watches Cognitora CRDs and mirrors desired state into etcd (`/cognitora/*`) so `cgn-router` and `cgn-agent` behave the same as in bare-metal profiles. No second control plane.
 
 ## Overview
 
@@ -18,9 +18,9 @@ YAML shapes mirror the examples in [Kubernetes guide](../guides/kubernetes.md).
 
 ## Features
 
-- Single reconciliation loop per CRD kind — edits propagate to etcd for live router reload
+- Single reconciliation loop per CRD kind; edits propagate to etcd for live router reload
 - Works alongside the packaged [**Helm chart**](../../deploy/kubernetes/helm/cognitora/) (`helm install … ./deploy/kubernetes/helm/cognitora` or published OCI chart)
-- No Go runtime — pure Rust/Kubernetes dependency chain via **kube-rs**
+- No Go runtime; pure Rust/Kubernetes dependency chain via **kube-rs**
 
 ## Architecture
 

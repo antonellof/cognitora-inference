@@ -10,7 +10,7 @@ model, p99 TTFT spikes, GPU utilisation low (no prefix reuse).
    avg_over_time(cgn_router_cache_hit_ratio[5m]) by (model)
    ```
    Was the model recently deployed? Cold starts always look bad for
-   the first ~5 min — give it a window and re-check.
+   the first ~5 min; give it a window and re-check.
 
 2. Check sticky routing:
    ```promql
@@ -41,16 +41,16 @@ model, p99 TTFT spikes, GPU utilisation low (no prefix reuse).
    ```bash
    kubectl -n cognitora logs <router-pod> | jq 'select(.target=="cgn_router::routing") | .prefix_hash' | sort -u | head -20
    ```
-   If every hash is unique, the workload doesn't reuse prefixes —
+   If every hash is unique, the workload doesn't reuse prefixes, and
    the metric is reporting truth.
 
 ## Knobs to twist (in order of safety)
 
-1. `routingpolicy.spec.scoreWeights.kv` ↑ — favours nodes with the
+1. `routingpolicy.spec.scoreWeights.kv` ↑: favours nodes with the
    prefix already cached.
-2. `[kv].ram_gib` ↑ — bigger warm tier, fewer evictions.
-3. `[kv].ssd_gib` ↑ — bigger cold tier, fewer cold-disk fetches.
-4. `[router.disagg].enabled = true` for prompts > 256 tokens — frees
+2. `[kv].ram_gib` ↑: bigger warm tier, fewer evictions.
+3. `[kv].ssd_gib` ↑: bigger cold tier, fewer cold-disk fetches.
+4. `[router.disagg].enabled = true` for prompts > 256 tokens: frees
    up decode-only nodes to retain their KV better.
-5. (Last resort) Drop `[router.cascade]` if it's enabled — the
+5. (Last resort) Drop `[router.cascade]` if it's enabled; the
    cascade can fragment prefix-sharing across model tiers.

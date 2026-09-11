@@ -74,7 +74,7 @@ spec:
   cascade:   { enabled: true, confidenceThreshold: -1.2 }
 ```
 
-Editing this resource updates the live router without restart — the
+Editing this resource updates the live router without restart; the
 operator publishes the JSON to etcd at `/cognitora/routing/policy` and
 `cgn-router`'s `arc_swap` watcher picks up the new weights inside a
 second.

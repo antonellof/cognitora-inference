@@ -51,7 +51,7 @@ etcd = ["10.0.0.5:2379"]
 
 ## Sizing
 
-Hetzner's GPU lineup changes regularly — check
+Hetzner's GPU lineup changes regularly; check
 `hcloud server-type list` and pick a SKU with NVIDIA H100, A100, or
 L40S. The Cognitora installer auto-detects the driver via NVML and
 boots vLLM with the appropriate TP size.
@@ -59,7 +59,7 @@ boots vLLM with the appropriate TP size.
 ## Networking
 
 Hetzner Cloud's private networks (`hcloud network create`) are the
-right place for the etcd, gRPC, and QUIC ports — the public IPs
+right place for the etcd, gRPC, and QUIC ports; the public IPs
 should only carry the OpenAI HTTP traffic. The Terraform module
 binds Cognitora's internal listeners to the private subnet.
 

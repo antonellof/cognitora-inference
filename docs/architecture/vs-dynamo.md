@@ -1,7 +1,7 @@
 # Cognitora vs NVIDIA Dynamo
 
 This page is an honest, axis-by-axis comparison between Cognitora and
-[NVIDIA Dynamo](https://github.com/ai-dynamo/dynamo) — the closest peer
+[NVIDIA Dynamo](https://github.com/ai-dynamo/dynamo), the closest peer
 in the open-source distributed-inference space.
 
 It is **not** a marketing pitch: where Dynamo is ahead, we say so;
@@ -28,7 +28,7 @@ backends, and the cross-cluster index" deep dive, see
   as the universe. Cognitora adds llama.cpp and any OpenAI-compatible
   process (Ollama, hosted endpoints, sidecars) as first-class drivers.
 * **Different KV story.** Dynamo ships KVBM as the in-house tiered
-  block manager. Cognitora doesn't ship its own — it integrates
+  block manager. Cognitora doesn't ship its own; it integrates
   LMCache, SGLang HiCache, and KVBM as alternatives behind one TOML
   knob, plus its own `cgn-kvcached` cross-cluster index on top.
 * **Pick Dynamo if** you want NVIDIA-aligned reference deployments,
@@ -48,10 +48,10 @@ not the internal module names of either project.
 | Capability | Cognitora | Dynamo |
 |------------|-----------|--------|
 | KV-aware prefix routing | yes | yes |
-| Hashing scheme | **Sequence-chained BLAKE3** — each chunk's hash covers all preceding tokens, so identical chunks at different positions never collide | RadixTree of chained block hashes |
+| Hashing scheme | **Sequence-chained BLAKE3**: each chunk's hash covers all preceding tokens, so identical chunks at different positions never collide | RadixTree of chained block hashes |
 | Scoring metric | **Longest-prefix overlap** + `load` + `power` + `capacity`, weights live in etcd, hot-reloaded via `arc_swap` | Overlap + load |
 | Power / energy term | yes (Redfish + NVML; IPMI/DCGM planned) | no |
-| Load / capacity signals | live engine telemetry — vLLM/SGLang `/metrics` queue depth + KV occupancy scraped into the heartbeat | engine KV events + forward-pass metrics |
+| Load / capacity signals | live engine telemetry: vLLM/SGLang `/metrics` queue depth + KV occupancy scraped into the heartbeat | engine KV events + forward-pass metrics |
 | SLO / deadline propagation | yes (`cgn-router::deadline`) | yes (Planner SLA targets) |
 | Admission control | per-(model, role) inflight counters; queue caps; rate limiting | similar |
 | Dispatch retry / failover | pre-token retry against next-best node (failed node excluded) | in-flight request migration |
@@ -76,10 +76,10 @@ differently.
 
 | Layer | Cognitora | Dynamo |
 |-------|-----------|--------|
-| **L1 — Engine-internal KV** (GPU HBM) | left to engine | left to engine |
-| **L2 — Engine-side offload connector** | `none / nixl / lmcache / hicache / kvbm` selectable per recipe via one TOML knob (`engine.kv_offload`); `cgn-agent` auto-renders the right `--kv-transfer-config` JSON or HiCache flags | KVBM (built-in), LMCache, FlexKV — separate launch scripts per backend |
-| **L3 — Cross-worker transfer (disagg)** | `NixlConnector`, optionally stacked with LMCache/KVBM via `PdConnector` MultiConnector (auto-composed from `[agent].role`) | `NixlConnector`, optionally with KVBM/LMCache |
-| **L4 — Cross-cluster KV-aware routing** | **`cgn-kvcached`** — RAM (DashMap) + SSD (RocksDB-indexed file store) + QUIC peer fetch (federation across clusters) | `kv-router` (single cluster, NATS-based event plane) |
+| **L1: Engine-internal KV** (GPU HBM) | left to engine | left to engine |
+| **L2: Engine-side offload connector** | `none / nixl / lmcache / hicache / kvbm` selectable per recipe via one TOML knob (`engine.kv_offload`); `cgn-agent` auto-renders the right `--kv-transfer-config` JSON or HiCache flags | KVBM (built-in), LMCache, FlexKV, with separate launch scripts per backend |
+| **L3: Cross-worker transfer (disagg)** | `NixlConnector`, optionally stacked with LMCache/KVBM via `PdConnector` MultiConnector (auto-composed from `[agent].role`) | `NixlConnector`, optionally with KVBM/LMCache |
+| **L4: Cross-cluster KV-aware routing** | **`cgn-kvcached`**: RAM (DashMap) + SSD (RocksDB-indexed file store) + QUIC peer fetch (federation across clusters) | `kv-router` (single cluster, NATS-based event plane) |
 | Engine-internal G1 GPU pool | not owned by Cognitora | KVBM owns G1 |
 | Pinned host pool (G2) | RAM tier in cgn-kvcached | KVBM Host Pool |
 | NVMe / SSD (G3) | SSD tier in cgn-kvcached (RocksDB index) | KVBM Disk Pool |
@@ -103,9 +103,9 @@ sits above all of them**.
 
 | Concern | Cognitora | Dynamo |
 |---------|-----------|--------|
-| Runtime artefact | Six single-file binaries — no Python control plane, JVM, or operator runtime | Rust core + Python frontend / extensibility |
-| Service discovery | etcd (optional; single-node needs nothing — gossip fallback planned) | K8s-native, etcd, or file backends (etcd/NATS optional as of 1.x) |
-| Coordination plane | etcd only — `nodes`, `routing/policy` keys | pluggable planes (TCP/NATS request, ZMQ/NATS events) |
+| Runtime artefact | Six single-file binaries; no Python control plane, JVM, or operator runtime | Rust core + Python frontend / extensibility |
+| Service discovery | etcd (optional; single-node needs nothing, gossip fallback planned) | K8s-native, etcd, or file backends (etcd/NATS optional as of 1.x) |
+| Coordination plane | etcd only (`nodes`, `routing/policy` keys) | pluggable planes (TCP/NATS request, ZMQ/NATS events) |
 | External hard dependencies | etcd (multi-node only) | none on Kubernetes; etcd/NATS on Slurm/bare-metal paths |
 | Kubernetes | optional Helm chart (`deploy/kubernetes/helm/cognitora`) | first-class operator + CRDs |
 | Bare metal | first-class systemd units (`deploy/systemd/`) | not the focus |
@@ -117,8 +117,8 @@ sits above all of them**.
 
 | Capability | Cognitora | Dynamo |
 |------------|-----------|--------|
-| Autoscaler | closed loop — router writes energy-aware drain hints, `cgn-operator` cordons / restores capacity | Planner (SLA/TCO-driven, predictive) |
-| SLA planner | reactive — ModelPool SLOs (`maxQueuePerReplica`, min/max replicas, cooldown) scale decode replicas from live queue depth | predictive (SLA/TCO Planner) |
+| Autoscaler | closed loop: router writes energy-aware drain hints, `cgn-operator` cordons / restores capacity | Planner (SLA/TCO-driven, predictive) |
+| SLA planner | reactive: ModelPool SLOs (`maxQueuePerReplica`, min/max replicas, cooldown) scale decode replicas from live queue depth | predictive (SLA/TCO Planner) |
 | Workload simulator | not yet | AIConfigurator (search 10K configs) |
 | Topology-aware gang scheduling | basic (cgn-operator + node selectors) | Grove (NVL72-aware) |
 | Federation (cross-cluster) | `cgn-router::federation` + `cgn-kvcached` QUIC peer fetch | not shipped |
@@ -130,9 +130,9 @@ sits above all of them**.
 | Modality | Cognitora | Dynamo |
 |----------|-----------|--------|
 | Text LLM | yes | yes |
-| Tool calling | yes — `tools` / `tool_choice` passthrough, streaming tool-call deltas, buffered aggregation | yes (built-in agent toolkit) |
-| Structured output | yes — `response_format` passthrough (engine guided decoding) | yes (engine-side) |
-| Multimodal (images) | yes — OpenAI content-parts passthrough; text-only prefix hashing | yes (E/P/D pipeline + embedding cache) |
+| Tool calling | yes: `tools` / `tool_choice` passthrough, streaming tool-call deltas, buffered aggregation | yes (built-in agent toolkit) |
+| Structured output | yes: `response_format` passthrough (engine guided decoding) | yes (engine-side) |
+| Multimodal (images) | yes: OpenAI content-parts passthrough; text-only prefix hashing | yes (E/P/D pipeline + embedding cache) |
 | Multimodal (audio) / disaggregated multimodal | not yet | yes |
 | Video generation | not yet | yes (FastVideo, SGLang Diffusion) |
 | Speculative decoding | yes (engine-side, passthrough) | yes (engine-side, passthrough) |
@@ -167,7 +167,7 @@ Differentiators where Cognitora is currently ahead:
    and an Ollama-backed dev sandbox.
 2. **Bare-metal-first deployment.** `deploy/systemd/` units, a
    one-line installer with cosign-verified release tarballs, and
-   Terraform recipes for the four major clouds — without requiring
+   Terraform recipes for the four major clouds, without requiring
    Kubernetes.
 3. **Pure-binary runtime.** Six static binaries, no Python control
    plane, no JVM, no operator install required. The same artifacts
@@ -215,7 +215,7 @@ Areas where Dynamo is currently ahead:
    migration is future work.
 7. **Zero-config deploy (DGDR).** Specify model + SLA in one YAML and
    Dynamo profiles + plans + deploys. Our equivalent is the
-   `recipes/` tree — pre-baked, not generated.
+   `recipes/` tree: pre-baked, not generated.
 8. **Tool-calling toolkit.** Dynamo ships a NeMo Agent Toolkit
    integration. Cognitora passes tool calls through to the engine but
    adds nothing on top.
@@ -251,7 +251,7 @@ operator-visible behaviour is comparable:
 ## Migration / interop
 
 Both stacks consume the same `--kv-transfer-config` JSON shapes for
-LMCache, KVBM, and NIXL — Cognitora's auto-renderer was modelled on
+LMCache, KVBM, and NIXL; Cognitora's auto-renderer was modelled on
 the same patterns. A vLLM container that Dynamo can launch in agg or
 disagg mode is the same container Cognitora launches with
 `engine.kv_offload = "lmcache"` (or `kvbm`).
@@ -265,16 +265,16 @@ Porting between the two is mostly mechanical.
 
 Items on the Cognitora roadmap (`plan.md`) that close the deltas above:
 
-* **Multimodal text+image E/P/D** — track once vLLM and SGLang ship
+* **Multimodal text+image E/P/D**: track once vLLM and SGLang ship
   stable disaggregated multimodal hooks.
-* **Native G1 GPU pool** in `cgn-kvcached` — optional, only if a
+* **Native G1 GPU pool** in `cgn-kvcached`: optional, only if a
   workload doesn't fit any of the L2 backends.
-* **WSPT prefill scheduling** — Dynamo's "weighted shortest predicted
+* **WSPT prefill scheduling**: Dynamo's "weighted shortest predicted
   task" admission. The KV-overlap signal needed for it already exists
   in our router; the queue restructure is what's missing.
-* **Federated peer-fetch policy** — bound egress when peer-fetching
+* **Federated peer-fetch policy**: bound egress when peer-fetching
   from another cluster.
-* **Workload simulator** — `cgn-ctl bench plan` that searches the
+* **Workload simulator**: `cgn-ctl bench plan` that searches the
   recipe matrix.
 
 Items where we deliberately don't intend to converge:

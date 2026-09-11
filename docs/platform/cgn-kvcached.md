@@ -1,4 +1,4 @@
-# cgn-kvcached — Multi-tier KV cache daemon
+# cgn-kvcached: Multi-tier KV cache daemon
 
 **Host-local KV block service** with RAM + SSD tiers and cross-node fetch over QUIC (optional RDMA). Feeds prefix-overlap data so `cgn-router` can schedule onto GPUs that already hold prompt state.
 
@@ -50,8 +50,8 @@ index_dir   = "/var/lib/cognitora/kv/index"
 
 ## Dependencies
 
-- **cgn-agent** — publishes residency / eviction events
-- **Peer `cgn-kvcached` instances** — for cross-node fills
+- **cgn-agent**: publishes residency / eviction events
+- **Peer `cgn-kvcached` instances**: for cross-node fills
 
 ## Operational targets
 

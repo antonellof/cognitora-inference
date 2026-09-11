@@ -69,4 +69,4 @@ http://router:8080/healthz` hangs / errors.
 - Set `router.replicas=2` minimum in production.
 - Set a PodDisruptionBudget with `minAvailable: 1`.
 - Run a Prometheus alert on `cgn:router_p99_routing_us > 1500` for
-  10 min — the routing fast-path is the canary for everything else.
+  10 min; the routing fast-path is the canary for everything else.

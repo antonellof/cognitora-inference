@@ -29,7 +29,7 @@ issues.
 ### gRPC over Unix Domain Socket
 
 `cgn-agent` ↔ colocated `cgn-kvcached` use a UDS at
-`/run/cognitora/kv.sock`. No TLS — filesystem permissions
+`/run/cognitora/kv.sock`. No TLS; filesystem permissions
 (`0660`, owned by `cognitora:cognitora`) guard the channel. This is
 the only deliberate exception to "mTLS everywhere".
 
@@ -45,10 +45,10 @@ the threat model.
 Every binary that needs cluster state speaks etcd's gRPC API directly
 via `etcd-client`. Two key prefixes:
 
-- `/cognitora/nodes/<node_id>` — `NodeHealth` JSON written by every
+- `/cognitora/nodes/<node_id>`: `NodeHealth` JSON written by every
   agent every `[agent].heartbeat`. Stale entries (TTL 3×heartbeat)
   are filtered on read.
-- `/cognitora/routing/policy` — `RoutingPolicy` JSON written by the
+- `/cognitora/routing/policy`: `RoutingPolicy` JSON written by the
   operator (or `cgn-ctl cluster set-policy`). Watched by every
   router; updates land in `< 1 s`.
 
@@ -80,7 +80,7 @@ we use RDMA; otherwise we fall back to QUIC.
 ### Prometheus over HTTP
 
 Every binary serves `/metrics` on its admin port (`:9091` for
-router/agent/kvcached, `:9092` for metrics). No TLS — admin ports
+router/agent/kvcached, `:9092` for metrics). No TLS; admin ports
 bind `127.0.0.1` by default; the Helm chart never exposes them as
 Services.
 
@@ -88,7 +88,7 @@ Services.
 
 When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, every binary exports
 spans to that collector. The default sampler is parent-based ratio
-at 1%. Cognitora doesn't ship its own collector — Tempo / Jaeger /
+at 1%. Cognitora doesn't ship its own collector; Tempo / Jaeger /
 Honeycomb / Datadog all work.
 
 ## Summary table
