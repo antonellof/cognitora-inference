@@ -138,7 +138,11 @@ endpointEl.value =
   new URLSearchParams(location.search).get("endpoint") ||
   localStorage.getItem("cgn.endpoint") ||
   "http://localhost:9091/metrics";
-let pollMs = Number(localStorage.getItem("cgn.interval") || 5000);
+let pollMs = Number(
+  new URLSearchParams(location.search).get("interval") ||
+  localStorage.getItem("cgn.interval") ||
+  5000
+);
 $("interval").value = String(pollMs);
 let paused = false;
 

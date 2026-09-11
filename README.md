@@ -77,10 +77,10 @@ supports Llama-family GGUF models with sequential request serving; only
 
 <p align="center">
   <a href="dashboard/README.md">
-    <img src="dashboard/screenshot.png" alt="Cognitora cluster dashboard monitoring a 12-node mixed fleet (H100, A100, MI300X, L40S): live requests/s, tokens/s, latency and TTFT percentiles, queue depth, fleet power, KV cache utilisation, and energy per token." width="90%" />
+    <img src="dashboard/screenshot.png" alt="Cognitora cluster dashboard monitoring a 16-node mixed fleet (H100, H200, A100, MI300X, L40S, A10): live requests/s, tokens/s, latency and TTFT percentiles, queue depth, fleet power, KV cache utilisation, and energy per token." width="90%" />
   </a>
   <br />
-  <sub>The <a href="dashboard/README.md">cluster dashboard</a> watching a 12-node mixed fleet — single static HTML file, fed straight from the Prometheus <code>/metrics</code> endpoints.</sub>
+  <sub>The <a href="dashboard/README.md">cluster dashboard</a> watching a 16-node mixed fleet — single static HTML file, fed straight from the Prometheus <code>/metrics</code> endpoints.</sub>
 </p>
 
 <p align="center">
