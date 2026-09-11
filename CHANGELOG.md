@@ -10,6 +10,12 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-11
+
+The "carbon + truth-fed prefix" release. Grid-intensity aware admission
+for deferrable workloads, and agent-reported KV-cache epochs that keep
+the prefix index honest without engine block-hash events.
+
 ### Added
 
 - **KV-cache epoch + eviction-burst prefix reconciliation**: agents publish
