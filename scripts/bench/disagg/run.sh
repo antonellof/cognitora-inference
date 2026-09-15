@@ -76,7 +76,58 @@ done
 log()  { printf '\033[1;34m[disagg-bench]\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m[disagg-bench] fail:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# shellcheck disable=SC1091
+. "$ROOT/scripts/run/lib.sh"
+
 command -v python3 >/dev/null 2>&1 || fail "python3 not found"
+command -v curl >/dev/null 2>&1 || fail "curl not found"
+
+require_gpu_host() {
+  if [ "${CGN_BENCH_FORCE:-0}" = "1" ]; then
+    warn "CGN_BENCH_FORCE=1 — skipping vllm/GPU preflight"
+    return 0
+  fi
+  command -v vllm >/dev/null 2>&1 \
+    || fail "vllm not found in PATH (pip install vllm). Mac/CPU smoke: bash scripts/bench/validate-local.sh"
+}
+
+require_agents_up() {
+  local down=""
+  for f in "$WORK"/agent-*.pid; do
+    [ -f "$f" ] || continue
+    local name pid
+    name=$(basename "$f" .pid)
+    pid=$(cat "$f")
+    if ! kill -0 "$pid" 2>/dev/null; then
+      down="$down $name"
+    fi
+  done
+  if [ -n "$down" ]; then
+    fail "agent(s) exited:$down — check $WORK/agent-*.log (usually missing vllm or GPU)"
+  fi
+}
+
+require_model_ready() {
+  local url="$ROUTER_URL/v1/models"
+  log "waiting for model $MODEL at $url (up to 300s — first bring-up loads weights)"
+  for _ in $(seq 1 300); do
+    if curl -fsS -m 2 "$url" 2>/dev/null | python3 -c "
+import json, sys
+want = sys.argv[1]
+try:
+    data = json.load(sys.stdin).get('data') or []
+except Exception:
+    sys.exit(1)
+sys.exit(0 if any(m.get('id') == want for m in data) else 1)
+" "$MODEL"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+require_gpu_host
 mkdir -p "$OUT_DIR"
 RESULTS="$OUT_DIR/results.jsonl"
 : >"$RESULTS"
@@ -125,7 +176,8 @@ run_mode() {
   log "=== mode: $mode — bringing up $(basename "$recipe") ==="
   CURRENT_RECIPE=$recipe
   CGN_SKIP_PROBE=1 bash "$recipe/up.sh"
-  wait_for_router || fail "router never became ready for mode=$mode"
+  require_agents_up
+  require_model_ready || fail "model $MODEL never registered for mode=$mode (see $WORK/router.log agent-*.log)"
 
   log "load phase: n=$N conc=$CONC max_tokens=$MAX_TOKENS prompt_tokens=$PROMPT_TOKENS"
   local client_args=(
@@ -139,8 +191,15 @@ run_mode() {
     --warmup 2
     --prompts-file "$WORKLOAD"
   )
-  python3 "$ROOT/scripts/bench/bench_client.py" "${client_args[@]}" >>"$RESULTS" \
-    || fail "bench client failed for mode=$mode"
+  set +e
+  python3 "$ROOT/scripts/bench/bench_client.py" "${client_args[@]}" >>"$RESULTS"
+  rc=$?
+  set -e
+  if [ "$rc" -eq 2 ]; then
+    fail "bench client recorded zero completion tokens for mode=$mode — engine likely down or misconfigured (see $WORK/agent-*.log)"
+  elif [ "$rc" -ne 0 ]; then
+    fail "bench client failed for mode=$mode (exit $rc — no successful samples)"
+  fi
 
   teardown
   # Give engine subprocesses a moment to release the GPUs before the

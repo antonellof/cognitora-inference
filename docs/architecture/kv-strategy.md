@@ -20,7 +20,7 @@ each with a different owner:
 | 1 | Engine-internal KV            | vLLM / SGLang / llama.cpp | The KV blocks the model writes during prefill. Pinned in GPU HBM. | µs (GPU local)        |
 | 2 | Engine-side offload connector | The connector (`LMCacheConnectorV1`, `DynamoConnector`, `--enable-hierarchical-cache`) | Spillover blocks in CPU RAM, NVMe, Redis, Mooncake, S3. Stacks on layer 1 via vLLM/SGLang's connector ABI. | sub-ms → ms           |
 | 3 | Cross-worker KV transfer      | `NixlConnector` (vLLM) or NIXL inside KVBM/HiCache | The KV produced on a prefill GPU streamed to a decode GPU in disagg topologies. | RDMA-bound, sub-ms    |
-| 4 | Cross-cluster KV-aware routing | **`cgn-kvcached` + `cgn-router`** | A persistent index of *which node holds which prefix*. Used to score candidate workers before a request is dispatched. | sub-ms (same DC)      |
+| 4 | Cross-cluster KV-aware routing | **`cgn-kvcached` + `cgn-router`** | Persistent prefix index for cross-node fetch and (today) **local heartbeat prefix-claim scoring** in the router. Live `cgn-kvcached` overlap queries on the [v0.5 roadmap](../../plan.md#05--close-dynamo-credibility-gaps). | sub-ms (same DC)      |
 
 Cognitora **owns layer 4**. We **integrate** layers 2 and 3. Layer 1 is
 left untouched; it's the engine's internal accounting.

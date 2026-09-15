@@ -33,6 +33,13 @@ def delta_pct(disagg: float | None, agg: float | None) -> str:
     return f"{(disagg - agg) / agg * 100:+.1f}%"
 
 
+def completion_tokens_invalid(r: dict) -> bool:
+    """True when a scenario has no real completion tokens."""
+    if "total_completion_tokens" in r:
+        return r.get("total_completion_tokens", 0) == 0
+    return r.get("ok", 0) == 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="inp", required=True)
@@ -70,6 +77,20 @@ def main() -> int:
         f"max_tokens={meta.get('max_tokens', '?')} · "
         f"prompt_tokens={meta.get('prompt_tokens', '?')}",
         "",
+    ]
+    invalid = [
+        mode
+        for mode in ("disagg", "agg")
+        if (r := by_mode.get(mode)) and completion_tokens_invalid(r)
+    ]
+    if invalid:
+        modes_str = ", ".join(f"`{m}`" for m in invalid)
+        lines += [
+            f"> **Warning:** Zero completion tokens for {modes_str}.",
+            "> TTFT and tok/s numbers are not from real inference — engine is likely down or misconfigured.",
+            "",
+        ]
+    lines += [
         "| mode | ok/n | TTFT p50 (ms) | TTFT p95 (ms) | decode tok/s (p50) | system tok/s |",
         "|---|---:|---:|---:|---:|---:|",
     ]

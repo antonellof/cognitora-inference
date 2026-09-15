@@ -17,9 +17,21 @@ numbers require a GPU host with power reporting (below).
 
 ## Prerequisites (GPU host)
 
-* A running Cognitora stack with agents reporting power in heartbeats
-  (NVML / Redfish / rocm-smi).
-* `python3`, `curl` (optional sanity checks).
+* A **running** Cognitora stack with agents reporting power in heartbeats
+  (NVML / Redfish / rocm-smi). `run.sh` does not start or stop the stack —
+  bring one up first (e.g. `bash recipes/llama3-8b/vllm/agg/up.sh`).
+* `python3`, `curl`.
+
+## Fail-fast checks
+
+Before sampling metrics or driving load, `run.sh` verifies:
+
+* `$ADMIN_URL/metrics` is reachable (router admin / Prometheus listener)
+* `$ROUTER_URL/v1/models` is reachable (OpenAI-compatible surface)
+
+If either check fails you get an actionable error instead of a Python
+traceback. After a disagg benchmark tear-down the admin port is usually
+gone — start a stack again before running the energy bench.
 
 ## Running
 

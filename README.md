@@ -116,8 +116,8 @@ NVIDIA Dynamo is the closest peer in this space. We agree on most fundamentals (
 |---------|-----------|---------------|
 | **Positioning** | Engine-agnostic orchestration above vLLM / SGLang / llama.cpp / TRT-LLM / MLX | Engine-agnostic orchestration above vLLM / SGLang / TRT-LLM |
 | **Runtime artefact** | Six single-file binaries; no Python control plane, JVM, or operator runtime | Rust core + Python frontend / extensibility layer |
-| **First-class engines** | vLLM · SGLang · llama.cpp · MLX (Apple Silicon) · TensorRT-LLM (`trtllm-serve`) · OpenAI-compat | vLLM · SGLang · TRT-LLM |
-| **KV routing signal** | Sequence-chained BLAKE3 digests + longest-prefix overlap (positionally correct), fed by live engine telemetry **and** completion-confirmed claims (lease-bound, pressure-evicted) | RadixTree on chained block hashes, fed by engine KV events |
+| **First-class engines** | vLLM · SGLang · llama.cpp · MLX (Apple Silicon) · TensorRT-LLM spawn driver (`trtllm-serve`; no default recipe yet) · OpenAI-compat | vLLM · SGLang · TRT-LLM |
+| **KV routing signal** | Sequence-chained BLAKE3 digests + longest-prefix overlap (positionally correct), scored locally from agent heartbeat prefix claims and live engine telemetry; live `cgn-kvcached` overlap queries on the roadmap | RadixTree on chained block hashes, fed by engine KV events |
 | **KV offload backends** | `none / nixl / lmcache / hicache / kvbm`, selected per recipe via one TOML knob and auto-rendered into the engine argv | KVBM (built-in) + LMCache + FlexKV (separate launch scripts per backend) |
 | **Multi-tier KV** | RAM + SSD + cross-cluster QUIC peer fetch (cgn-kvcached) | Full G1–G4 (KVBM owns GPU + Host + SSD + remote pools) |
 | **Cross-cluster federation** | QUIC peer fetch + cgn-router federation | Single cluster |
@@ -134,7 +134,7 @@ NVIDIA Dynamo is the closest peer in this space. We agree on most fundamentals (
 | **Install surface** | One curl line, six static binaries, no runtime | `pip install ai-dynamo`, container, or operator |
 | **License** | Apache-2.0 | Apache-2.0 |
 
-The full deep-dive is in [`docs/architecture/vs-dynamo.md`](docs/architecture/vs-dynamo.md).
+The full deep-dive — including an honest **credibility gaps (v0.5)** table — is in [`docs/architecture/vs-dynamo.md`](docs/architecture/vs-dynamo.md).
 
 What we have that Dynamo doesn't: bare-metal-first deployment with one-curl install · llama.cpp + MLX + OpenAI-compat as first-class engines · energy-aware scheduling wired into routing and autoscaling · capability-aware routing for mixed NVIDIA/AMD fleets · etcd-free gossip discovery · positionally-correct KV digests · cross-cluster QUIC peer fetch · multi-model SLM→LLM cascade (streaming included) · single-binary runtime with no Python control plane.
 

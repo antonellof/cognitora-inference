@@ -38,6 +38,27 @@ backends, and the cross-cluster index" deep dive, see
   hybrid topologies, energy-aware admission, llama.cpp at the edge,
   or cross-cluster federation.
 
+## Credibility gaps (v0.5)
+
+Honest gaps that would undermine a Dynamo comparison if left
+unaddressed. See [`plan.md`](../../plan.md) for the matching roadmap
+items.
+
+| Gap | Today | Target |
+|-----|-------|--------|
+| Router ↔ `cgn-kvcached` overlap | Overlap scored locally from agent heartbeat prefix claims (`routing::score`); no live overlap RPC to `cgn-kvcached` | Cluster-wide prefix visibility via `cgn-kvcached` queries |
+| In-flight request migration | Pre-token retry against next-best node | Token-state replay on worker failure |
+| Multi-node GPU E2E | Labelled `run-gpu-e2e` or manual; not in default CI | Nightly GPU gate on real hardware |
+| RDMA KV transport | Stub behind `--features rdma`; QUIC is default | Real ibverbs path or docs trimmed |
+| IPMI / DCGM power | Redfish + NVML (+ rocm-smi) wired; IPMI/DCGM planned | Implement or drop roadmap claims |
+
+Already shipped (previously listed as gaps in internal reviews):
+
+* **Streaming cascade** — `stream_run_cascade` in the gateway.
+* **Live engine telemetry** — queue depth and KV occupancy in the
+  agent heartbeat.
+* **Closed autoscaler loop** — drain hints + operator replica scaling.
+
 ## Side-by-side: capabilities
 
 The vertical groupings are *what an operator typically asks about*,
@@ -49,7 +70,7 @@ not the internal module names of either project.
 |------------|-----------|--------|
 | KV-aware prefix routing | yes | yes |
 | Hashing scheme | **Sequence-chained BLAKE3**: each chunk's hash covers all preceding tokens, so identical chunks at different positions never collide | RadixTree of chained block hashes |
-| Scoring metric | **Longest-prefix overlap** + `load` + `power` + `capacity`, weights live in etcd, hot-reloaded via `arc_swap` | Overlap + load |
+| Scoring metric | **Longest-prefix overlap** (local, from agent heartbeat prefix claims) + `load` + `power` + `capacity`, weights live in etcd, hot-reloaded via `arc_swap`; live `cgn-kvcached` overlap queries not yet wired | Overlap + load |
 | Power / energy term | yes (Redfish + NVML, rocm-smi on AMD; IPMI/DCGM planned) | no |
 | Soft power cap | yes: `[agent].watt_limit` rides the heartbeat; under-cap nodes preferred, over-cap nodes still serve when nothing else can | no |
 | Capability filtering | yes: per-model `min_vram_mb` / `require_gpu` matched against GPU identity (name, vendor, VRAM) in the heartbeat | no (homogeneous workers assumed per deployment) |
@@ -65,7 +86,7 @@ not the internal module names of either project.
 |--------|-----------|--------|
 | vLLM | first-class | first-class |
 | SGLang | first-class | first-class |
-| TensorRT-LLM | first-class spawn driver (`trtllm-serve`, `kind = "tensorrt_llm"`) | first-class |
+| TensorRT-LLM | spawn driver shipped (`trtllm-serve`, `kind = "tensorrt_llm"`); no default recipe or GPU E2E gate yet | first-class |
 | llama.cpp (CPU + GPU offload) | first-class | not supported |
 | OpenAI-compatible (Ollama, hosted, sidecars) | first-class (`engine.kind = "openai_compat"`) | not supported |
 | Mixing engines in one cluster | yes (router routes by `model`, not engine) | partial |

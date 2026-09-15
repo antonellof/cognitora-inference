@@ -31,6 +31,13 @@ eviction-burst pruning) to find the longest contiguous cached prefix.
 The fraction of matched blocks is the overlap signal. This is the
 single most-important term; it's why KV-aware routing exists.
 
+**Today this is local scoring only.** The router does not call
+`cgn-kvcached` on the hot path; overlap comes from agent heartbeat
+prefix claims, Confirmed-KV etcd keys, and optimistic post-dispatch
+inserts. Live overlap queries against `cgn-kvcached` are on the
+[v0.5 roadmap](../../plan.md#05--close-dynamo-credibility-gaps) — see
+also [vs Dynamo](vs-dynamo.md#credibility-gaps-were-closing).
+
 ### `util(n)`
 
 Each `cgn-agent` publishes its in-flight request count and total

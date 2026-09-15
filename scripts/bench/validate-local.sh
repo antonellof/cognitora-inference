@@ -14,8 +14,8 @@ python3 "$HERE/disagg/workload.py" --out "$OUT/workload.jsonl" --n 8 --prefix-to
 
 log "disagg summarize (fixture inputs)"
 cat >"$OUT/results.jsonl" <<'EOF'
-{"name":"disagg","n":8,"ok":8,"ttft_ms":{"p50":120,"p95":340},"decode_tps":{"p50":42.1},"system_tps":81.9}
-{"name":"agg","n":8,"ok":8,"ttft_ms":{"p50":180,"p95":420},"decode_tps":{"p50":38.0},"system_tps":72.5}
+{"name":"disagg","n":8,"ok":8,"total_completion_tokens":256,"ttft_ms":{"p50":120,"p95":340},"decode_tps":{"p50":42.1},"system_tps":81.9}
+{"name":"agg","n":8,"ok":8,"total_completion_tokens":224,"ttft_ms":{"p50":180,"p95":420},"decode_tps":{"p50":38.0},"system_tps":72.5}
 EOF
 python3 "$HERE/disagg/summarize.py" \
   --in "$OUT/results.jsonl" \

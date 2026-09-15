@@ -27,8 +27,27 @@ OUT_DIR=${OUT_DIR:-$HERE/results}
 log()  { printf '\033[1;34m[energy-bench]\033[0m %s\n' "$*"; }
 fail() { printf '\033[1;31m[energy-bench] fail:\033[0m %s\n' "$*" >&2; exit 1; }
 
+require_metrics_endpoint() {
+  local url="$ADMIN_URL/metrics"
+  log "checking metrics endpoint at $url"
+  if ! curl -fsS -m 5 "$url" >/dev/null 2>&1; then
+    fail "router metrics not reachable at $url — start a stack first (e.g. bash recipes/llama3-8b/vllm/agg/up.sh). See scripts/bench/energy/README.md"
+  fi
+}
+
+require_router_endpoint() {
+  local url="$ROUTER_URL/v1/models"
+  log "checking router at $url"
+  if ! curl -fsS -m 5 "$url" >/dev/null 2>&1; then
+    fail "router not reachable at $url — start a stack first (e.g. bash recipes/llama3-8b/vllm/agg/up.sh). See scripts/bench/energy/README.md"
+  fi
+}
+
 command -v python3 >/dev/null 2>&1 || fail "python3 not found"
+command -v curl >/dev/null 2>&1 || fail "curl not found"
 mkdir -p "$OUT_DIR"
+require_metrics_endpoint
+require_router_endpoint
 
 BENCH="$ROOT/scripts/bench/bench_client.py"
 [ -f "$BENCH" ] || fail "missing $BENCH"
@@ -47,6 +66,7 @@ sample "$ADMIN_URL/metrics" >"$BEFORE"
 
 log "running bench_client n=$N conc=$CONC"
 BENCH_OUT="$OUT_DIR/bench.json"
+set +e
 python3 "$BENCH" \
   --url "$ROUTER_URL/v1/chat/completions" \
   --model "$MODEL" \
@@ -56,6 +76,13 @@ python3 "$BENCH" \
   --stream \
   --name energy \
   >"$BENCH_OUT"
+rc=$?
+set -e
+if [ "$rc" -eq 2 ]; then
+  fail "bench client recorded zero completion tokens — engine likely down or misconfigured"
+elif [ "$rc" -ne 0 ]; then
+  fail "bench client failed (exit $rc — no successful samples)"
+fi
 
 log "sampling metrics after load"
 AFTER="$OUT_DIR/after.json"

@@ -24,10 +24,16 @@ model depth).
 ### GPU (hot)
 
 Lives inside vLLM's KV pool, **not** owned by `cgn-kvcached`. The
-agent reports a window of pinned addresses to `cgn-kvcached` so the
-router's overlap query can answer "is this prefix on this GPU
-right now?" without traversing the engine. When vLLM evicts a
-block the agent emits a `block_evicted` event over the local UDS.
+agent reports a window of pinned addresses to `cgn-kvcached` for
+cross-node fetch and index metadata. **Router overlap scoring today
+does not query `cgn-kvcached` on the hot path** — it uses local
+heartbeat prefix claims and Confirmed-KV etcd keys (see
+[`routing.md`](routing.md#overlapprefix-n)). Live overlap queries
+against `cgn-kvcached` are on the
+[v0.5 roadmap](../../plan.md#05--close-dynamo-credibility-gaps) — see
+also [vs Dynamo](vs-dynamo.md#credibility-gaps-were-closing). When
+vLLM evicts a block the agent emits a `block_evicted` event over
+the local UDS.
 
 Lookup latency: <30 µs (in-process pointer table).
 

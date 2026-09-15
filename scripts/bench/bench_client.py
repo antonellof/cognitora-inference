@@ -108,6 +108,15 @@ def _http_post(url: str, payload: dict, *, stream: bool, timeout: float) -> Samp
 
     if completion_tokens == 0:
         completion_tokens = chunk_count
+    if chunk_count == 0 and completion_tokens == 0:
+        return Sample(
+            False,
+            math.nan,
+            total,
+            0,
+            prompt_tokens=prompt_tokens,
+            error="empty stream (no completion tokens)",
+        )
     if ttft is None:
         ttft = total
     return Sample(True, ttft, total, completion_tokens, prompt_tokens=prompt_tokens)
@@ -324,6 +333,14 @@ def main() -> int:
     )
     json.dump(res, sys.stdout)
     sys.stdout.write("\n")
+    if res.get("ok", 0) == 0:
+        return 1
+    if res.get("total_completion_tokens", 0) == 0:
+        print(
+            "[bench] no completion tokens recorded — engine likely down or misconfigured",
+            file=sys.stderr,
+        )
+        return 2
     return 0
 
 

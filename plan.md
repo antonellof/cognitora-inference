@@ -27,7 +27,7 @@ non-goals, and an index into the rest of the docs.
 | Area                    | What ships                                                          |
 |-------------------------|---------------------------------------------------------------------|
 | OpenAI HTTP surface     | `cgn-router` exposes `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/models`, SSE streaming |
-| KV-aware routing        | `cgn-router::routing::score` with policy hot-reload from etcd via `arc_swap` |
+| KV-aware routing        | `cgn-router::routing::score` with local prefix-overlap from agent heartbeats; policy hot-reload from etcd via `arc_swap` |
 | Multi-node clustering   | etcd-backed `NodeRegistry` with lease-based liveness in `cgn-agent::health` |
 | KV tiering              | RAM tier in `cgn-kv::RamTier`; SSD tier in `cgn-kv::SsdTier` (file-per-block, atomic rename); RocksDB index |
 | Cross-node KV transport | QUIC `Frame` codec in `cgn-kvcached::transport`; RDMA behind `--features rdma` |
@@ -179,8 +179,36 @@ The `vs-dynamo.md` deltas where we want to lead, not match.
   [FlexKV](https://github.com/taco-project/FlexKV) connector. Same
   rendering shape as LMCache; we just need a renderer branch and a
   recipe.
-* **Streaming cascade.** Incremental logprob gating on SSE responses;
-  today only buffered responses pass through `Cascade::run`.
+
+### 0.5 — close Dynamo credibility gaps
+
+Items that would dismiss a side-by-side comparison if left open.
+Detailed rationale in
+[`docs/architecture/vs-dynamo.md`](docs/architecture/vs-dynamo.md).
+
+* **Live overlap queries to `cgn-kvcached`.** Today the router scores
+  `kv_overlap` from prefix claims in the agent heartbeat only; it does
+  not call `cgn-kvcached` overlap RPCs. Wire the router to the
+  cross-cluster index for cluster-wide prefix visibility.
+* **In-flight request migration.** Pre-token dispatch retry exists;
+  mid-stream token-state replay on worker failure is not shipped.
+* **Multi-node GPU E2E outside default CI.** Nightly or labelled
+  `run-gpu-e2e` runs on real hardware; default PR CI stays CPU-only.
+* **Delete or implement documented stubs.** RDMA transport behind
+  `--features rdma` is a stub; IPMI/DCGM power paths are planned but
+  not wired. Either land them or remove the docs claims.
+* **Prefix index from engine KV events.** Eviction-aware claims work
+  today; a full block-hash event stream from vLLM/SGLang would tighten
+  overlap accuracy.
+
+Shipped since the last competitive review (no longer roadmap items):
+
+* ✓ **Streaming cascade.** `gateway::chat::stream_run_cascade` gates
+  on incremental logprob during SSE, not just buffered responses.
+* ✓ **Live engine telemetry in heartbeat.** vLLM/SGLang queue depth
+  and KV occupancy scraped in `cgn-agent::telemetry`.
+* ✓ **Closed autoscaler loop.** Router drain hints + operator replica
+  scaling from queue-depth SLOs.
 
 ### 0.5+ — research and infra
 
