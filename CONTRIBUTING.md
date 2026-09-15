@@ -7,8 +7,8 @@ high but the on-ramp should be quick.
 ## Quick start
 
 ```bash
-git clone https://github.com/<org>/<repo> cognitora
-cd cognitora
+git clone https://github.com/antonellof/cognitora-inference.git
+cd cognitora-inference
 cargo build --release --workspace --no-default-features \
     --exclude cgn-kvcached --exclude cgn-kv
 ./tests/e2e/single_node.sh        # CPU smoke test
@@ -19,10 +19,13 @@ recent macOS SDKs). Linux production builds use the full feature set.
 
 ## Branching and review
 
+- **Base every PR on `main`.** `main` is the only long-lived branch;
+  release tags (`vX.Y.Z`) are cut from it. Do not open PRs against
+  stale topic branches.
 - One change per PR. PRs that touch more than ~400 lines of
   non-trivial code will be asked to split.
-- Branches are named `kebab-prefix/short-summary`, e.g.
-  `router/cascade-confidence-floor`.
+- Topic branches are named `kebab-prefix/short-summary`, e.g.
+  `router/cascade-confidence-floor`, and deleted after merge.
 - Every PR runs the [`ci`](.github/workflows/ci.yml) workflow:
   `cargo fmt`, `cargo clippy --workspace --all-features
   -- -D warnings`, `cargo test`, `helm lint`, and `shellcheck` on
