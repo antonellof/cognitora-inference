@@ -395,7 +395,12 @@ pub(crate) fn kv_transfer_params_from_digests(
     let mut obj = serde_json::Map::new();
     obj.insert(
         "cgn_prefix_digests".into(),
-        serde_json::Value::Array(prefix_hex.into_iter().map(serde_json::Value::String).collect()),
+        serde_json::Value::Array(
+            prefix_hex
+                .into_iter()
+                .map(serde_json::Value::String)
+                .collect(),
+        ),
     );
     let resident_hex = digest_hex(resident);
     if !resident_hex.is_empty() {

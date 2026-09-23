@@ -103,13 +103,12 @@ impl Agent for AgentSvc {
             };
             let p = first.params.unwrap_or_default();
             let confirmed_digests = first.digests.clone();
-            let resident_digests = if supervisor.engine_cfg.kv_offload
-                == cgn_core::config::KvOffload::Cgn
-            {
-                crate::kvcached::resident_digests(&supervisor.cfg, &first.digests).await
-            } else {
-                Vec::new()
-            };
+            let resident_digests =
+                if supervisor.engine_cfg.kv_offload == cgn_core::config::KvOffload::Cgn {
+                    crate::kvcached::resident_digests(&supervisor.cfg, &first.digests).await
+                } else {
+                    Vec::new()
+                };
             let req = GenerateReq {
                 id: first.id,
                 model: first.model,

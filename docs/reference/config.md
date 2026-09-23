@@ -122,7 +122,7 @@ backends is a one-line change.
 |-----------|------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------|
 | `none`    | nothing injected                                                                                     | nothing injected                                                                          |
 | `nixl`    | `--kv-transfer-config '{"kv_connector":"NixlConnector",...}'` with role-aware `kv_role`              | (rejected: SGLang HiCache uses NIXL internally; pick `hicache` instead)                  |
-| `lmcache` | `LMCacheConnectorV1` (agg) or `PdConnector(LMCache+NIXL)` (disagg, prefill role)                     | (rejected: LMCache is vLLM-side)                                                         |
+| `lmcache` | `mode = "v1"`: `LMCacheConnectorV1` (agg) or `PdConnector(LMCache+NIXL)` (prefill). `mode = "mp"`: `LMCacheMPConnector` plus optional `lmcache server` | `--enable-lmcache` (`mode = "v1"`; YAML via `config_file`) |
 | `hicache` | (rejected: vLLM has no HiCache)                                                                     | `--enable-hierarchical-cache --hicache-ratio 2 --hicache-write-policy write_through --hicache-storage-backend nixl` |
 | `kvbm`    | `--kv-transfer-config '{"kv_connector":"DynamoConnector","kv_connector_module_path":"kvbm.vllm_integration.connector",...}'` | (rejected: KVBM has no SGLang support)                                                   |
 | `cgn`     | `--kv-transfer-config '{"kv_connector":"CognitoraConnector","kv_connector_module_path":"cgn_kv_connector.connector",...}'` (preview) | (rejected: Cognitora connector is vLLM-side)                                      |
@@ -134,6 +134,40 @@ the exact JSON blobs, lives in [`docs/architecture/kv-strategy.md`](../architect
 LMCache, HiCache, and KVBM all require the corresponding Python
 package to be installed in the engine's virtualenv. `cgn-agent` does
 not install them; the recipe's `up.sh` warns when they're missing.
+
+### `[engine.lmcache]`
+
+Used when `kv_offload = "lmcache"`. Omitted keys keep the defaults
+below, so existing recipes stay on the in-process connector.
+
+```toml
+[engine.lmcache]
+mode                 = "mp"          # "v1" (default) or "mp"
+host                 = "localhost"   # bare host, or tcp:// / grpc://
+port                 = 5555
+http_port            = 8080
+l1_size_gb           = 20
+eviction_policy      = "LRU"
+chunk_size           = 256
+spawn_server         = true          # agent starts `lmcache server`
+isolated_ipc         = false         # true = driver-level CUDA IPC, no hostIPC
+disable_prefix_caching = false       # adds --no-enable-prefix-caching
+config_file          = ""            # vLLM: operator kv-transfer-config.json
+                                     # SGLang: LMCache YAML (LMCACHE_CONFIG_FILE)
+connector_module_path = ""           # vLLM >= 0.20: lmcache.integration.vllm.lmcache_mp_connector
+server_urls          = ""            # "tcp://a:5555,tcp://b:5555" overrides host/port
+```
+
+`mode = "mp"` also sets `PYTHONHASHSEED=0` on the engine (and on the
+server, when the agent spawns it) unless that variable is already set.
+That keeps token hashes stable across processes, which both
+[LMCache](https://docs.lmcache.ai/developer_guide/integration.html) and
+the [TensorMesh Dynamo integration](https://docs.tensormesh.ai/integrations/dynamo)
+require. On Kubernetes, leave `spawn_server = false` and use the chart's
+LMCache DaemonSet, or set `config_file` to the operator's
+`<engine>-connection` ConfigMap. `isolated_ipc` must match the server's
+`--isolated-ipc` flag; a mismatch fails when the two sides import each
+other's CUDA events.
 
 ### Per-model knobs
 

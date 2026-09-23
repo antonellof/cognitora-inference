@@ -103,6 +103,40 @@ helm install cognitora deploy/kubernetes/helm/cognitora \
   -n cognitora --create-namespace -f values-vllm.yaml
 ```
 
+### vLLM with LMCache MP
+
+Runs a per-node `lmcache server` and attaches the sidecar with
+`LMCacheMPConnector`. `isolatedIPC: false` shares the host IPC namespace
+(required for the legacy CUDA IPC path; the container runs as root).
+Leave `command` empty.
+
+```yaml
+# values-lmcache.yaml
+lmcache:
+  enabled: true
+  mode: mp
+  l1SizeGB: 20
+  isolatedIPC: false
+agent:
+  nodeSelector:
+    nvidia.com/gpu.present: "true"
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+  engine:
+    enabled: true
+    image: lmcache/vllm-openai:v0.5.2
+    args: ["--model", "Qwen/Qwen3-0.6B", "--port", "8000"]
+    resources:
+      limits:
+        nvidia.com/gpu: 1
+```
+
+Set `lmcache.externalConfigMap` to an LMCache operator
+`<engine>-connection` ConfigMap to mount that JSON instead of starting
+a server.
+
 ### External engine (no sidecar)
 
 Leave `agent.engine.enabled=false` and set the URL:
@@ -151,6 +185,9 @@ router and agent pods and renders the `ca_file` / `cert_file` /
 | `agent.engine.port` | `8000` | Sidecar port; agent proxies to `http://127.0.0.1:<port>`. |
 | `agent.engine.kind` / `agent.engine.url` | `openai_compat` / `http://127.0.0.1:8000` | Used only when the sidecar is disabled. |
 | `agent.hostNetwork` | `false` | Host networking for the agent pod (KV QUIC transport). |
+| `lmcache.enabled` | `false` | Per-node LMCache MP server plus vLLM connector wiring. |
+| `lmcache.isolatedIPC` | `false` | `false`: hostIPC + root. `true`: driver-level CUDA IPC. |
+| `lmcache.externalConfigMap` | `""` | Operator `<engine>-connection` ConfigMap; skips the DaemonSet. |
 | `router.service.type` | `ClusterIP` | Set `LoadBalancer` for a public OpenAI endpoint. |
 
 Auth for the public OpenAI surface (`auth.enabled`, OIDC / API keys) and

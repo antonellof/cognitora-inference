@@ -33,7 +33,10 @@ use tokio::process::{Child, Command};
 use tracing::{info, warn};
 
 use crate::engine::{
-    spawn::{render_argv, render_pipeline_workers},
+    spawn::{
+        engine_child_env, lmcache_server_argv, render_argv, render_pipeline_workers,
+        should_spawn_lmcache_server,
+    },
     Engine, ModelSpec, OpenAiHttpEngine,
 };
 
@@ -102,6 +105,22 @@ impl Supervisor {
 
         let legacy = self.cfg.agent.vllm_cmd.clone();
         let role = self.cfg.agent.role;
+        let extra_env = engine_child_env(&self.engine_cfg);
+
+        let mut children = Vec::new();
+        if should_spawn_lmcache_server(&self.engine_cfg) {
+            let argv = lmcache_server_argv(&self.engine_cfg.lmcache);
+            info!(argv = ?argv, "spawning lmcache server");
+            let mut server = spawn_child(&argv, self.cfg.agent.gpu_index, &extra_env)?;
+            if let Err(e) =
+                wait_lmcache_server(&mut server, self.engine_cfg.lmcache.http_port).await
+            {
+                let _ = server.start_kill();
+                let _ = server.wait().await;
+                return Err(e);
+            }
+            children.push(server);
+        }
 
         // Pipeline workers first: the coordinator dials them at startup.
         let mut argvs = render_pipeline_workers(&self.engine_cfg, &spec)?;
@@ -112,10 +131,9 @@ impl Supervisor {
             legacy.as_deref(),
         )?);
 
-        let mut children = Vec::with_capacity(argvs.len());
         for argv in &argvs {
             info!(argv = ?argv, kind = %self.engine.name(), "spawning engine process");
-            children.push(spawn_child(argv, self.cfg.agent.gpu_index)?);
+            children.push(spawn_child(argv, self.cfg.agent.gpu_index, &extra_env)?);
         }
         *self.children.lock() = children;
         Ok(())
@@ -185,7 +203,42 @@ impl Supervisor {
     }
 }
 
-fn spawn_child(argv: &[String], gpu_index: Option<u32>) -> Result<Child> {
+/// Poll the LMCache HTTP frontend until `/healthcheck` succeeds or the
+/// server process exits. Matches the wait in Dynamo's `agg_lmcache_mp.sh`.
+async fn wait_lmcache_server(child: &mut Child, http_port: u16) -> Result<()> {
+    let url = format!("http://127.0.0.1:{http_port}/healthcheck");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .map_err(|e| Error::Internal(format!("lmcache health client: {e}")))?;
+    let start = std::time::Instant::now();
+    loop {
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(Error::Unavailable(format!(
+                "lmcache server exited before {url} was healthy (status {status})"
+            )));
+        }
+        match client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                info!(url = %url, "lmcache server is healthy");
+                return Ok(());
+            }
+            _ => {}
+        }
+        if start.elapsed() > Duration::from_secs(60) {
+            return Err(Error::Unavailable(format!(
+                "lmcache server never became healthy at {url}"
+            )));
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+fn spawn_child(
+    argv: &[String],
+    gpu_index: Option<u32>,
+    extra_env: &[(String, String)],
+) -> Result<Child> {
     let mut cmd = Command::new(&argv[0]);
     cmd.args(&argv[1..])
         .stdin(Stdio::null())
@@ -195,6 +248,14 @@ fn spawn_child(argv: &[String], gpu_index: Option<u32>) -> Result<Child> {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .kill_on_drop(true);
+    for (key, value) in extra_env {
+        // An operator-supplied seed wins. LMCache only requires that the
+        // engine and the server agree, not that the value is specifically 0
+        // when the operator already pinned one.
+        if std::env::var_os(key).is_none() {
+            cmd.env(key, value);
+        }
+    }
     // Pin the engine to the configured GPU. Both env vars are set — CUDA
     // runtimes read CUDA_VISIBLE_DEVICES, ROCm/HIP reads
     // HIP_VISIBLE_DEVICES — and each vendor's runtime ignores the other's

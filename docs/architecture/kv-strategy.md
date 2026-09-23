@@ -31,18 +31,30 @@ left untouched; it's the engine's internal accounting.
 |-----------------------------------|-------|-----------------|
 | Layer 4: cross-cluster prefix index (Rust, RocksDB, QUIC peer fetch) | yes  | mature          |
 | Layer 3: `NixlConnector` for vLLM disagg                            | yes  | mature          |
-| Layer 2: `LMCacheConnectorV1` for vLLM (agg + disagg)               | yes (auto-wired by `kv_offload = "lmcache"`) | mature |
+| Layer 2: LMCache for vLLM — in-process `LMCacheConnectorV1` or MP `LMCacheMPConnector` | yes (`kv_offload = "lmcache"`, `[engine.lmcache].mode`) | mature |
 | Layer 2: SGLang HiCache (`--enable-hierarchical-cache`)             | yes (auto-wired by `kv_offload = "hicache"`) | mature |
 | Layer 2: `DynamoConnector` (KVBM)                                   | yes (auto-wired by `kv_offload = "kvbm"`, for parity benchmarks) | benchmarking |
 | Layer 2: `CognitoraConnector` (`cgn-kvcached` RAM/SSD)              | yes (auto-wired by `kv_offload = "cgn"`, preview)              | preview      |
 | Layer 2: FlexKV                                                     | no    | considering     |
 | Mooncake-backed shared HiCache pool                                  | no, but the recipe TOML can pass through `--hicache-storage-backend mooncake` | compatible |
 
-**No, we do not currently use LMCache by default.** It is now opt-in via
-`[engine].kv_offload = "lmcache"` and ships in two reference recipes:
+**No, we do not currently use LMCache by default.** It is opt-in via
+`[engine].kv_offload = "lmcache"`. Two modes live under `[engine.lmcache]`:
 
-* `recipes/llama3-8b/vllm/agg-lmcache/`
-* `recipes/llama3-8b/vllm/disagg-lmcache/`
+* `mode = "v1"` (the default) embeds [`LMCacheConnectorV1`](https://docs.lmcache.ai/getting_started/quickstart.html)
+  in the vLLM process. Recipes: `agg-lmcache`, `disagg-lmcache`.
+* `mode = "mp"` (what LMCache recommends, and what the
+  [TensorMesh Dynamo integration](https://docs.tensormesh.ai/integrations/dynamo)
+  deploys) runs a standalone `lmcache server` and attaches vLLM with
+  `LMCacheMPConnector`. KV tensors move over CUDA IPC. Recipe:
+  `agg-lmcache-mp`. On Kubernetes the Helm chart runs that server as a
+  per-node DaemonSet, or you can mount the `<engine>-connection`
+  ConfigMap from the LMCache operator via `config_file`.
+
+SGLang takes the same knob as `--enable-lmcache` (in-process). Point
+`[engine.lmcache].config_file` at an LMCache YAML when you need
+`mp_host` / `mp_port` or a CPU budget; the agent exports it as
+`LMCACHE_CONFIG_FILE`.
 
 ## Why we don't ship our own KVBM-equivalent
 
@@ -78,7 +90,7 @@ The compatibility matrix is:
 | engine          | `none` | `nixl` | `lmcache` | `hicache` | `kvbm` |
 |-----------------|--------|--------|-----------|-----------|--------|
 | `vllm`          | yes    | yes    | yes       | no        | yes    |
-| `sglang`        | yes    | yes    | no        | yes       | no     |
+| `sglang`        | yes    | yes    | yes (`--enable-lmcache`, mode `v1`) | yes | no |
 | `llama_cpp`     | yes    | no     | no        | no        | no     |
 | `mlx`           | yes    | no     | no        | no        | no     |
 | `tensorrt_llm`  | yes    | no     | no        | no        | no     |
@@ -92,10 +104,15 @@ recommended pattern from
 The full rendering table is in `cgn-agent::engine::spawn`. For
 convenience:
 
+* `vllm × lmcache v1 × both` →
+  `--kv-transfer-config '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'`
+* `vllm × lmcache mp × both` →
+  `--kv-transfer-config '{"kv_connector":"LMCacheMPConnector","kv_role":"kv_both","kv_connector_extra_config":{"lmcache.mp.host":"localhost","lmcache.mp.port":5555}}'`
 * `vllm × lmcache × prefill` →
   `--kv-transfer-config '{"kv_connector":"PdConnector",...,"connectors":[LMCache,NIXL]}'`
 * `vllm × lmcache × decode` →
   `--kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both"}'`
+* `sglang × lmcache × *` → `--enable-lmcache`
 * `vllm × kvbm × *` →
   `--kv-transfer-config '{"kv_connector":"DynamoConnector",...,"kv_connector_module_path":"kvbm.vllm_integration.connector"}'`
 * `sglang × hicache × *` →
@@ -141,7 +158,7 @@ LMCache are both well-tuned and our recipes piggyback on them. What we
 | Workload                                            | Recommended `kv_offload` | Recipe                              |
 |-----------------------------------------------------|--------------------------|-------------------------------------|
 | Dev / smoke tests / one-shot completions            | `none`                    | `vllm/agg`                          |
-| Long sessions, RAG, chat, repeated system prompts   | `lmcache` (vLLM) / `hicache` (SGLang) | `vllm/agg-lmcache`, `sglang/agg-hicache` |
+| Long sessions, RAG, chat, repeated system prompts   | `lmcache` (vLLM MP or v1) / `hicache` (SGLang) | `vllm/agg-lmcache-mp`, `vllm/agg-lmcache`, `sglang/agg-hicache` |
 | 2-GPU node, want best TTFT under load               | `lmcache` (disagg)        | `vllm/disagg-lmcache`               |
 | Head-to-head benchmark vs Dynamo                    | `kvbm`                    | `vllm/agg-kvbm`                     |
 | Air-gapped / no extra Python deps                   | `none` + cgn-kvcached     | `vllm/agg`, `llama-cpp/cpu`         |

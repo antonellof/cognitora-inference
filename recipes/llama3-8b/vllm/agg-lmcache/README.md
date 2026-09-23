@@ -52,7 +52,8 @@ bash scripts/run/down.sh
 | Variant                    | Engine | Topology         | KV offload | Best for                                     |
 |----------------------------|--------|------------------|------------|----------------------------------------------|
 | `vllm/agg`                 | vLLM   | aggregated       | none       | Smallest possible footprint, no Python deps  |
-| `vllm/agg-lmcache` (this)  | vLLM   | aggregated       | LMCache    | Long sessions, RAG, multi-turn chat          |
+| `vllm/agg-lmcache` (this)  | vLLM   | aggregated       | LMCache v1 | Long sessions, RAG, multi-turn chat          |
+| `vllm/agg-lmcache-mp`      | vLLM   | aggregated       | LMCache MP | Shared node-local server, CUDA IPC           |
 | `vllm/agg-kvbm`            | vLLM   | aggregated       | KVBM       | Parity with NVIDIA Dynamo's reference stack  |
 | `vllm/disagg-lmcache`      | vLLM   | prefill ⇆ decode | LMCache+NIXL | Highest TTFT improvement, 2× GPU available |
 | `sglang/agg`               | SGLang | aggregated       | none       | RadixAttention prefix cache only             |

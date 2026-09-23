@@ -443,6 +443,14 @@ pub struct EngineConfig {
     pub tensorrt_llm: TensorrtLlmEngineConfig,
     /// cgn-infer knobs (used when `kind = "cgn_infer"`).
     pub cgn_infer: CgnInferEngineConfig,
+    /// LMCache knobs. Used when `kv_offload = "lmcache"`.
+    ///
+    /// `mode = "v1"` keeps LMCache inside the vLLM process
+    /// (`LMCacheConnectorV1`). `mode = "mp"` is the recommended path:
+    /// a standalone `lmcache server` plus vLLM's `LMCacheMPConnector`,
+    /// matching [LMCache's integration guide](https://docs.lmcache.ai/getting_started/quickstart.html)
+    /// and the [TensorMesh Dynamo integration](https://docs.tensormesh.ai/integrations/dynamo).
+    pub lmcache: LmcacheEngineConfig,
 }
 impl Default for EngineConfig {
     fn default() -> Self {
@@ -456,6 +464,7 @@ impl Default for EngineConfig {
             mlx_lm: MlxLmEngineConfig::default(),
             tensorrt_llm: TensorrtLlmEngineConfig::default(),
             cgn_infer: CgnInferEngineConfig::default(),
+            lmcache: LmcacheEngineConfig::default(),
         }
     }
 }
@@ -487,7 +496,7 @@ pub enum EngineKind {
 /// | Engine        | `none` | `nixl` | `lmcache` | `hicache` | `kvbm` | `cgn` |
 /// |---------------|--------|--------|-----------|-----------|--------|-------|
 /// | `vllm`        | yes    | yes    | yes       | no        | yes    | yes   |
-/// | `sglang`      | yes    | yes    | no        | yes       | no     | no    |
+/// | `sglang`      | yes    | yes    | yes (`--enable-lmcache`, mode `v1`) | yes | no | no |
 /// | `llama_cpp`   | yes    | no     | no        | no        | no     | no    |
 /// | `mlx`         | yes    | no     | no        | no        | no     | no    |
 /// | `tensorrt_llm`| yes    | no     | no        | no        | no     | no    |
@@ -508,9 +517,11 @@ pub enum KvOffload {
     /// NIXL only — sufficient for prefill→decode handoff in disagg
     /// without any extra offload backend.
     Nixl,
-    /// LMCache (`LMCacheConnectorV1`). Adds CPU/SSD/Redis/Mooncake KV
-    /// reuse on top of vLLM. In disagg, automatically wraps with a
-    /// `PdConnector(LMCache + NIXL)` MultiConnector.
+    /// LMCache. `mode = "v1"` (default) embeds `LMCacheConnectorV1` in
+    /// the vLLM process. `mode = "mp"` attaches `LMCacheMPConnector` to
+    /// a standalone `lmcache server` (CPU L1, optional L2) over ZMQ,
+    /// with KV tensors moved by CUDA IPC. In disagg, the prefill role
+    /// wraps the chosen connector with NIXL via `PdConnector`.
     Lmcache,
     /// SGLang Hierarchical Cache (`--enable-hierarchical-cache`).
     /// SGLang-only. Stacks on top of RadixAttention.
@@ -523,6 +534,113 @@ pub enum KvOffload {
     /// `cgn-kv-connector` Python package). Spills engine KV blocks into
     /// the host-local RAM/SSD tiers and feeds the router prefix index.
     Cgn,
+}
+
+/// How `kv_offload = "lmcache"` attaches to the engine.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LmcacheMode {
+    /// In-process `LMCacheConnectorV1`. One process, no extra server.
+    /// LMCache documents this as the legacy path.
+    #[default]
+    V1,
+    /// Out-of-process `LMCacheMPConnector` plus `lmcache server`.
+    /// Recommended by LMCache. One server can be shared by every engine
+    /// on the node, and the cache survives an engine restart.
+    Mp,
+}
+
+impl LmcacheMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::V1 => "v1",
+            Self::Mp => "mp",
+        }
+    }
+}
+
+/// Knobs for `kv_offload = "lmcache"`.
+///
+/// Defaults preserve the historical in-process connector. Set
+/// `mode = "mp"` and `spawn_server = true` for a single-node bring-up
+/// that matches `lmcache server` + `LMCacheMPConnector`. On Kubernetes,
+/// leave `spawn_server` false and either let the Helm chart run the
+/// server DaemonSet or point `config_file` at the `<engine>-connection`
+/// ConfigMap published by the LMCache operator.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LmcacheEngineConfig {
+    pub mode: LmcacheMode,
+    /// Request address of the MP server. A bare host is normalized to
+    /// `tcp://` by the connector. Use `tcp://` for ZMQ or `grpc://` for
+    /// gRPC, matching the server's `--transport`. Ignored when
+    /// `server_urls` is set.
+    pub host: String,
+    /// ZMQ/gRPC port of the MP server. Must match `lmcache server --port`.
+    pub port: u16,
+    /// HTTP management port (`/healthcheck`, `/metrics`).
+    pub http_port: u16,
+    /// L1 CPU cache size passed to `lmcache server --l1-size-gb`.
+    pub l1_size_gb: u32,
+    /// `LRU`, `IsolatedLRU`, or `noop`.
+    pub eviction_policy: String,
+    /// Token chunk size. Production default is 256; smaller values store
+    /// more, shorter prefixes.
+    pub chunk_size: u32,
+    /// Start `lmcache server` before vLLM. Off by default so a chart or
+    /// the LMCache operator can own the server process.
+    pub spawn_server: bool,
+    /// PATH name of the `lmcache` CLI.
+    pub server_binary: String,
+    /// Flags appended after the rendered `lmcache server` arguments
+    /// (L2 adapters, `--transport grpc`, and so on).
+    pub server_extra_args: Vec<String>,
+    /// vLLM: path to a `kv-transfer-config.json` (the operator ConfigMap).
+    /// When set, that JSON is passed through as `--kv-transfer-config`.
+    /// SGLang: path to an LMCache YAML, exported as `LMCACHE_CONFIG_FILE`.
+    pub config_file: String,
+    /// Opt into LMCache's own connector on vLLM >= 0.20
+    /// (`lmcache.integration.vllm.lmcache_mp_connector`). Empty keeps
+    /// vLLM's built-in `LMCacheMPConnector`.
+    pub connector_module_path: String,
+    /// Driver-level CUDA IPC (`--isolated-ipc` / `lmcache.mp.isolated_ipc`).
+    /// Leave false for the legacy shared-`/dev/shm` wiring (hostIPC).
+    /// Both sides must agree; a mismatch fails at event import.
+    pub isolated_ipc: bool,
+    /// Comma-separated `tcp://host:port` list. When set, takes precedence
+    /// over `host` and `port`. The vLLM world size must be divisible by
+    /// the number of servers.
+    pub server_urls: String,
+    /// Pass `--no-enable-prefix-caching` so vLLM's own prefix cache does
+    /// not serve repeats before LMCache is exercised.
+    pub disable_prefix_caching: bool,
+    /// Pass `--disable-hybrid-kv-cache-manager`. Required by LMCache's
+    /// in-process `--kv-offloading-backend` shortcut; the MP connector
+    /// does not need it.
+    pub disable_hybrid_kv_cache_manager: bool,
+}
+
+impl Default for LmcacheEngineConfig {
+    fn default() -> Self {
+        Self {
+            mode: LmcacheMode::V1,
+            host: "localhost".into(),
+            port: 5555,
+            http_port: 8080,
+            l1_size_gb: 20,
+            eviction_policy: "LRU".into(),
+            chunk_size: 256,
+            spawn_server: false,
+            server_binary: "lmcache".into(),
+            server_extra_args: Vec::new(),
+            config_file: String::new(),
+            connector_module_path: String::new(),
+            isolated_ipc: false,
+            server_urls: String::new(),
+            disable_prefix_caching: false,
+            disable_hybrid_kv_cache_manager: false,
+        }
+    }
 }
 
 impl KvOffload {

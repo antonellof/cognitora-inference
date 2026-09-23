@@ -5,11 +5,7 @@ use cgn_proto::v1::{kv_client::KvClient, HashList};
 
 /// Return prefix digests currently resident in the local kvcached tiers.
 pub async fn resident_digests(cfg: &Config, digests: &[Vec<u8>]) -> Vec<Vec<u8>> {
-    let values: Vec<Vec<u8>> = digests
-        .iter()
-        .filter(|d| d.len() == 32)
-        .cloned()
-        .collect();
+    let values: Vec<Vec<u8>> = digests.iter().filter(|d| d.len() == 32).cloned().collect();
     if values.is_empty() {
         return Vec::new();
     }

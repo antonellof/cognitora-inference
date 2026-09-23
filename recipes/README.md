@@ -51,7 +51,8 @@ bash scripts/run/down.sh recipes/llama3-8b/vllm/agg
 | Model                      | Engine     | Topology                    | GPUs  | Notes                          |
 | -------------------------- | ---------- | --------------------------- | ----- | ------------------------------ |
 | Llama-3.1 8B               | vLLM       | [`agg`](llama3-8b/vllm/agg)                         | 1     | TP=1, baseline aggregated      |
-| Llama-3.1 8B               | vLLM       | [`agg-lmcache`](llama3-8b/vllm/agg-lmcache)         | 1     | LMCache KV offload (`kv_offload = "lmcache"`) |
+| Llama-3.1 8B               | vLLM       | [`agg-lmcache`](llama3-8b/vllm/agg-lmcache)         | 1     | In-process LMCache (`mode = "v1"`) |
+| Llama-3.1 8B               | vLLM       | [`agg-lmcache-mp`](llama3-8b/vllm/agg-lmcache-mp)   | 1     | LMCache MP server + `LMCacheMPConnector` |
 | Llama-3.1 8B               | vLLM       | [`agg-kvbm`](llama3-8b/vllm/agg-kvbm)               | 1     | NVIDIA KVBM offload (`kv_offload = "kvbm"`); benchmark parity vs Dynamo |
 | Llama-3.1 8B               | vLLM       | [`agg-cgn`](llama3-8b/vllm/agg-cgn)                 | 1     | Cognitora `cgn-kvcached` connector (`kv_offload = "cgn"`, preview) |
 | Llama-3.1 8B               | vLLM       | [`disagg-single-node`](llama3-8b/vllm/disagg-single-node) | 2 | Prefill/decode split, NIXL handoff |

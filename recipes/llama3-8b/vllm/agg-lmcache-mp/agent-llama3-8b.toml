@@ -1,0 +1,52 @@
+# cgn-agent for llama3-8b · vllm · aggregated · LMCache MP server.
+
+[cluster]
+name           = "cognitora-llama3-8b-agg-lmcache-mp"
+state_backend  = "etcd"
+etcd_endpoints = ["http://127.0.0.1:2379"]
+
+[security]
+require_mtls = false
+
+[auth]
+enabled = false
+
+[agent]
+listen   = "127.0.0.1:7080"
+role     = "both"
+node_id  = "agent-llama3-8b-lmcache-mp"
+kv_uds   = "/tmp/cognitora-kv.sock"
+
+[engine]
+kind       = "vllm"
+url        = "http://127.0.0.1:8001"
+# `lmcache` + mode `mp` starts `lmcache server` and injects
+# LMCacheMPConnector. See docs/architecture/kv-strategy.md.
+kv_offload = "lmcache"
+
+[engine.lmcache]
+mode               = "mp"
+spawn_server       = true
+host               = "localhost"
+port               = 5555
+http_port          = 8080
+l1_size_gb         = 20
+eviction_policy    = "LRU"
+chunk_size         = 256
+# Turn on while checking that repeats hit LMCache rather than vLLM's
+# own prefix cache. Leave false in production if you want both layers.
+disable_prefix_caching = false
+
+[engine.vllm]
+binary     = "vllm"
+extra_args = [
+  "--enable-chunked-prefill",
+  "--block-size", "16",
+  "--gpu-memory-utilization", "0.85",
+  "--port", "8001",
+  "--host", "127.0.0.1",
+]
+
+[models."meta-llama/Meta-Llama-3.1-8B-Instruct"]
+tp            = 1
+max_model_len = 8192

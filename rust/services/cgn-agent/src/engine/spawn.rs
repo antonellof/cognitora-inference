@@ -30,9 +30,11 @@
 //! | vllm    | both     | nixl        | `--kv-transfer-config '{NixlConnector,kv_both}'`       |
 //! | vllm    | prefill  | nixl        | `--kv-transfer-config '{NixlConnector,kv_producer}'`   |
 //! | vllm    | decode   | nixl        | `--kv-transfer-config '{NixlConnector,kv_consumer}'`   |
-//! | vllm    | both     | lmcache     | `--kv-transfer-config '{LMCacheConnectorV1,kv_both}'`  |
+//! | vllm    | both     | lmcache v1  | `--kv-transfer-config '{LMCacheConnectorV1,kv_both}'`  |
+//! | vllm    | both     | lmcache mp  | `--kv-transfer-config '{LMCacheMPConnector,kv_both}'`  |
 //! | vllm    | prefill  | lmcache     | `--kv-transfer-config '{PdConnector(LMCache+Nixl)}'`   |
-//! | vllm    | decode   | lmcache     | `--kv-transfer-config '{NixlConnector,kv_consumer}'`   |
+//! | vllm    | decode   | lmcache     | `--kv-transfer-config '{NixlConnector,kv_both}'`       |
+//! | sglang  | *        | lmcache v1  | `--enable-lmcache` (+ `LMCACHE_CONFIG_FILE` if set)    |
 //! | vllm    | both     | cgn         | `--kv-transfer-config '{CognitoraConnector,kv_both}'`  |
 //! | vllm    | prefill  | cgn         | `--kv-transfer-config '{PdConnector(Cgn+Nixl)}'`       |
 //! | vllm    | decode   | cgn         | `--kv-transfer-config '{NixlConnector,kv_consumer}'`   |
@@ -43,7 +45,10 @@
 //! Combinations not in the table are rejected at render time.
 
 use cgn_core::{
-    config::{EngineConfig, EngineKind, KvOffload, LlamaCppMode, NodeRoleCfg},
+    config::{
+        EngineConfig, EngineKind, KvOffload, LlamaCppMode, LmcacheEngineConfig, LmcacheMode,
+        NodeRoleCfg,
+    },
     Error, Result,
 };
 
@@ -69,14 +74,14 @@ pub fn render_argv(
     role: NodeRoleCfg,
     legacy_cmd: Option<&[String]>,
 ) -> Result<Vec<String>> {
-    validate_kv_offload(cfg.kind, cfg.kv_offload)?;
+    validate_kv_offload(cfg)?;
     if let Some(legacy) = legacy_cmd {
         if !legacy.is_empty() {
             return Ok(render_legacy(legacy, spec));
         }
     }
     match cfg.kind {
-        EngineKind::Vllm => Ok(render_vllm(cfg, spec, role)),
+        EngineKind::Vllm => render_vllm(cfg, spec, role),
         EngineKind::Sglang => Ok(render_sglang(cfg, spec)),
         EngineKind::LlamaCpp => render_llama_cpp(cfg, spec),
         EngineKind::Mlx => Ok(render_mlx(cfg, spec)),
@@ -118,7 +123,7 @@ fn render_tensorrt_llm(cfg: &EngineConfig, spec: &ModelSpec) -> Vec<String> {
     argv
 }
 
-fn render_vllm(cfg: &EngineConfig, spec: &ModelSpec, role: NodeRoleCfg) -> Vec<String> {
+fn render_vllm(cfg: &EngineConfig, spec: &ModelSpec, role: NodeRoleCfg) -> Result<Vec<String>> {
     let mut argv: Vec<String> = vec![
         cfg.vllm.binary.clone(),
         "serve".into(),
@@ -130,13 +135,21 @@ fn render_vllm(cfg: &EngineConfig, spec: &ModelSpec, role: NodeRoleCfg) -> Vec<S
         argv.push("--max-model-len".into());
         argv.push(len.to_string());
     }
-    if let Some(json) = vllm_kv_transfer_config(role, cfg.kv_offload) {
+    if let Some(json) = vllm_kv_transfer_config(role, cfg)? {
         argv.push("--kv-transfer-config".into());
         argv.push(json);
     }
+    if cfg.kv_offload == KvOffload::Lmcache {
+        if cfg.lmcache.disable_prefix_caching {
+            argv.push("--no-enable-prefix-caching".into());
+        }
+        if cfg.lmcache.disable_hybrid_kv_cache_manager {
+            argv.push("--disable-hybrid-kv-cache-manager".into());
+        }
+    }
     argv.extend(cfg.vllm.extra_args.clone());
     argv.extend(spec.extra_args.clone());
-    argv
+    Ok(argv)
 }
 
 fn render_sglang(cfg: &EngineConfig, spec: &ModelSpec) -> Vec<String> {
@@ -167,6 +180,7 @@ fn render_sglang(cfg: &EngineConfig, spec: &ModelSpec) -> Vec<String> {
         format!("{:.3}", cfg.sglang.mem_fraction_static),
     ];
     argv.extend(sglang_hicache_args(cfg.kv_offload));
+    argv.extend(sglang_lmcache_args(cfg.kv_offload));
     argv.extend(cfg.sglang.extra_args.clone());
     argv.extend(spec.extra_args.clone());
     argv
@@ -393,7 +407,9 @@ fn render_legacy(template: &[String], spec: &ModelSpec) -> Vec<String> {
 ///
 /// The error is shaped so it surfaces clearly in `cgn-agent` start-up
 /// logs and in `cgn-ctl recipe up` output.
-fn validate_kv_offload(kind: EngineKind, offload: KvOffload) -> Result<()> {
+fn validate_kv_offload(cfg: &EngineConfig) -> Result<()> {
+    let kind = cfg.kind;
+    let offload = cfg.kv_offload;
     let ok = matches!(
         (kind, offload),
         (_, KvOffload::None)
@@ -403,51 +419,101 @@ fn validate_kv_offload(kind: EngineKind, offload: KvOffload) -> Result<()> {
             | (EngineKind::Vllm, KvOffload::Cgn)
             | (EngineKind::Sglang, KvOffload::Hicache)
             | (EngineKind::Sglang, KvOffload::Nixl)
+            | (EngineKind::Sglang, KvOffload::Lmcache)
     );
     if !ok {
         return Err(Error::Config(format!(
             "engine.kv_offload = \"{}\" is not supported with engine.kind = \"{}\". \
-             Valid pairings: vllm × {{none,nixl,lmcache,kvbm,cgn}}, sglang × {{none,nixl,hicache}}, \
+             Valid pairings: vllm × {{none,nixl,lmcache,kvbm,cgn}}, sglang × {{none,nixl,hicache,lmcache}}, \
              llama_cpp/mlx/tensorrt_llm/cgn_infer/openai_compat × {{none}}.",
             offload.as_str(),
-            match kind {
-                EngineKind::Vllm => "vllm",
-                EngineKind::Sglang => "sglang",
-                EngineKind::LlamaCpp => "llama_cpp",
-                EngineKind::Mlx => "mlx",
-                EngineKind::TensorrtLlm => "tensorrt_llm",
-                EngineKind::CgnInfer => "cgn_infer",
-                EngineKind::OpenaiCompat => "openai_compat",
-            }
+            engine_kind_name(kind)
         )));
+    }
+    if kind == EngineKind::Sglang
+        && offload == KvOffload::Lmcache
+        && cfg.lmcache.mode == LmcacheMode::Mp
+    {
+        return Err(Error::Config(
+            "engine.lmcache.mode = \"mp\" renders vLLM's LMCacheMPConnector. \
+             SGLang uses --enable-lmcache with an LMCache YAML: set mode = \"v1\" \
+             and point [engine.lmcache].config_file at that file (mp_host / mp_port \
+             live in the YAML)."
+                .into(),
+        ));
     }
     Ok(())
 }
 
+fn engine_kind_name(kind: EngineKind) -> &'static str {
+    match kind {
+        EngineKind::Vllm => "vllm",
+        EngineKind::Sglang => "sglang",
+        EngineKind::LlamaCpp => "llama_cpp",
+        EngineKind::Mlx => "mlx",
+        EngineKind::TensorrtLlm => "tensorrt_llm",
+        EngineKind::CgnInfer => "cgn_infer",
+        EngineKind::OpenaiCompat => "openai_compat",
+    }
+}
+
 /// Build the JSON blob for vLLM's `--kv-transfer-config`.
 ///
-/// Returns `None` when no connector should be injected (the agent's
-/// engine config opted out, or the role/offload combo is a no-op like
-/// `Both × Nixl` in pure aggregated mode).
-pub(crate) fn vllm_kv_transfer_config(role: NodeRoleCfg, offload: KvOffload) -> Option<String> {
+/// Returns `None` when no connector should be injected.
+pub(crate) fn vllm_kv_transfer_config(
+    role: NodeRoleCfg,
+    cfg: &EngineConfig,
+) -> Result<Option<String>> {
     use KvOffload::*;
     use NodeRoleCfg::*;
-    let json = match (role, offload) {
-        (_, None) => return Option::None,
-        (_, Hicache) => return Option::None, // never valid for vllm; caught by validate
+    if cfg.kv_offload == Lmcache && !cfg.lmcache.config_file.is_empty() {
+        let path = &cfg.lmcache.config_file;
+        let json = std::fs::read_to_string(path).map_err(|e| {
+            Error::Config(format!(
+                "engine.lmcache.config_file = {path:?} could not be read: {e}. \
+                 This file is the kv-transfer-config JSON published next to an LMCache server \
+                 (the `<engine>-connection` ConfigMap)."
+            ))
+        })?;
+        let json = json.trim().to_string();
+        if json.is_empty() {
+            return Err(Error::Config(format!(
+                "engine.lmcache.config_file = {path:?} is empty"
+            )));
+        }
+        return Ok(Some(json));
+    }
+    let json = match (role, cfg.kv_offload) {
+        (_, None) => return Ok(std::option::Option::None),
+        (_, Hicache) => return Ok(std::option::Option::None), // never valid for vllm; caught by validate
         (Both, Nixl) => r#"{"kv_connector":"NixlConnector","kv_role":"kv_both"}"#.to_string(),
         (Prefill, Nixl) => r#"{"kv_connector":"NixlConnector","kv_role":"kv_producer"}"#.to_string(),
         (Decode, Nixl) => r#"{"kv_connector":"NixlConnector","kv_role":"kv_consumer"}"#.to_string(),
-        (Both, Lmcache) => {
-            r#"{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}"#.to_string()
-        }
+        (Both, Lmcache) => match cfg.lmcache.mode {
+            LmcacheMode::V1 => {
+                r#"{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}"#.to_string()
+            }
+            LmcacheMode::Mp => mp_transfer_config(&cfg.lmcache)?,
+        },
         (Prefill, Lmcache) => {
-            // Dynamo's pattern: the prefill worker stacks LMCache
-            // (offload) + Nixl (handoff to decode) via a MultiConnector.
-            r#"{"kv_connector":"PdConnector","kv_role":"kv_both","kv_connector_extra_config":{"connectors":[{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"},{"kv_connector":"NixlConnector","kv_role":"kv_both"}]}}"#.to_string()
+            // Prefill stacks LMCache (offload) + Nixl (handoff to decode).
+            let lmcache = match cfg.lmcache.mode {
+                LmcacheMode::V1 => {
+                    serde_json::json!({"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"})
+                }
+                LmcacheMode::Mp => mp_connector_value(&cfg.lmcache),
+            };
+            serde_json::json!({
+                "kv_connector": "PdConnector",
+                "kv_role": "kv_both",
+                "kv_connector_extra_config": {
+                    "connectors": [lmcache, {"kv_connector":"NixlConnector","kv_role":"kv_both"}]
+                }
+            })
+            .to_string()
         }
         (Decode, Lmcache) => {
-            // Decode worker only needs Nixl; LMCache lives on the prefill side.
+            // Decode only needs Nixl; the LMCache server is attached on prefill.
             r#"{"kv_connector":"NixlConnector","kv_role":"kv_both"}"#.to_string()
         }
         (Both, Kvbm) => r#"{"kv_connector":"DynamoConnector","kv_role":"kv_both","kv_connector_module_path":"kvbm.vllm_integration.connector"}"#.to_string(),
@@ -457,7 +523,114 @@ pub(crate) fn vllm_kv_transfer_config(role: NodeRoleCfg, offload: KvOffload) -> 
         (Prefill, Cgn) => r#"{"kv_connector":"PdConnector","kv_role":"kv_both","kv_connector_extra_config":{"connectors":[{"kv_connector":"CognitoraConnector","kv_role":"kv_both","kv_connector_module_path":"cgn_kv_connector.connector"},{"kv_connector":"NixlConnector","kv_role":"kv_both"}]}}"#.to_string(),
         (Decode, Cgn) => r#"{"kv_connector":"NixlConnector","kv_role":"kv_both"}"#.to_string(),
     };
-    Some(json)
+    Ok(Some(json))
+}
+
+fn mp_transfer_config(cfg: &LmcacheEngineConfig) -> Result<String> {
+    Ok(serde_json::to_string(&mp_connector_value(cfg))?)
+}
+
+/// `LMCacheMPConnector` object, including `kv_connector_extra_config`.
+fn mp_connector_value(cfg: &LmcacheEngineConfig) -> serde_json::Value {
+    let mut extra = serde_json::Map::new();
+    if !cfg.server_urls.is_empty() {
+        extra.insert(
+            "lmcache.mp.server_urls".into(),
+            serde_json::Value::String(cfg.server_urls.clone()),
+        );
+    } else {
+        extra.insert(
+            "lmcache.mp.host".into(),
+            serde_json::Value::String(cfg.host.clone()),
+        );
+        extra.insert("lmcache.mp.port".into(), serde_json::json!(cfg.port));
+    }
+    if cfg.isolated_ipc {
+        extra.insert(
+            "lmcache.mp.isolated_ipc".into(),
+            serde_json::Value::Bool(true),
+        );
+    }
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "kv_connector".into(),
+        serde_json::Value::String("LMCacheMPConnector".into()),
+    );
+    obj.insert(
+        "kv_role".into(),
+        serde_json::Value::String("kv_both".into()),
+    );
+    if !cfg.connector_module_path.is_empty() {
+        obj.insert(
+            "kv_connector_module_path".into(),
+            serde_json::Value::String(cfg.connector_module_path.clone()),
+        );
+    }
+    obj.insert(
+        "kv_connector_extra_config".into(),
+        serde_json::Value::Object(extra),
+    );
+    serde_json::Value::Object(obj)
+}
+
+/// Argv for a locally spawned `lmcache server`.
+pub fn lmcache_server_argv(cfg: &LmcacheEngineConfig) -> Vec<String> {
+    let mut argv = vec![
+        cfg.server_binary.clone(),
+        "server".into(),
+        "--host".into(),
+        if cfg.host.starts_with("tcp://") || cfg.host.starts_with("grpc://") {
+            cfg.host
+                .split("://")
+                .nth(1)
+                .unwrap_or("localhost")
+                .to_string()
+        } else {
+            cfg.host.clone()
+        },
+        "--port".into(),
+        cfg.port.to_string(),
+        "--http-port".into(),
+        cfg.http_port.to_string(),
+        "--l1-size-gb".into(),
+        cfg.l1_size_gb.to_string(),
+        "--eviction-policy".into(),
+        cfg.eviction_policy.clone(),
+        "--chunk-size".into(),
+        cfg.chunk_size.to_string(),
+    ];
+    if cfg.isolated_ipc {
+        argv.push("--isolated-ipc".into());
+    }
+    argv.extend(cfg.server_extra_args.clone());
+    argv
+}
+
+/// True when the supervisor should start `lmcache server` before vLLM.
+pub fn should_spawn_lmcache_server(cfg: &EngineConfig) -> bool {
+    cfg.kind == EngineKind::Vllm
+        && cfg.kv_offload == KvOffload::Lmcache
+        && cfg.lmcache.mode == LmcacheMode::Mp
+        && cfg.lmcache.spawn_server
+}
+
+/// Environment entries the engine child needs for the selected offload.
+///
+/// LMCache requires `PYTHONHASHSEED=0` so token hashing agrees across the
+/// engine and the cache server. Existing values in the agent environment
+/// are left alone by the supervisor.
+pub fn engine_child_env(cfg: &EngineConfig) -> Vec<(String, String)> {
+    if cfg.kv_offload != KvOffload::Lmcache {
+        return Vec::new();
+    }
+    let mut env = vec![("PYTHONHASHSEED".into(), "0".into())];
+    if cfg.kind == EngineKind::Sglang && !cfg.lmcache.config_file.is_empty() {
+        env.push((
+            "LMCACHE_CONFIG_FILE".into(),
+            cfg.lmcache.config_file.clone(),
+        ));
+    }
+    env
 }
 
 /// Build SGLang HiCache flags.
@@ -481,6 +654,19 @@ pub(crate) fn sglang_hicache_args(offload: KvOffload) -> Vec<String> {
     }
 }
 
+/// SGLang's LMCache integration (`--enable-lmcache`).
+///
+/// The current SGLang path is in-process and reads `LMCACHE_CONFIG_FILE`
+/// when `[engine.lmcache].config_file` is set. Multiprocess SGLang puts
+/// `mp_host` / `mp_port` in that YAML; the vLLM `LMCacheMPConnector` JSON
+/// is not a SGLang flag.
+pub(crate) fn sglang_lmcache_args(offload: KvOffload) -> Vec<String> {
+    match offload {
+        KvOffload::Lmcache => vec!["--enable-lmcache".into()],
+        _ => Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -495,6 +681,7 @@ mod tests {
             kind: EngineKind::Vllm,
             url: "http://127.0.0.1:8000".into(),
             kv_offload: KvOffload::None,
+            lmcache: Default::default(),
             vllm: VllmEngineConfig {
                 binary: "vllm".into(),
                 extra_args: vec!["--enable-chunked-prefill".into()],
@@ -512,6 +699,7 @@ mod tests {
             kind: EngineKind::Sglang,
             url: "http://127.0.0.1:30000".into(),
             kv_offload: KvOffload::None,
+            lmcache: Default::default(),
             vllm: VllmEngineConfig::default(),
             sglang: SglangEngineConfig {
                 binary: "python".into(),
@@ -533,6 +721,7 @@ mod tests {
             kind: EngineKind::LlamaCpp,
             url: "http://127.0.0.1:8000".into(),
             kv_offload: KvOffload::None,
+            lmcache: Default::default(),
             vllm: VllmEngineConfig::default(),
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig {
@@ -556,6 +745,7 @@ mod tests {
             kind: EngineKind::Mlx,
             url: "http://127.0.0.1:8090".into(),
             kv_offload: KvOffload::None,
+            lmcache: Default::default(),
             vllm: VllmEngineConfig::default(),
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
@@ -570,6 +760,7 @@ mod tests {
             kind: EngineKind::CgnInfer,
             url: "http://127.0.0.1:8001".into(),
             kv_offload: KvOffload::None,
+            lmcache: Default::default(),
             vllm: VllmEngineConfig::default(),
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
@@ -693,6 +884,143 @@ mod tests {
         let json = &argv[i + 1];
         assert!(json.contains("LMCacheConnectorV1"));
         assert!(json.contains("kv_both"));
+        assert!(!argv.iter().any(|a| a == "--no-enable-prefix-caching"));
+    }
+
+    #[test]
+    fn vllm_lmcache_mp_injects_mp_connector() {
+        let mut cfg = vllm_cfg();
+        cfg.kv_offload = KvOffload::Lmcache;
+        cfg.lmcache.mode = LmcacheMode::Mp;
+        cfg.lmcache.host = "localhost".into();
+        cfg.lmcache.port = 5555;
+        cfg.lmcache.disable_prefix_caching = true;
+        let argv = render_argv(
+            &cfg,
+            &spec("Qwen/Qwen3-0.6B", None),
+            NodeRoleCfg::Both,
+            None,
+        )
+        .unwrap();
+        let i = argv
+            .iter()
+            .position(|a| a == "--kv-transfer-config")
+            .unwrap();
+        let json = &argv[i + 1];
+        assert!(json.contains("LMCacheMPConnector"));
+        assert!(json.contains("\"lmcache.mp.host\":\"localhost\""));
+        assert!(json.contains("\"lmcache.mp.port\":5555"));
+        assert!(!json.contains("LMCacheConnectorV1"));
+        assert!(!json.contains("isolated_ipc"));
+        assert!(argv.iter().any(|a| a == "--no-enable-prefix-caching"));
+        let env = engine_child_env(&cfg);
+        assert!(env.iter().any(|(k, v)| k == "PYTHONHASHSEED" && v == "0"));
+    }
+
+    #[test]
+    fn vllm_lmcache_mp_prefill_stacks_nixl() {
+        let mut cfg = vllm_cfg();
+        cfg.kv_offload = KvOffload::Lmcache;
+        cfg.lmcache.mode = LmcacheMode::Mp;
+        cfg.lmcache.isolated_ipc = true;
+        cfg.lmcache.connector_module_path = "lmcache.integration.vllm.lmcache_mp_connector".into();
+        let argv = render_argv(
+            &cfg,
+            &spec("Qwen/Qwen3-0.6B", None),
+            NodeRoleCfg::Prefill,
+            None,
+        )
+        .unwrap();
+        let json = &argv[argv
+            .iter()
+            .position(|a| a == "--kv-transfer-config")
+            .unwrap()
+            + 1];
+        assert!(json.contains("PdConnector"));
+        assert!(json.contains("LMCacheMPConnector"));
+        assert!(json.contains("NixlConnector"));
+        assert!(json.contains("lmcache.integration.vllm.lmcache_mp_connector"));
+        assert!(json.contains("\"lmcache.mp.isolated_ipc\":true"));
+    }
+
+    #[test]
+    fn vllm_lmcache_mp_server_urls_replace_host_port() {
+        let mut cfg = vllm_cfg();
+        cfg.kv_offload = KvOffload::Lmcache;
+        cfg.lmcache.mode = LmcacheMode::Mp;
+        cfg.lmcache.server_urls = "tcp://cache-a:5555,tcp://cache-b:5555".into();
+        let argv = render_argv(
+            &cfg,
+            &spec("Qwen/Qwen3-0.6B", None),
+            NodeRoleCfg::Both,
+            None,
+        )
+        .unwrap();
+        let json = &argv[argv
+            .iter()
+            .position(|a| a == "--kv-transfer-config")
+            .unwrap()
+            + 1];
+        assert!(json.contains("lmcache.mp.server_urls"));
+        assert!(!json.contains("lmcache.mp.host"));
+        assert!(!json.contains("lmcache.mp.port"));
+    }
+
+    #[test]
+    fn vllm_lmcache_mp_reads_operator_config_file() {
+        let path = std::env::temp_dir().join(format!("cgn-lmcache-{}.json", std::process::id()));
+        std::fs::write(
+            &path,
+            r#"{"kv_connector":"LMCacheMPConnector","kv_role":"kv_both"}"#,
+        )
+        .unwrap();
+        let mut cfg = vllm_cfg();
+        cfg.kv_offload = KvOffload::Lmcache;
+        cfg.lmcache.mode = LmcacheMode::Mp;
+        cfg.lmcache.config_file = path.display().to_string();
+        let argv = render_argv(
+            &cfg,
+            &spec("Qwen/Qwen3-0.6B", None),
+            NodeRoleCfg::Both,
+            None,
+        )
+        .unwrap();
+        let json = &argv[argv
+            .iter()
+            .position(|a| a == "--kv-transfer-config")
+            .unwrap()
+            + 1];
+        assert_eq!(
+            json,
+            r#"{"kv_connector":"LMCacheMPConnector","kv_role":"kv_both"}"#
+        );
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn lmcache_server_argv_matches_mp_quickstart() {
+        let mut cfg = LmcacheEngineConfig::default();
+        cfg.mode = LmcacheMode::Mp;
+        cfg.host = "tcp://localhost".into();
+        cfg.isolated_ipc = true;
+        cfg.server_extra_args = vec!["--transport".into(), "grpc".into()];
+        let argv = lmcache_server_argv(&cfg);
+        assert_eq!(argv[0], "lmcache");
+        assert_eq!(argv[1], "server");
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--host" && w[1] == "localhost"));
+        assert!(argv.windows(2).any(|w| w[0] == "--port" && w[1] == "5555"));
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--l1-size-gb" && w[1] == "20"));
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--eviction-policy" && w[1] == "LRU"));
+        assert!(argv.iter().any(|a| a == "--isolated-ipc"));
+        assert!(argv
+            .windows(2)
+            .any(|w| w[0] == "--transport" && w[1] == "grpc"));
     }
 
     #[test]
@@ -816,9 +1144,30 @@ mod tests {
     }
 
     #[test]
-    fn rejects_lmcache_on_sglang() {
+    fn sglang_lmcache_enables_lmcache_flag() {
         let mut cfg = sglang_cfg();
         cfg.kv_offload = KvOffload::Lmcache;
+        cfg.lmcache.config_file = "/etc/lmcache/lmc_config.yaml".into();
+        let argv = render_argv(
+            &cfg,
+            &spec("Qwen/Qwen2.5-7B-Instruct", None),
+            NodeRoleCfg::Both,
+            None,
+        )
+        .unwrap();
+        assert!(argv.contains(&"--enable-lmcache".to_string()));
+        let env = engine_child_env(&cfg);
+        assert!(env.iter().any(|(k, v)| k == "PYTHONHASHSEED" && v == "0"));
+        assert!(env
+            .iter()
+            .any(|(k, v)| k == "LMCACHE_CONFIG_FILE" && v == "/etc/lmcache/lmc_config.yaml"));
+    }
+
+    #[test]
+    fn rejects_lmcache_mp_on_sglang() {
+        let mut cfg = sglang_cfg();
+        cfg.kv_offload = KvOffload::Lmcache;
+        cfg.lmcache.mode = LmcacheMode::Mp;
         let err = render_argv(
             &cfg,
             &spec("Qwen/Qwen2.5-7B-Instruct", None),
@@ -826,9 +1175,11 @@ mod tests {
             None,
         )
         .unwrap_err();
-        let msg = format!("{err:?}");
-        assert!(msg.contains("kv_offload"));
-        assert!(msg.contains("sglang"));
+        let msg = format!("{err}");
+        assert!(msg.contains("mode"));
+        assert!(
+            msg.contains("sglang") || msg.contains("SGLang") || msg.contains("--enable-lmcache")
+        );
     }
 
     #[test]
@@ -927,6 +1278,7 @@ mod tests {
             kind: EngineKind::TensorrtLlm,
             url: "http://127.0.0.1:8000".into(),
             kv_offload: KvOffload::None,
+            lmcache: Default::default(),
             vllm: VllmEngineConfig::default(),
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),
@@ -1158,6 +1510,7 @@ mod tests {
             kind: EngineKind::OpenaiCompat,
             url: "http://127.0.0.1:8000".into(),
             kv_offload: KvOffload::None,
+            lmcache: Default::default(),
             vllm: VllmEngineConfig::default(),
             sglang: SglangEngineConfig::default(),
             llama_cpp: LlamaCppEngineConfig::default(),

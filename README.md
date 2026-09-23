@@ -197,6 +197,9 @@ bash recipes/llama3-8b/sglang/agg/up.sh
 # Same model with LMCache "prefill-once-reuse-everywhere" KV offload:
 bash recipes/llama3-8b/vllm/agg-lmcache/up.sh
 
+# Same model with a standalone LMCache server (LMCacheMPConnector):
+bash recipes/llama3-8b/vllm/agg-lmcache-mp/up.sh
+
 # Same model on SGLang with HiCache hierarchical KV:
 bash recipes/llama3-8b/sglang/agg-hicache/up.sh
 

@@ -10,8 +10,21 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-09-23
+
+The "LMCache multiprocess" release. vLLM can attach to a standalone
+`lmcache server` through `LMCacheMPConnector`, and the Helm chart can
+run that server on every node. This tag also includes the preview
+Cognitora KV connector work that landed after 0.9.1.
+
 ### Added
 
+- **LMCache multiprocess mode**: `[engine.lmcache].mode = "mp"` starts
+  `lmcache server` (when `spawn_server = true`) and attaches vLLM with
+  `LMCacheMPConnector`. The Helm chart can run that server as a per-node
+  DaemonSet (`hostIPC` when `isolatedIPC` is false, `PYTHONHASHSEED=0`).
+  SGLang `kv_offload = "lmcache"` now passes `--enable-lmcache`. Recipe:
+  `recipes/llama3-8b/vllm/agg-lmcache-mp/`.
 - **Router → vLLM prefix digest passthrough**: agents forward sequence-chained
   BLAKE3 digests as `kv_transfer_params.cgn_prefix_digests` on chat requests
   so `CognitoraConnector` can probe `cgn-kvcached`. When `kv_offload = "cgn"`,

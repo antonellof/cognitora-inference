@@ -176,6 +176,48 @@ agent:
     #     requests: { cpu: "4", memory: "24Gi", nvidia.com/gpu: 1 }
     #     limits:   { memory: "32Gi", nvidia.com/gpu: 1 }
 
+# ---- LMCache multiprocess server ------------------------------------------
+#
+# Off by default. Turn on to run a per-node `lmcache server` and point the
+# vLLM sidecar at it with LMCacheMPConnector (the path LMCache recommends,
+# and the one TensorMesh uses with Dynamo).
+#
+# isolatedIPC=false is the legacy shared-/dev/shm wiring: the agent pod
+# gets hostIPC and the engine container runs as root, because the CUDA IPC
+# handshake fails otherwise. isolatedIPC=true matches the current LMCache
+# operator default (driver-level handles, no hostIPC). Both sides must
+# agree.
+#
+# Leave agent.engine.command empty when this is on. The chart wraps
+# `vllm serve` so it reads /etc/lmcache/kv-transfer-config.json and
+# substitutes the node IP. Put model flags in agent.engine.args.
+#
+# To use an LMCache operator engine instead of this DaemonSet, set
+# externalConfigMap to `<engine-name>-connection` and keep enabled=true
+# so the sidecar still mounts that ConfigMap.
+lmcache:
+  enabled: false
+  mode: mp                 # mp | v1 (v1 is in-process; no server pod)
+  image:
+    repository: lmcache/vllm-openai
+    tag: v0.5.2            # pin to the LMCache build inside the vLLM image
+    pullPolicy: IfNotPresent
+  l1SizeGB: 20
+  port: 5555
+  httpPort: 8080
+  evictionPolicy: LRU
+  chunkSize: 256
+  isolatedIPC: false
+  disablePrefixCaching: false
+  disableHybridKvCacheManager: false
+  # Pod-private /dev/shm, used only when isolatedIPC=true.
+  shmSize: 8Gi
+  # Operator-published ConfigMap. When set, this chart does not run a server.
+  externalConfigMap: ""
+  nodeSelector: {}
+  tolerations: []
+  resources: {}
+
 # ---- KV cache daemon ------------------------------------------------------
 kvcached:
   enabled: true

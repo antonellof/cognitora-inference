@@ -100,6 +100,38 @@ router:
     host: api.example.com
 ```
 
+## LMCache multiprocess offload
+
+`lmcache.enabled=true` runs a per-node `lmcache server` DaemonSet and,
+when the vLLM sidecar is enabled, points it at that server with
+`LMCacheMPConnector`. This follows LMCache's
+[multiprocess quickstart](https://docs.lmcache.ai/getting_started/quickstart.html)
+and the [TensorMesh Dynamo integration](https://docs.tensormesh.ai/integrations/dynamo).
+
+```yaml
+lmcache:
+  enabled: true
+  mode: mp
+  l1SizeGB: 20
+  isolatedIPC: false    # legacy shared /dev/shm; hostIPC + root on the worker
+agent:
+  engine:
+    enabled: true
+    image: lmcache/vllm-openai:v0.5.2
+    args: ["--model", "Qwen/Qwen3-0.6B", "--port", "8000"]
+```
+
+Leave `agent.engine.command` empty so the chart can wrap `vllm serve`.
+`isolatedIPC: false` sets `hostIPC: true` and `runAsUser: 0` on the
+worker, and does not mount an emptyDir at `/dev/shm`. `isolatedIPC: true`
+matches the current LMCache operator default (driver-level CUDA IPC, no
+host IPC namespace) and gives the worker a private memory-backed
+`/dev/shm`.
+
+To use an engine the LMCache operator already reconciled, set
+`lmcache.externalConfigMap` to `<engine-name>-connection` instead of
+running this chart's server.
+
 ## Observability
 
 Every binary exposes Prometheus on its admin port (`:9091` for

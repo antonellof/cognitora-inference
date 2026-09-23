@@ -104,10 +104,22 @@ _recipe_probe_engines() {
     case "$kind" in
       vllm)
         command -v vllm >/dev/null 2>&1 || warn "$(basename "$cfg") expects vllm in PATH (pip install vllm)"
+        if grep -q 'kv_offload *= *"lmcache"' "$cfg" 2>/dev/null; then
+          python -c 'import lmcache' >/dev/null 2>&1 \
+            || warn "$(basename "$cfg") expects lmcache (pip install lmcache)"
+          if grep -q 'mode *= *"mp"' "$cfg" 2>/dev/null; then
+            command -v lmcache >/dev/null 2>&1 \
+              || warn "$(basename "$cfg") expects the lmcache CLI (pip install lmcache)"
+          fi
+        fi
         ;;
       sglang)
         python -c 'import sglang' >/dev/null 2>&1 \
           || warn "$(basename "$cfg") expects 'python -m sglang.launch_server' (pip install \"sglang[all]\")"
+        if grep -q 'kv_offload *= *"lmcache"' "$cfg" 2>/dev/null; then
+          python -c 'import lmcache' >/dev/null 2>&1 \
+            || warn "$(basename "$cfg") expects lmcache (pip install lmcache)"
+        fi
         ;;
       llama_cpp)
         python -c 'import llama_cpp' >/dev/null 2>&1 \

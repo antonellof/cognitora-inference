@@ -25,6 +25,13 @@ spec:
       tolerations: {{- toYaml . | nindent 8 }}
       {{- end }}
       hostNetwork: {{ .Values.agent.hostNetwork }}
+      {{- if and .Values.lmcache.enabled (eq .Values.lmcache.mode "mp") .Values.agent.engine.enabled (not .Values.lmcache.isolatedIPC) }}
+      # Legacy CUDA IPC. vLLM and the node-local LMCache server share the
+      # host IPC namespace so cudaIpcOpenMemHandle can open the server's
+      # tensors. Do not mount an emptyDir at /dev/shm — it would hide the
+      # host tmpfs.
+      hostIPC: true
+      {{- end }}
       containers:
         - name: cgn-agent
           image: {{ include "cognitora.image" . }}
@@ -50,14 +57,57 @@ spec:
         - name: engine
           image: {{ required "agent.engine.image is required when agent.engine.enabled=true" .Values.agent.engine.image }}
           imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          {{- if and .Values.lmcache.enabled (eq .Values.lmcache.mode "mp") }}
+          {{- if .Values.agent.engine.command }}
+          {{- fail "lmcache.mode=mp injects the vLLM entrypoint; leave agent.engine.command empty and put model flags in agent.engine.args" }}
+          {{- end }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              cfg="$(cat /etc/lmcache/kv-transfer-config.json)"
+              if [ -n "${HOST_IP:-}" ]; then
+                cfg="$(printf '%s' "$cfg" | sed "s/__LMCACHE_HOST__/${HOST_IP}/g")"
+              fi
+              set -- vllm serve "$@" --kv-transfer-config "$cfg"
+              {{ if .Values.lmcache.disablePrefixCaching }}
+              set -- "$@" --no-enable-prefix-caching
+              {{ end }}
+              {{ if .Values.lmcache.disableHybridKvCacheManager }}
+              set -- "$@" --disable-hybrid-kv-cache-manager
+              {{ end }}
+              exec "$@"
+            - --
+            {{- with .Values.agent.engine.args }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- else }}
           {{- with .Values.agent.engine.command }}
           command: {{- toYaml . | nindent 12 }}
           {{- end }}
           {{- with .Values.agent.engine.args }}
           args: {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.agent.engine.env }}
-          env: {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if or .Values.lmcache.enabled .Values.agent.engine.env }}
+          env:
+            {{- if .Values.lmcache.enabled }}
+            - name: PYTHONHASHSEED
+              value: "0"
+            {{- end }}
+            {{- if and .Values.lmcache.enabled (eq .Values.lmcache.mode "mp") (not .Values.lmcache.externalConfigMap) }}
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            {{- end }}
+            {{- with .Values.agent.engine.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- if and .Values.lmcache.enabled (eq .Values.lmcache.mode "mp") (not .Values.lmcache.isolatedIPC) }}
+          securityContext:
+            runAsUser: 0
           {{- end }}
           ports:
             - { name: engine, containerPort: {{ .Values.agent.engine.port }} }
@@ -72,6 +122,16 @@ spec:
           {{- with .Values.agent.engine.resources }}
           resources: {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- if and .Values.lmcache.enabled (eq .Values.lmcache.mode "mp") }}
+          volumeMounts:
+            - name: kv-transfer-config
+              mountPath: /etc/lmcache
+              readOnly: true
+            {{- if .Values.lmcache.isolatedIPC }}
+            - name: lmcache-dev-shm
+              mountPath: /dev/shm
+            {{- end }}
+          {{- end }}
         {{- end }}
       volumes:
         - name: config
@@ -83,4 +143,15 @@ spec:
         {{- end }}
         - name: socks
           emptyDir: {}
+        {{- if and .Values.lmcache.enabled (eq .Values.lmcache.mode "mp") .Values.agent.engine.enabled }}
+        - name: kv-transfer-config
+          configMap:
+            name: {{ .Values.lmcache.externalConfigMap | default (printf "%s-lmcache-connection" (include "cognitora.fullname" .)) }}
+        {{- if .Values.lmcache.isolatedIPC }}
+        - name: lmcache-dev-shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.lmcache.shmSize }}
+        {{- end }}
+        {{- end }}
 {{- end }}

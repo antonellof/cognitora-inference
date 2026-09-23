@@ -90,7 +90,13 @@ async fn loop_emit_gossip(supervisor: Arc<Supervisor>) -> Result<()> {
                 .await
                 .unwrap_or_default();
         let kv_epoch = kv_cache_state.observe(ready, &engine_stats);
-        debug!(ready, ?gpu, ?engine_stats, kv_epoch, "health snapshot (gossip)");
+        debug!(
+            ready,
+            ?gpu,
+            ?engine_stats,
+            kv_epoch,
+            "health snapshot (gossip)"
+        );
         let record = node_record_json(&supervisor, ready, &gpu, &engine_stats, kv_epoch);
         member.publish_node_record(&record.to_string()).await;
         tokio::time::sleep(HEARTBEAT_INTERVAL).await;

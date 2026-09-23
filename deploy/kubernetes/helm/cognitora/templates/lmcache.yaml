@@ -1,0 +1,103 @@
+{{- if and .Values.lmcache.enabled (eq .Values.lmcache.mode "mp") (not .Values.lmcache.externalConfigMap) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cognitora.fullname" . }}-lmcache-connection
+  labels:
+    {{- include "cognitora.labels" . | nindent 4 }}
+    app.kubernetes.io/component: lmcache
+data:
+  # __LMCACHE_HOST__ is replaced at vLLM start with the node IP. The server
+  # binds the host network, so a pod-network worker reaches it there.
+  kv-transfer-config.json: |
+    {
+      "kv_connector": "LMCacheMPConnector",
+      "kv_role": "kv_both",
+      "kv_connector_extra_config": {
+        "lmcache.mp.host": "__LMCACHE_HOST__",
+        "lmcache.mp.port": {{ .Values.lmcache.port }}{{ if .Values.lmcache.isolatedIPC }},
+        "lmcache.mp.isolated_ipc": true{{ end }}
+      }
+    }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "cognitora.fullname" . }}-lmcache
+  labels:
+    {{- include "cognitora.labels" . | nindent 4 }}
+    app.kubernetes.io/component: lmcache
+spec:
+  selector:
+    matchLabels:
+      {{- include "cognitora.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: lmcache
+  template:
+    metadata:
+      labels:
+        {{- include "cognitora.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: lmcache
+    spec:
+      # Bind the request port on the node. Workers pass that address as
+      # lmcache.mp.host. No GPU is requested: the NVIDIA runtime still
+      # exposes the devices LMCache needs to import CUDA IPC handles.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- if not .Values.lmcache.isolatedIPC }}
+      hostIPC: true
+      {{- end }}
+      {{- with (default .Values.agent.nodeSelector .Values.lmcache.nodeSelector) }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with (default .Values.agent.tolerations .Values.lmcache.tolerations) }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: lmcache
+          image: {{ printf "%s:%s" .Values.lmcache.image.repository .Values.lmcache.image.tag }}
+          imagePullPolicy: {{ .Values.lmcache.image.pullPolicy }}
+          command: ["lmcache"]
+          args:
+            - server
+            - --host
+            - 0.0.0.0
+            - --port
+            - {{ .Values.lmcache.port | quote }}
+            - --http-port
+            - {{ .Values.lmcache.httpPort | quote }}
+            - --l1-size-gb
+            - {{ .Values.lmcache.l1SizeGB | quote }}
+            - --eviction-policy
+            - {{ .Values.lmcache.evictionPolicy | quote }}
+            - --chunk-size
+            - {{ .Values.lmcache.chunkSize | quote }}
+            {{- if .Values.lmcache.isolatedIPC }}
+            - --isolated-ipc
+            {{- end }}
+          env:
+            - name: PYTHONHASHSEED
+              value: "0"
+          ports:
+            - { name: zmq, containerPort: {{ .Values.lmcache.port }} }
+            - { name: http, containerPort: {{ .Values.lmcache.httpPort }} }
+          readinessProbe:
+            httpGet:
+              path: /healthcheck
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          {{- if not .Values.lmcache.isolatedIPC }}
+          securityContext:
+            runAsUser: 0
+          {{- end }}
+          {{- if .Values.lmcache.resources }}
+          resources: {{- toYaml .Values.lmcache.resources | nindent 12 }}
+          {{- else }}
+          resources:
+            requests:
+              cpu: "500m"
+              memory: {{ add (int .Values.lmcache.l1SizeGB) 4 }}Gi
+            limits:
+              memory: {{ add (int .Values.lmcache.l1SizeGB) 8 }}Gi
+          {{- end }}
+{{- end }}
