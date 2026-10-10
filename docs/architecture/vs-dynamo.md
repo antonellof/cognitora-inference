@@ -1,6 +1,6 @@
 # Cognitora vs NVIDIA Dynamo
 
-This page is an honest, axis-by-axis comparison between Cognitora and
+This page is an axis-by-axis comparison between Cognitora and
 [NVIDIA Dynamo](https://github.com/ai-dynamo/dynamo), the closest peer
 in the open-source distributed-inference space.
 
@@ -40,7 +40,7 @@ backends, and the cross-cluster index" deep dive, see
 
 ## Credibility gaps (v0.5)
 
-Honest gaps that would undermine a Dynamo comparison if left
+Gaps that would undermine a Dynamo comparison if left
 unaddressed. See [`plan.md`](../../plan.md) for the matching roadmap
 items.
 

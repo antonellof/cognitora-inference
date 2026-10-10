@@ -134,7 +134,7 @@ NVIDIA Dynamo is the closest peer in this space. We agree on most fundamentals (
 | **Install surface** | One curl line, six static binaries, no runtime | `pip install ai-dynamo`, container, or operator |
 | **License** | Apache-2.0 | Apache-2.0 |
 
-The full deep-dive — including an honest **credibility gaps (v0.5)** table — is in [`docs/architecture/vs-dynamo.md`](docs/architecture/vs-dynamo.md).
+The full comparison, including the **credibility gaps (v0.5)** table, is in [`docs/architecture/vs-dynamo.md`](docs/architecture/vs-dynamo.md).
 
 What we have that Dynamo doesn't: bare-metal-first deployment with one-curl install · llama.cpp + MLX + OpenAI-compat as first-class engines · energy-aware scheduling wired into routing and autoscaling · capability-aware routing for mixed NVIDIA/AMD fleets · etcd-free gossip discovery · positionally-correct KV digests · cross-cluster QUIC peer fetch · multi-model SLM→LLM cascade (streaming included) · single-binary runtime with no Python control plane.
 

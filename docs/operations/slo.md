@@ -48,7 +48,7 @@ chart's PrometheusRules emit:
 
 Alerts fire when both windows are burning above their multiplier.
 
-## How we keep them honest
+## How we verify them
 
 1. **Every PR runs the perf harness.** It uses synthetic prompts and
    pre-warmed KV blocks so the numbers are reproducible. CI fails if
