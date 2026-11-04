@@ -15,6 +15,9 @@ use serde::Deserialize;
 
 use super::{Principal, PrincipalKind};
 
+/// Minimum gap between JWKS refreshes triggered by unknown key ids.
+const KID_MISS_COOLDOWN: Duration = Duration::from_secs(30);
+
 #[derive(Clone)]
 pub struct OidcVerifier {
     issuer: String,
@@ -110,6 +113,12 @@ impl OidcVerifier {
             .kid
             .ok_or_else(|| Error::InvalidArgument("oidc: no kid".into()))?;
 
+        // An unknown kid usually means the IdP rotated keys. Refresh early,
+        // but at most once per cooldown so junk tokens can't hammer the IdP.
+        if !self.jwks.load().keys.iter().any(|k| k.kid == kid) && self.may_refresh_on_miss() {
+            self.refresh_jwks().await?;
+        }
+
         let snap = self.jwks.load();
         let entry = snap
             .keys
@@ -147,6 +156,16 @@ impl OidcVerifier {
             scopes,
             kind: PrincipalKind::Oidc,
         })
+    }
+
+    /// Claims the refresh slot for a kid miss, rate-limited by cooldown.
+    fn may_refresh_on_miss(&self) -> bool {
+        let mut last = self.refresh.lock();
+        if last.elapsed() < KID_MISS_COOLDOWN {
+            return false;
+        }
+        *last = Instant::now();
+        true
     }
 
     async fn refresh_jwks(&self) -> Result<()> {

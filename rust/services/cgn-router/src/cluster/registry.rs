@@ -44,11 +44,29 @@ pub struct NodeEntry {
     /// changes.
     #[serde(default)]
     pub kv_epoch: u64,
+    /// Engine accepts traffic. Absent on older agents, read as ready.
+    #[serde(default = "yes")]
+    pub ready: bool,
+    /// The agent got SIGTERM: in-flight work finishes, no new work.
+    #[serde(default)]
+    pub draining: bool,
+    /// LoRA adapter names this node serves on top of `model`.
+    #[serde(default)]
+    pub adapters: Vec<String>,
     #[serde(skip, default = "Instant::now")]
     pub last_heartbeat: Instant,
 }
 
+fn yes() -> bool {
+    true
+}
+
 impl NodeEntry {
+    /// Does this node serve `model`, as its base model or an adapter?
+    pub fn serves(&self, model: &str) -> bool {
+        self.model.as_deref() == Some(model) || self.adapters.iter().any(|a| a == model)
+    }
+
     pub fn role_enum(&self) -> NodeRole {
         NodeRole::try_from(self.role).unwrap_or(NodeRole::Unspecified)
     }
@@ -128,13 +146,13 @@ impl NodeRegistry {
             .iter()
             .filter_map(|kv| {
                 let n = kv.value().read().clone();
-                if n.cordoned {
+                if n.cordoned || n.draining || !n.ready {
                     return None;
                 }
                 let role_match = matches!(role, NodeRole::Unspecified)
                     || n.role_enum() == role
                     || n.role_enum() == NodeRole::Both;
-                let model_match = model.is_none_or(|m| n.model.as_deref() == Some(m));
+                let model_match = model.is_none_or(|m| n.serves(m));
                 if role_match && model_match {
                     Some(n)
                 } else {

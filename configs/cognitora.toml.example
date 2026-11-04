@@ -36,7 +36,17 @@ enabled         = true
 api_keys_file   = "/etc/cognitora/keys.txt"
 oidc_issuer     = ""        # e.g. "https://your-idp.example.com"
 oidc_audience   = ""        # JWT `aud`
-oidc_jwks_ttl   = "10m"
+# Requests need a scope (`chat`, `embed` or `*`). Set false to migrate keys.
+enforce_scopes  = true
+# oidc_groups_claim = "groups"
+# [auth.oidc_group_scopes]
+# ml-team = ["chat", "embed", "tenant:ml"]
+# Persists key usage across restarts; without it budgets reset on restart.
+# usage_file = "/var/lib/cognitora/usage.json"
+#
+# Key file lines: `<key-or-sha256> <comma-separated scopes>`. Besides `chat`
+# and `embed`, scopes are policy: `model:<name>` (repeatable, `*` suffix
+# allowed), `tenant:<id>`, `tpm:<tokens per minute>`, `budget:<tokens>`.
 
 # ---- Router (combined gateway + orchestrator) ------------------------------
 
@@ -45,6 +55,10 @@ listen_http  = "0.0.0.0:8080"   # OpenAI-compatible API
 listen_grpc  = "0.0.0.0:7070"   # internal RPC (mTLS)
 listen_admin = "127.0.0.1:9091" # /metrics, /healthz, /readyz
 worker_threads = 0              # 0 = num_cpus
+drain_timeout = "30s"           # in-flight work allowed after SIGTERM
+first_token_timeout = "300s"    # retry elsewhere after this long with no token
+max_body_mb = 32                # base64 images count against this
+kv_tenant_isolation = true      # tenants never share cached prefixes
 
 [router.score_weights]
 kv       = 0.55
@@ -53,14 +67,16 @@ power    = 0.10
 capacity = 0.10
 
 [router.admission]
-max_queue        = 4096    # global cap on requests in flight per (model,role)
-ttft_slo_ms      = 800
-queue_timeout_ms = 30_000
+max_queue            = 4096   # cap on requests in flight per (model,role)
+ttft_slo             = "800ms"
+wait_queue_per_tenant = 64    # parked per tenant at the cap; 0 rejects at once
+wait_timeout         = "10s"  # longest a parked request waits before a 429
 
 [router.rate_limit]
-enabled        = false
-rps_per_subject = 50
-burst           = 100
+rps   = 50
+burst = 100
+# Only these peers may set X-Forwarded-For. Empty ignores the header.
+trusted_proxies = []          # e.g. ["10.0.0.0/8"]
 
 [router.cascade]
 enabled              = false
@@ -149,8 +165,10 @@ n_gpu_layers = 0                  # -1 = offload everything to GPU
 # ---- KV cache daemon -------------------------------------------------------
 
 [kv]
-listen_grpc = "0.0.0.0:7072"
-listen_quic = "0.0.0.0:7073"
+listen      = "0.0.0.0:7072"
+quic_listen = "0.0.0.0:7073"
+# quic_server_name = "cognitora"   # every peer cert needs this SAN under mTLS
+# allow_insecure_quic = false      # needed for plain QUIC on a public address
 ssd_dir     = "/var/lib/cognitora/kv/ssd"
 index_dir   = "/var/lib/cognitora/kv/index"
 ram_gib     = 8
@@ -184,6 +202,12 @@ hf_repo  = "meta-llama/Meta-Llama-3-8B-Instruct"
 tp       = 1
 dtype    = "bfloat16"
 cascade  = []                  # []  | ["llama3-8b","llama3-70b"]
+# Real tokens make prefix routing and usage accurate. One of:
+# tokenizer      = "/models/llama3-8b/tokenizer.json"
+# tokenizer_repo = "meta-llama/Meta-Llama-3-8B-Instruct"
+# LoRA adapters, requested by name as a model id (vLLM and SGLang):
+# [models.llama3-8b.lora]
+# sql = "/models/lora/sql"
 
 [models.llama3-70b]
 hf_repo  = "meta-llama/Meta-Llama-3-70B-Instruct"

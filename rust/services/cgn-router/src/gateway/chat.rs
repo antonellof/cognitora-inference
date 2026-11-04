@@ -1,42 +1,63 @@
-//! `/v1/chat/completions` and `/v1/completions` handlers.
+//! `/v1/chat/completions` and legacy `/v1/completions`.
 //!
-//! Translates OpenAI's HTTP request shape into a `cognitora.v1` proto
-//! `GenerateRequest`, invokes the routing logic in-process, and either:
-//!
-//! * Streams Server-Sent Events back to the client (`stream: true`).
-//! * Buffers tokens and returns a single JSON body (`stream: false`).
+//! Translates OpenAI request shapes into a `cognitora.v1` proto
+//! `GenerateRequest`, hands it to [`super::generate`], and renders the
+//! result as one JSON body or Server-Sent Events.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    Json,
+    Extension, Json,
 };
-use cgn_proto::v1::{GenerateRequest, Message as PMessage, NodeRole, SamplingParams};
-use futures::StreamExt;
+use cgn_auth::Principal;
+use cgn_proto::v1::{GenerateRequest, Message as PMessage, SamplingParams};
 use serde_json::json;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
-use tracing::{error, info, warn};
+use tracing::warn;
 
 use crate::carbon::{self, CarbonAdmission, RequestPriority};
-use crate::cascade::{Cascade, StepOutcome};
-use crate::routing;
+use crate::cascade::Cascade;
 use crate::state::SharedState;
 
-use super::metrics::{CHAT_COMPLETION_TOKENS, CHAT_LATENCY, CHAT_REQUESTS, CHAT_TTFT};
-use super::sse;
+use super::authz::{authorize, Caller};
+use super::generate::{self, error_json, Generated, Resolved, ResponseCtx, Surface};
+use super::metrics::{CHAT_LATENCY, CHAT_REQUESTS};
 use super::types::{
-    ChatChoice, ChatChunk, ChatChunkChoice, ChatDelta, ChatMessage, ChatRequest, ChatResponse,
-    Usage,
+    ChatChoice, ChatMessage, ChatRequest, ChatResponse, CompletionRequest, ContentSpec, PromptSpec,
+    TextChoice, TextCompletion,
 };
 
-pub async fn completions(
-    State(state): State<Arc<SharedState>>,
-    headers: HeaderMap,
-    Json(req): Json<ChatRequest>,
+fn bad_request(message: impl Into<String>) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(json!({
+            "error": {
+                "message": message.into(),
+                "type": "invalid_request_error",
+                "code": null,
+            }
+        })),
+    )
+        .into_response()
+}
+
+/// Requests that must run on the model the client named: tool formats
+/// differ between cascade models, and guided decoding binds to one model.
+fn pins_model(r: &ChatRequest) -> bool {
+    r.tools.is_some() || r.tool_choice.is_some() || r.response_format.is_some()
+}
+
+/// Shared by both surfaces once the proto is built.
+async fn serve(
+    state: Arc<SharedState>,
+    headers: &HeaderMap,
+    mut proto: GenerateRequest,
+    casc: Option<Cascade>,
+    ctx: ResponseCtx,
+    stream: bool,
 ) -> Response {
     let priority = headers
         .get("x-cgn-priority")
@@ -54,189 +75,223 @@ pub async fn completions(
             threshold,
         } => {
             carbon::record_rejection();
-            CHAT_REQUESTS
-                .with_label_values(&[&req.model, "429"])
-                .inc();
+            CHAT_REQUESTS.with_label_values(&[&ctx.model, "429"]).inc();
             return carbon_reject_response(intensity, threshold);
         }
     }
 
-    let stream_mode = req.stream.unwrap_or(false);
-    let id = format!(
-        "chatcmpl-{}",
-        &uuid::Uuid::new_v4().simple().to_string()[..16]
-    );
-    let created = chrono::Utc::now().timestamp();
-    let model = req.model.clone();
-    let started = std::time::Instant::now();
-    let stream_label = if stream_mode { "true" } else { "false" };
+    generate::apply_headers(&mut proto, headers);
+    let started = Instant::now();
+    let resolved = match &casc {
+        Some(c) => generate::resolve_cascade(&state, &proto, c).await,
+        None => generate::open(&state, &proto).await.map(Resolved::Live),
+    };
+    let resolved = match resolved {
+        Ok(r) => r,
+        Err(e) => {
+            // Nothing has been sent, so streaming clients get a real
+            // status too, not a 200 with an empty stream.
+            CHAT_REQUESTS.with_label_values(&[&ctx.model, "5xx"]).inc();
+            warn!(error = ?e, "completion failed");
+            return error_json(&e);
+        }
+    };
 
-    // Build the proto request once.
-    let proto_req = build_proto_request(&req);
-
-    if stream_mode {
-        let (tx, rx) = mpsc::channel::<String>(64);
-        let id_for_task = id.clone();
-        let model_for_task = model.clone();
-        let state_clone = state.clone();
-        let metric_model = model.clone();
-        let started_for_metric = started;
-        // Tool-calling / structured-output requests bypass the cascade:
-        // different cascade models emit incompatible tool-call formats,
-        // and guided decoding must run on the model the client asked for.
-        let casc = if proto_req.extensions_json.is_empty() {
-            Cascade::from_config(&state.cfg, &model, &[])
-        } else {
-            None
-        };
-        tokio::spawn(async move {
-            let outcome = match casc {
-                Some(c) => {
-                    stream_run_cascade(
-                        state_clone,
-                        proto_req,
-                        c,
-                        tx.clone(),
-                        id_for_task,
-                        model_for_task,
-                        created,
-                    )
-                    .await
-                }
-                None => {
-                    stream_run(
-                        state_clone,
-                        proto_req,
-                        tx.clone(),
-                        id_for_task,
-                        model_for_task,
-                        created,
-                    )
-                    .await
-                }
-            };
-            let status = if outcome.is_ok() { "200" } else { "5xx" };
-            CHAT_REQUESTS
-                .with_label_values(&[&metric_model, status])
-                .inc();
-            CHAT_LATENCY
-                .with_label_values(&[&metric_model, "true"])
-                .observe(started_for_metric.elapsed().as_secs_f64());
-            if let Err(e) = outcome {
-                error!(error=?e, "stream_run error");
-            }
-        });
-        let stream = ReceiverStream::new(rx);
-        return sse::into_response(stream);
+    if stream {
+        return generate::stream_response(state, resolved, ctx, started);
     }
 
-    // Buffered path: the cascade evaluates the complete response's
-    // confidence before deciding whether to escalate. Tool/structured
-    // requests skip the cascade (see the streaming path for why).
-    let casc = if proto_req.extensions_json.is_empty() {
-        Cascade::from_config(&state.cfg, &model, &[])
-    } else {
-        None
+    let generated = match resolved {
+        Resolved::Done(g) => Ok(g),
+        Resolved::Live(flow) => generate::collect(flow).await,
     };
-    let result = match casc {
-        Some(c) => buffered_with_cascade(state.clone(), proto_req, c).await,
-        None => buffered_run(state.clone(), proto_req)
-            .await
-            .map(|(text, n, finish, tool_calls)| (text, n, finish, tool_calls, model.clone())),
-    };
-
-    let dt = started.elapsed().as_secs_f64();
     CHAT_LATENCY
-        .with_label_values(&[&model, stream_label])
-        .observe(dt);
-
-    match result {
-        Ok((text, completion_tokens, finish, tool_calls, used_model)) => {
-            CHAT_REQUESTS.with_label_values(&[&used_model, "200"]).inc();
-            CHAT_COMPLETION_TOKENS
-                .with_label_values(&[&used_model])
-                .inc_by(completion_tokens as u64);
-            let resp = ChatResponse {
-                id,
-                object: "chat.completion",
-                created,
-                model: used_model,
-                choices: vec![ChatChoice {
-                    index: 0,
-                    message: ChatMessage {
-                        role: "assistant".into(),
-                        content: super::types::ContentSpec::Text(text),
-                        name: None,
-                        tool_calls,
-                        tool_call_id: None,
-                    },
-                    finish_reason: finish,
-                }],
-                usage: Usage {
-                    prompt_tokens: 0,
-                    completion_tokens,
-                    total_tokens: completion_tokens,
-                },
-            };
-            Json(resp).into_response()
+        .with_label_values(&[&ctx.model, "false"])
+        .observe(started.elapsed().as_secs_f64());
+    match generated {
+        Ok(g) => {
+            CHAT_REQUESTS.with_label_values(&[&ctx.model, "200"]).inc();
+            generate::settle(&state, &ctx, g.usage);
+            buffered_response(g, &ctx)
         }
         Err(e) => {
-            CHAT_REQUESTS.with_label_values(&[&model, "5xx"]).inc();
-            warn!(error=?e, "completion failed");
+            CHAT_REQUESTS.with_label_values(&[&ctx.model, "5xx"]).inc();
+            warn!(error = ?e, "completion failed");
             error_json(&e)
         }
     }
 }
 
-/// Run a buffered completion through a model cascade. Each step
-/// re-routes through `routing::pick` so we always pick the best node
-/// for that particular model.
-async fn buffered_with_cascade(
-    state: Arc<SharedState>,
-    proto: GenerateRequest,
-    casc: Cascade,
-) -> cgn_core::Result<(String, u32, String, Option<serde_json::Value>, String)> {
-    let result = casc
-        .run(|model| {
-            let state = state.clone();
-            let mut step_proto = proto.clone();
-            step_proto.model = model.to_string();
-            async move {
-                match buffered_run(state, step_proto).await {
-                    Ok((text, n, finish, _tool_calls)) => StepOutcome {
-                        logprob: heuristic_logprob(n),
-                        text,
-                        tokens: n,
-                        finish,
-                    },
-                    Err(e) => {
-                        tracing::warn!(error=?e, "cascade step failed; escalating");
-                        StepOutcome::default()
-                    }
-                }
-            }
+fn buffered_response(g: Generated, ctx: &ResponseCtx) -> Response {
+    match ctx.surface {
+        Surface::Chat => Json(ChatResponse {
+            id: ctx.id.clone(),
+            object: "chat.completion",
+            created: ctx.created,
+            model: ctx.model.clone(),
+            choices: vec![ChatChoice {
+                index: 0,
+                message: ChatMessage {
+                    role: "assistant".into(),
+                    content: ContentSpec::Text(g.text),
+                    name: None,
+                    tool_calls: g.tool_calls,
+                    tool_call_id: None,
+                },
+                finish_reason: g.finish,
+                logprobs: g.logprobs,
+            }],
+            usage: g.usage,
         })
-        .await;
-
-    info!(
-        used = %result.model_used,
-        attempts = result.steps_attempted.len(),
-        tokens = result.outcome.tokens,
-        "cascade complete"
-    );
-    Ok((
-        result.outcome.text,
-        result.outcome.tokens,
-        result.outcome.finish,
-        // Cascade requests never carry tools (the gateway bypasses the
-        // cascade when extensions are present), so no tool calls here.
-        None,
-        result.model_used,
-    ))
+        .into_response(),
+        Surface::Text => Json(TextCompletion {
+            id: ctx.id.clone(),
+            object: "text_completion",
+            created: ctx.created,
+            model: ctx.model.clone(),
+            choices: vec![TextChoice {
+                index: 0,
+                text: g.text,
+                finish_reason: Some(g.finish),
+                logprobs: None,
+            }],
+            usage: Some(g.usage),
+        })
+        .into_response(),
+    }
 }
 
-fn build_proto_request(r: &ChatRequest) -> GenerateRequest {
-    use super::types::ContentSpec;
+fn response_ctx(
+    prefix: &str,
+    model: &str,
+    surface: Surface,
+    include_usage: bool,
+    caller: Caller,
+) -> ResponseCtx {
+    ResponseCtx {
+        id: format!(
+            "{prefix}-{}",
+            &uuid::Uuid::new_v4().simple().to_string()[..16]
+        ),
+        created: chrono::Utc::now().timestamp(),
+        model: model.to_string(),
+        surface,
+        include_usage,
+        caller,
+    }
+}
+
+pub async fn completions(
+    State(state): State<Arc<SharedState>>,
+    principal: Option<Extension<Principal>>,
+    headers: HeaderMap,
+    Json(req): Json<ChatRequest>,
+) -> Response {
+    let caller = match authorize(&state, principal.as_deref(), "chat", &req.model) {
+        Ok(c) => c,
+        Err(resp) => return resp,
+    };
+    if req.n.is_some_and(|n| n != 1) {
+        return bad_request("only n=1 is supported");
+    }
+    let stream = req.stream.unwrap_or(false);
+    let casc = if pins_model(&req) {
+        None
+    } else {
+        Cascade::from_config(&state.cfg, &req.model, &[])
+    };
+    let include_usage = req.stream_options.as_ref().is_some_and(|o| o.include_usage);
+    let ctx = response_ctx(
+        "chatcmpl",
+        &req.model,
+        Surface::Chat,
+        include_usage,
+        caller.clone(),
+    );
+    let proto = build_proto_request(&state, &req, &caller);
+    serve(state, &headers, proto, casc, ctx, stream).await
+}
+
+/// Legacy text completions: a raw prompt with no chat template.
+pub async fn text_completions(
+    State(state): State<Arc<SharedState>>,
+    principal: Option<Extension<Principal>>,
+    headers: HeaderMap,
+    Json(req): Json<CompletionRequest>,
+) -> Response {
+    let caller = match authorize(&state, principal.as_deref(), "chat", &req.model) {
+        Ok(c) => c,
+        Err(resp) => return resp,
+    };
+    if req.n.is_some_and(|n| n != 1) {
+        return bad_request("only n=1 is supported");
+    }
+    if req.echo == Some(true) {
+        return bad_request("echo is not supported");
+    }
+    if req.logprobs.is_some() {
+        return bad_request("logprobs is not supported on /v1/completions");
+    }
+    let prompt = match req.prompt {
+        PromptSpec::One(p) => p,
+        PromptSpec::Many(mut v) if v.len() == 1 => v.remove(0),
+        PromptSpec::Many(_) => return bad_request("prompt arrays must hold exactly one string"),
+    };
+    if prompt.is_empty() {
+        return bad_request("prompt must not be empty");
+    }
+    let stream = req.stream.unwrap_or(false);
+    let include_usage = req.stream_options.as_ref().is_some_and(|o| o.include_usage);
+    let ctx = response_ctx(
+        "cmpl",
+        &req.model,
+        Surface::Text,
+        include_usage,
+        caller.clone(),
+    );
+    let proto = GenerateRequest {
+        model: req.model.clone(),
+        prompt,
+        params: Some(SamplingParams {
+            temperature: req.temperature.unwrap_or(1.0),
+            top_p: req.top_p.unwrap_or(1.0),
+            max_tokens: req.max_tokens.unwrap_or(0),
+            stop: req.stop.clone().map(|s| s.into_vec()).unwrap_or_default(),
+            seed: req.seed,
+            frequency_penalty: req.frequency_penalty.unwrap_or(0.0),
+            presence_penalty: req.presence_penalty.unwrap_or(0.0),
+            repetition_penalty: 1.0,
+            ..Default::default()
+        }),
+        tenant: caller.tenant.clone(),
+        session: req.user.clone().unwrap_or_default(),
+        stream,
+        extensions_json: isolation_ext(&state, &caller, serde_json::Map::new()),
+        ..Default::default()
+    };
+    serve(state, &headers, proto, None, ctx, stream).await
+}
+
+/// Serialize request extensions, adding vLLM's `cache_salt` for tenants so
+/// isolation also holds inside the engine's own prefix cache.
+fn isolation_ext(
+    state: &SharedState,
+    caller: &Caller,
+    mut ext: serde_json::Map<String, serde_json::Value>,
+) -> String {
+    if !caller.tenant.is_empty() && state.cfg.router.kv_tenant_isolation {
+        let salt = blake3::hash(caller.tenant.as_bytes());
+        ext.insert("cache_salt".into(), salt.to_hex().as_str().into());
+    }
+    if ext.is_empty() {
+        String::new()
+    } else {
+        serde_json::Value::Object(ext).to_string()
+    }
+}
+
+/// Translate an OpenAI chat request into the internal proto shape.
+fn build_proto_request(state: &SharedState, r: &ChatRequest, caller: &Caller) -> GenerateRequest {
     let messages: Vec<PMessage> = r
         .messages
         .iter()
@@ -244,7 +299,7 @@ fn build_proto_request(r: &ChatRequest) -> GenerateRequest {
             let (content, content_json) = match &m.content {
                 ContentSpec::Text(s) => (s.clone(), String::new()),
                 // Multimodal content parts: keep the raw JSON for the
-                // engine and a text-only view for prefix hashing.
+                // engine; `join_messages` derives the hashed view from it.
                 ContentSpec::Parts(v) => (String::new(), v.to_string()),
             };
             PMessage {
@@ -262,30 +317,21 @@ fn build_proto_request(r: &ChatRequest) -> GenerateRequest {
         })
         .collect();
 
-    // Tool / structured-output passthrough. Bundled as one JSON object
-    // so the wire protocol stays stable as OpenAI grows the surface.
+    // Fields with no proto slot travel as one JSON object, so the wire
+    // protocol stays stable as OpenAI grows the surface.
     let mut ext = serde_json::Map::new();
-    if let Some(t) = &r.tools {
-        ext.insert("tools".into(), t.clone());
-    }
-    if let Some(t) = &r.tool_choice {
-        ext.insert("tool_choice".into(), t.clone());
-    }
-    if let Some(t) = &r.response_format {
-        ext.insert("response_format".into(), t.clone());
-    }
-    let extensions_json = if ext.is_empty() {
-        String::new()
-    } else {
-        serde_json::Value::Object(ext).to_string()
+    let mut put = |k: &str, v: Option<serde_json::Value>| {
+        if let Some(v) = v {
+            ext.insert(k.to_string(), v);
+        }
     };
-
-    let stops = r
-        .stop
-        .as_ref()
-        .cloned()
-        .map(|s| s.into_vec())
-        .unwrap_or_default();
+    put("tools", r.tools.clone());
+    put("tool_choice", r.tool_choice.clone());
+    put("response_format", r.response_format.clone());
+    put("logit_bias", r.logit_bias.clone());
+    put("parallel_tool_calls", r.parallel_tool_calls.map(Into::into));
+    put("top_logprobs", r.top_logprobs.map(Into::into));
+    put("min_p", r.min_p.map(Into::into));
 
     GenerateRequest {
         model: r.model.clone(),
@@ -293,625 +339,21 @@ fn build_proto_request(r: &ChatRequest) -> GenerateRequest {
         params: Some(SamplingParams {
             temperature: r.temperature.unwrap_or(1.0),
             top_p: r.top_p.unwrap_or(1.0),
-            top_k: 0,
-            max_tokens: r.max_tokens.unwrap_or(0),
-            stop: stops,
-            logprobs: false,
-            seed: r.seed.unwrap_or(0),
+            top_k: r.top_k.unwrap_or(0),
+            max_tokens: r.max_completion_tokens.or(r.max_tokens).unwrap_or(0),
+            stop: r.stop.clone().map(|s| s.into_vec()).unwrap_or_default(),
+            logprobs: r.logprobs.unwrap_or(false),
+            seed: r.seed,
             frequency_penalty: r.frequency_penalty.unwrap_or(0.0),
             presence_penalty: r.presence_penalty.unwrap_or(0.0),
-            repetition_penalty: 1.0,
+            repetition_penalty: r.repetition_penalty.unwrap_or(1.0),
         }),
-        tenant: r.user.clone().unwrap_or_default(),
-        prefix_hash: vec![],
+        tenant: caller.tenant.clone(),
+        session: r.user.clone().unwrap_or_default(),
         stream: r.stream.unwrap_or(false),
-        cascade: vec![],
-        traceparent: String::new(),
-        tracestate: String::new(),
-        deadline_ms: 0,
-        extensions_json,
+        extensions_json: isolation_ext(state, caller, ext),
+        ..Default::default()
     }
-}
-
-/// Without engine-side logprobs, approximate confidence with a
-/// length-based heuristic: longer responses imply higher confidence.
-/// Real impl plugs in the engine's mean-logprob output once exposed.
-fn heuristic_logprob(tokens: u32) -> f32 {
-    -1.0 / ((tokens as f32).max(1.0)).ln().max(0.5)
-}
-
-/// Build one SSE chunk JSON string.
-fn chunk_json(
-    id: &str,
-    created: i64,
-    model: &str,
-    role: Option<&str>,
-    content: Option<&str>,
-    finish: Option<&str>,
-) -> String {
-    let chunk = ChatChunk {
-        id: id.to_string(),
-        object: "chat.completion.chunk",
-        created,
-        model: model.to_string(),
-        choices: vec![ChatChunkChoice {
-            index: 0,
-            delta: ChatDelta {
-                role: role.map(str::to_string),
-                content: content.map(str::to_string),
-                tool_calls: None,
-            },
-            finish_reason: finish.map(str::to_string),
-        }],
-    };
-    serde_json::to_string(&chunk).unwrap()
-}
-
-/// Streaming path with a model cascade (SLM → … → LLM).
-///
-/// Steps before the last are executed *buffered* — confidence gating
-/// needs the complete output — and a passing step's text is emitted as
-/// a single content chunk. If every early step escalates, the final
-/// model streams live token-by-token, so the worst case degrades to
-/// exactly the non-cascade streaming behavior (plus the SLM detour).
-async fn stream_run_cascade(
-    state: Arc<SharedState>,
-    proto: GenerateRequest,
-    casc: Cascade,
-    tx: mpsc::Sender<String>,
-    id: String,
-    model: String,
-    created: i64,
-) -> cgn_core::Result<()> {
-    if casc.steps.is_empty() {
-        return stream_run(state, proto, tx, id, model, created).await;
-    }
-    // Role chunk first, tagged with the originally requested model —
-    // per-step model substitution is an internal routing detail.
-    let _ = tx
-        .send(chunk_json(
-            &id,
-            created,
-            &model,
-            Some("assistant"),
-            None,
-            None,
-        ))
-        .await;
-
-    let n = casc.steps.len();
-    for (i, step) in casc.steps.iter().enumerate() {
-        let mut step_proto = proto.clone();
-        step_proto.model = step.clone();
-
-        if i + 1 == n {
-            // Final step: stream live.
-            info!(step = %step, "cascade streaming final step");
-            return stream_tokens(state, step_proto, tx, id, model, created).await;
-        }
-
-        match buffered_run(state.clone(), step_proto).await {
-            Ok((text, tokens, finish, _tool_calls)) => {
-                let outcome = StepOutcome {
-                    logprob: heuristic_logprob(tokens),
-                    text,
-                    tokens,
-                    finish,
-                };
-                if !casc.should_escalate(&outcome) {
-                    info!(step = %step, tokens, "cascade streaming: early step accepted");
-                    CHAT_COMPLETION_TOKENS
-                        .with_label_values(&[&model])
-                        .inc_by(outcome.tokens as u64);
-                    let _ = tx
-                        .send(chunk_json(
-                            &id,
-                            created,
-                            &model,
-                            None,
-                            Some(&outcome.text),
-                            None,
-                        ))
-                        .await;
-                    let _ = tx
-                        .send(chunk_json(
-                            &id,
-                            created,
-                            &model,
-                            None,
-                            None,
-                            Some(&outcome.finish),
-                        ))
-                        .await;
-                    return Ok(());
-                }
-                tracing::debug!(step = %step, logprob = outcome.logprob, "cascade escalating");
-            }
-            Err(e) => {
-                warn!(step = %step, error=?e, "cascade step failed; escalating");
-            }
-        }
-    }
-    unreachable!("loop returns on the final step");
-}
-
-/// Streaming path: forward token deltas as `data: {...chunk...}\n\n`.
-async fn stream_run(
-    state: Arc<SharedState>,
-    proto: GenerateRequest,
-    tx: mpsc::Sender<String>,
-    id: String,
-    model: String,
-    created: i64,
-) -> cgn_core::Result<()> {
-    // First chunk announces the role.
-    let _ = tx
-        .send(chunk_json(
-            &id,
-            created,
-            &model,
-            Some("assistant"),
-            None,
-            None,
-        ))
-        .await;
-    stream_tokens(state, proto, tx, id, model, created).await
-}
-
-/// Pump engine tokens into SSE chunks. Assumes the role chunk has
-/// already been sent.
-async fn stream_tokens(
-    state: Arc<SharedState>,
-    proto: GenerateRequest,
-    tx: mpsc::Sender<String>,
-    id: String,
-    model: String,
-    created: i64,
-) -> cgn_core::Result<()> {
-    let token_ids =
-        routing::prompt::approximate_token_ids(&routing::prompt::join_messages(&proto.messages));
-    let _permit = crate::admission::try_admit_request(&state, &proto.model, token_ids.len() as u32)?;
-    let dispatch_started = std::time::Instant::now();
-    let mut stream = run_to_token_stream(state, proto).await?;
-    let mut completion_tokens = 0u64;
-    let mut first_token_seen = false;
-    while let Some(item) = stream.next().await {
-        match item {
-            Ok(t) => {
-                if !first_token_seen {
-                    first_token_seen = true;
-                    CHAT_TTFT
-                        .with_label_values(&[&model])
-                        .observe(dispatch_started.elapsed().as_secs_f64());
-                }
-                if !t.text.is_empty() || !t.tool_calls_json.is_empty() {
-                    completion_tokens += 1;
-                }
-                let chunk = ChatChunk {
-                    id: id.clone(),
-                    object: "chat.completion.chunk",
-                    created,
-                    model: model.clone(),
-                    choices: vec![ChatChunkChoice {
-                        index: 0,
-                        delta: ChatDelta {
-                            role: None,
-                            content: if t.text.is_empty() {
-                                None
-                            } else {
-                                Some(t.text.clone())
-                            },
-                            // Tool-call deltas pass through verbatim.
-                            tool_calls: if t.tool_calls_json.is_empty() {
-                                None
-                            } else {
-                                serde_json::from_str(&t.tool_calls_json).ok()
-                            },
-                        },
-                        finish_reason: if t.finish.is_empty() {
-                            None
-                        } else {
-                            Some(t.finish.clone())
-                        },
-                    }],
-                };
-                if tx
-                    .send(serde_json::to_string(&chunk).unwrap())
-                    .await
-                    .is_err()
-                {
-                    break; // client disconnected
-                }
-            }
-            Err(e) => {
-                let chunk = ChatChunk {
-                    id: id.clone(),
-                    object: "chat.completion.chunk",
-                    created,
-                    model: model.clone(),
-                    choices: vec![ChatChunkChoice {
-                        index: 0,
-                        delta: ChatDelta::default(),
-                        finish_reason: Some(format!("error:{}", e.code())),
-                    }],
-                };
-                let _ = tx.send(serde_json::to_string(&chunk).unwrap()).await;
-                break;
-            }
-        }
-    }
-    // Streaming responses previously never fed the completion-tokens
-    // counter (only the buffered path did), silently under-reporting
-    // token throughput for streaming-heavy workloads.
-    if completion_tokens > 0 {
-        CHAT_COMPLETION_TOKENS
-            .with_label_values(&[&model])
-            .inc_by(completion_tokens);
-    }
-    Ok(())
-}
-
-/// Non-streaming path: collect all tokens and return them as a single
-/// body. Tool-call deltas are aggregated OpenAI-style: entries with the
-/// same `index` are merged, with `function.arguments` fragments
-/// concatenated in arrival order.
-async fn buffered_run(
-    state: Arc<SharedState>,
-    proto: GenerateRequest,
-) -> cgn_core::Result<(String, u32, String, Option<serde_json::Value>)> {
-    let token_ids =
-        routing::prompt::approximate_token_ids(&routing::prompt::join_messages(&proto.messages));
-    let _permit = crate::admission::try_admit_request(&state, &proto.model, token_ids.len() as u32)?;
-    let mut stream = run_to_token_stream(state, proto).await?;
-    let mut text = String::new();
-    let mut count = 0u32;
-    let mut finish = "stop".to_string();
-    let mut tool_agg = ToolCallAggregator::default();
-    while let Some(item) = stream.next().await {
-        match item {
-            Ok(t) => {
-                text.push_str(&t.text);
-                // Don't count the synthetic empty terminator chunk (or
-                // finish-only frames) as a completion token.
-                if !t.text.is_empty() || !t.tool_calls_json.is_empty() {
-                    count += 1;
-                }
-                if !t.tool_calls_json.is_empty() {
-                    if let Ok(v) = serde_json::from_str(&t.tool_calls_json) {
-                        tool_agg.push(&v);
-                    }
-                }
-                if !t.finish.is_empty() {
-                    finish = t.finish;
-                }
-            }
-            Err(e) => {
-                return Err(cgn_core::Error::Internal(format!("stream: {e}")));
-            }
-        }
-    }
-    info!(tokens = count, "chat completion finished");
-    Ok((text, count, finish, tool_agg.finish()))
-}
-
-/// Merges streaming `delta.tool_calls` fragments into the final
-/// `message.tool_calls` array, keyed by each fragment's `index`.
-#[derive(Default)]
-struct ToolCallAggregator {
-    calls: std::collections::BTreeMap<u64, serde_json::Value>,
-}
-
-impl ToolCallAggregator {
-    fn push(&mut self, delta: &serde_json::Value) {
-        let Some(entries) = delta.as_array() else {
-            return;
-        };
-        for e in entries {
-            let idx = e.get("index").and_then(|i| i.as_u64()).unwrap_or(0);
-            let slot = self.calls.entry(idx).or_insert_with(|| {
-                serde_json::json!({
-                    "id": "",
-                    "type": "function",
-                    "function": { "name": "", "arguments": "" }
-                })
-            });
-            if let Some(id) = e.get("id").and_then(|v| v.as_str()) {
-                slot["id"] = id.into();
-            }
-            if let Some(t) = e.get("type").and_then(|v| v.as_str()) {
-                slot["type"] = t.into();
-            }
-            if let Some(f) = e.get("function") {
-                if let Some(name) = f.get("name").and_then(|v| v.as_str()) {
-                    slot["function"]["name"] = name.into();
-                }
-                if let Some(args) = f.get("arguments").and_then(|v| v.as_str()) {
-                    let existing = slot["function"]["arguments"].as_str().unwrap_or("");
-                    slot["function"]["arguments"] = format!("{existing}{args}").into();
-                }
-            }
-        }
-    }
-
-    fn finish(self) -> Option<serde_json::Value> {
-        if self.calls.is_empty() {
-            None
-        } else {
-            Some(serde_json::Value::Array(self.calls.into_values().collect()))
-        }
-    }
-}
-
-/// Maximum dispatch attempts per request. The first failure excludes
-/// the failed node and re-picks; a second failure gives up (small
-/// clusters run out of alternatives quickly and the client's own retry
-/// budget is usually tighter than ours).
-const MAX_DISPATCH_ATTEMPTS: usize = 3;
-
-/// Drive the routing pipeline and return a stream of tokens. Currently the
-/// router talks to the agent over gRPC; this helper hides that detail so
-/// the gateway handlers are pure HTTP code.
-///
-/// Dispatch failures (agent unreachable, gRPC connect/setup error) are
-/// retried against the next-best node with the failed node excluded, up
-/// to [`MAX_DISPATCH_ATTEMPTS`]. Retries happen strictly *before* any
-/// token has been produced, so they are invisible to the client (for
-/// streaming responses the SSE role chunk is emitted independently).
-/// Mid-stream errors remain terminal — resuming half-generated output
-/// safely requires token-state migration, which is future work.
-///
-/// When the *local* cluster has no eligible node at all (routing itself
-/// failed, not a dispatch to a chosen node) and `[router.federation]` is
-/// enabled, the request is forwarded to the lowest-latency reachable
-/// peer cluster instead of failing. Forwarding targets the peer's gRPC
-/// surface, whose handler only routes locally — so a request crosses at
-/// most one cluster boundary and cannot loop.
-async fn run_to_token_stream(
-    state: Arc<SharedState>,
-    req: GenerateRequest,
-) -> cgn_core::Result<
-    futures::stream::BoxStream<'static, Result<cgn_proto::v1::Token, tonic::Status>>,
-> {
-    let token_ids =
-        routing::prompt::approximate_token_ids(&routing::prompt::join_messages(&req.messages));
-    let mut exclude: Vec<String> = Vec::new();
-
-    for attempt in 1..=MAX_DISPATCH_ATTEMPTS {
-        match dispatch_once(&state, &req, &token_ids, &exclude).await {
-            Ok(stream) => return Ok(Box::pin(stream)),
-            Err((failed_node, e)) => {
-                // Routing found no local candidate: try peer clusters.
-                if failed_node.is_none() && matches!(e, cgn_core::Error::Unavailable(_)) {
-                    let fed = &state.cfg.router.federation;
-                    if fed.enabled && !fed.peers.is_empty() {
-                        match federate(&state, &req).await {
-                            Ok(stream) => return Ok(stream),
-                            Err(fe) => {
-                                warn!(error = ?fe, "federation fallback failed");
-                            }
-                        }
-                    }
-                    return Err(e);
-                }
-                let retryable = matches!(
-                    e,
-                    cgn_core::Error::Unavailable(_) | cgn_core::Error::Internal(_)
-                ) && failed_node.is_some();
-                if !retryable || attempt == MAX_DISPATCH_ATTEMPTS {
-                    return Err(e);
-                }
-                let node = failed_node.expect("checked above");
-                warn!(
-                    %node,
-                    attempt,
-                    error = ?e,
-                    "dispatch failed; retrying on next-best node"
-                );
-                exclude.push(node);
-            }
-        }
-    }
-    unreachable!("loop returns or errors within MAX_DISPATCH_ATTEMPTS");
-}
-
-/// Forward the request to the best federation peer and return its token
-/// stream. See [`crate::federation`].
-async fn federate(
-    state: &Arc<SharedState>,
-    req: &GenerateRequest,
-) -> cgn_core::Result<
-    futures::stream::BoxStream<'static, Result<cgn_proto::v1::Token, tonic::Status>>,
-> {
-    let fed = &state.cfg.router.federation;
-    let (peer, mut client) = crate::federation::pick_peer(&fed.peers, &req.model).await?;
-    let stream = crate::federation::forward(&mut client, req.clone()).await?;
-    info!(%peer, model = %req.model, "no local node; request federated to peer cluster");
-    super::metrics::FEDERATION_FORWARDS
-        .with_label_values(&[&req.model, &peer])
-        .inc();
-    Ok(Box::pin(stream))
-}
-
-/// One dispatch attempt: plan → pick → (prefill) → decode. On failure
-/// returns the decode node id (when one was chosen) so the caller can
-/// exclude it and retry.
-async fn dispatch_once(
-    state: &Arc<SharedState>,
-    req: &GenerateRequest,
-    token_ids: &[u32],
-    exclude: &[String],
-) -> Result<
-    impl futures::Stream<Item = Result<cgn_proto::v1::Token, tonic::Status>> + Unpin,
-    (Option<String>, cgn_core::Error),
-> {
-    use crate::disagg::{self, Plan};
-    use cgn_proto::v1::AgentGenerateRequest;
-
-    let prompt_tokens = token_ids.len() as u32;
-
-    // Disagg plan: maybe split into (prefill, decode) or stay colocate.
-    let cfg_disagg = &state.cfg.router.disagg;
-    let plan = disagg::plan(
-        cfg_disagg.enabled,
-        cfg_disagg.colocate_below_tokens,
-        prompt_tokens,
-    );
-
-    let (prefill_decision, decode_decision) = match plan {
-        Plan::Colocate => {
-            let d = routing::pick_excluding(state, &req.model, NodeRole::Both, token_ids, exclude)
-                .await
-                .map_err(|e| (None, e))?;
-            (d.clone(), d)
-        }
-        Plan::Split {
-            prefill_role,
-            decode_role,
-        } => {
-            let (p, d) = routing::pick_pair(
-                state,
-                &req.model,
-                prefill_role,
-                decode_role,
-                token_ids,
-                exclude,
-            )
-            .await
-            .map_err(|e| (None, e))?;
-            info!(
-                prefill = %p.node.node_id,
-                decode  = %d.node.node_id,
-                "disagg pair selected"
-            );
-            (p, d)
-        }
-    };
-
-    info!(
-        node = %decode_decision.node.node_id,
-        score = decode_decision.score.total,
-        overlap = decode_decision.overlap,
-        "openai → routing decision"
-    );
-
-    match crate::deadline::check(state, req, &decode_decision.node) {
-        crate::deadline::AdmissionOutcome::Admit => {}
-        crate::deadline::AdmissionOutcome::DeadlineExceeded { .. } => {
-            crate::admission::record_rejection(&req.model, "ttft_violation");
-            return Err((
-                Some(decode_decision.node.node_id.clone()),
-                cgn_core::Error::Unavailable(
-                    "deadline exceeded given current queue depth".into(),
-                ),
-            ));
-        }
-        crate::deadline::AdmissionOutcome::QueueFull => {
-            crate::admission::record_rejection(&req.model, "queue_full");
-            return Err((
-                Some(decode_decision.node.node_id.clone()),
-                cgn_core::Error::Unavailable("admission queue full".into()),
-            ));
-        }
-    }
-
-    let decode_node_id = decode_decision.node.node_id.clone();
-
-    // Phase 1: prefill (only when split *and* prefill node ≠ decode node).
-    let prefill_blocks: Vec<Vec<u8>> =
-        if prefill_decision.node.node_id != decode_decision.node.node_id {
-            run_prefill(state.clone(), &prefill_decision.node.address, req)
-                .await
-                .unwrap_or_default()
-        } else {
-            vec![]
-        };
-
-    // Phase 2: decode. Pass the prefill block list so the engine can
-    // skip the first forward pass.
-    let mut client = state
-        .connect_agent(&decode_decision.node.address)
-        .await
-        .map_err(|e| (Some(decode_node_id.clone()), e))?;
-
-    let agent_req = AgentGenerateRequest {
-        id: uuid::Uuid::new_v4().to_string(),
-        model: req.model.clone(),
-        messages: req.messages.clone(),
-        params: req.params.clone(),
-        prefill_only: false,
-        decode_only: !prefill_blocks.is_empty(),
-        blocks: prefill_blocks,
-        traceparent: req.traceparent.clone(),
-        tracestate: req.tracestate.clone(),
-        extensions_json: req.extensions_json.clone(),
-        // The agent publishes these as *confirmed* KV claims to etcd
-        // after the generation completes successfully.
-        digests: decode_decision.digests.iter().map(|d| d.to_vec()).collect(),
-    };
-    let req_stream = futures::stream::iter(vec![agent_req]);
-    let response = client
-        .generate(tonic::Request::new(req_stream))
-        .await
-        .map_err(|s| {
-            (
-                Some(decode_node_id.clone()),
-                cgn_core::Error::Internal(format!("agent generate: {s}")),
-            )
-        })?
-        .into_inner();
-
-    // Optimistic prefix announcement: both the prefill and decode nodes
-    // end up holding this prompt's prefix KV, so record them (TTL-bounded)
-    // for KV-aware routing of follow-up turns. Only after a successful
-    // dispatch — failed nodes must not accrue prefix claims.
-    state
-        .prefix
-        .insert_many(&decode_decision.digests, &decode_decision.node.node_id);
-    if prefill_decision.node.node_id != decode_decision.node.node_id {
-        state
-            .prefix
-            .insert_many(&prefill_decision.digests, &prefill_decision.node.node_id);
-    }
-
-    Ok(response)
-}
-
-/// Issue a prefill-only request to the prefill agent and collect the
-/// returned block list. On any error returns an empty vec and the
-/// caller falls back to colocate execution.
-async fn run_prefill(
-    state: Arc<SharedState>,
-    address: &str,
-    req: &cgn_proto::v1::GenerateRequest,
-) -> Option<Vec<Vec<u8>>> {
-    use cgn_proto::v1::AgentGenerateRequest;
-
-    let mut client = state.connect_agent(address).await.ok()?;
-    let prefill_req = AgentGenerateRequest {
-        id: uuid::Uuid::new_v4().to_string(),
-        model: req.model.clone(),
-        messages: req.messages.clone(),
-        params: req.params.clone(),
-        prefill_only: true,
-        decode_only: false,
-        blocks: vec![],
-        traceparent: req.traceparent.clone(),
-        tracestate: req.tracestate.clone(),
-        extensions_json: req.extensions_json.clone(),
-        digests: vec![],
-    };
-    let req_stream = futures::stream::iter(vec![prefill_req]);
-    let mut stream = client
-        .generate(tonic::Request::new(req_stream))
-        .await
-        .ok()?
-        .into_inner();
-    // The prefill agent terminates the stream after publishing the KV
-    // handoff metadata. We don't currently surface that metadata back —
-    // a future revision will lift the handoff message into a
-    // side-channel so the router can drive the QUIC push between agents.
-    let _ = stream.next().await;
-    Some(vec![])
 }
 
 fn carbon_reject_response(intensity: f64, threshold: f64) -> Response {
@@ -932,27 +374,103 @@ fn carbon_reject_response(intensity: f64, threshold: f64) -> Response {
         .into_response()
 }
 
-fn error_json(e: &cgn_core::Error) -> Response {
-    let (status, code) = match e {
-        cgn_core::Error::InvalidArgument(_) => (StatusCode::BAD_REQUEST, "invalid_request_error"),
-        cgn_core::Error::NotFound(_) => (StatusCode::NOT_FOUND, "not_found_error"),
-        cgn_core::Error::Unavailable(msg)
-            if msg.contains("admission queue full") || msg.contains("deadline exceeded") =>
-        {
-            (StatusCode::TOO_MANY_REQUESTS, "server_error")
-        }
-        cgn_core::Error::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, "server_error"),
-        _ => (StatusCode::INTERNAL_SERVER_ERROR, "server_error"),
-    };
-    (
-        status,
-        Json(json!({
-            "error": {
-                "message": e.to_string(),
-                "type": code,
-                "code": null,
-            }
-        })),
-    )
-        .into_response()
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cgn_core::config::Config;
+
+    fn parse(body: serde_json::Value) -> ChatRequest {
+        serde_json::from_value(body).unwrap()
+    }
+
+    fn proto(body: serde_json::Value) -> GenerateRequest {
+        let s = SharedState::build(Config::default());
+        build_proto_request(&s, &parse(body), &Caller::default())
+    }
+
+    #[test]
+    fn max_completion_tokens_wins_over_max_tokens() {
+        let p =
+            proto(json!({"model":"m","messages":[],"max_tokens":5,"max_completion_tokens":900}));
+        assert_eq!(p.params.unwrap().max_tokens, 900);
+        let p = proto(json!({"model":"m","messages":[],"max_tokens":5}));
+        assert_eq!(p.params.unwrap().max_tokens, 5);
+    }
+
+    #[test]
+    fn unset_max_tokens_stays_unset() {
+        let p = proto(json!({"model":"m","messages":[]}));
+        assert_eq!(p.params.unwrap().max_tokens, 0);
+    }
+
+    #[test]
+    fn sampling_fields_are_carried() {
+        let p = proto(json!({
+            "model":"m","messages":[],"seed":0,"frequency_penalty":0.5,
+            "presence_penalty":-0.5,"logprobs":true,"top_k":40
+        }));
+        let s = p.params.unwrap();
+        assert_eq!(s.seed, Some(0));
+        assert_eq!((s.frequency_penalty, s.presence_penalty), (0.5, -0.5));
+        assert!(s.logprobs);
+        assert_eq!(s.top_k, 40);
+    }
+
+    #[test]
+    fn extensions_carry_fields_without_a_proto_slot() {
+        let p = proto(json!({
+            "model":"m","messages":[],"logit_bias":{"1":2},
+            "parallel_tool_calls":false,"top_logprobs":3,"min_p":0.1
+        }));
+        let e: serde_json::Value = serde_json::from_str(&p.extensions_json).unwrap();
+        assert_eq!(e["logit_bias"]["1"], 2);
+        assert_eq!(e["parallel_tool_calls"], false);
+        assert_eq!(e["top_logprobs"], 3);
+    }
+
+    #[test]
+    fn client_user_field_is_a_session_not_a_tenant() {
+        let p = proto(json!({"model":"m","messages":[],"user":"victim-tenant"}));
+        assert_eq!(p.tenant, "");
+        assert_eq!(p.session, "victim-tenant");
+    }
+
+    #[test]
+    fn tenants_get_an_engine_cache_salt() {
+        let s = SharedState::build(Config::default());
+        let caller = Caller {
+            subject: "k".into(),
+            tenant: "acme".into(),
+        };
+        let r = parse(json!({"model":"m","messages":[]}));
+        let p = build_proto_request(&s, &r, &caller);
+        assert_eq!(p.tenant, "acme");
+        assert!(p.extensions_json.contains("cache_salt"));
+        assert!(
+            !p.extensions_json.contains("acme"),
+            "salt must not leak the tenant"
+        );
+    }
+
+    #[test]
+    fn cache_salt_alone_does_not_bypass_the_cascade() {
+        let r = parse(json!({"model":"m","messages":[]}));
+        assert!(!pins_model(&r));
+        let tools = parse(json!({"model":"m","messages":[],"tools":[]}));
+        assert!(pins_model(&tools));
+    }
+
+    #[test]
+    fn legacy_prompt_parses_as_a_string_or_one_item_array() {
+        let r: CompletionRequest =
+            serde_json::from_value(json!({"model":"m","prompt":"hi"})).unwrap();
+        assert!(matches!(r.prompt, PromptSpec::One(_)));
+        let r: CompletionRequest =
+            serde_json::from_value(json!({"model":"m","prompt":["hi"]})).unwrap();
+        assert!(matches!(r.prompt, PromptSpec::Many(_)));
+        assert!(
+            serde_json::from_value::<CompletionRequest>(json!({"model":"m","prompt":[1,2]}))
+                .is_err()
+        );
+    }
 }

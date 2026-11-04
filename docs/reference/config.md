@@ -322,11 +322,37 @@ COGNITORA__AUTH__ENABLED=false
 CLI flags take precedence over the env, which takes precedence over the
 TOML file, which takes precedence over compiled defaults.
 
+## Request path
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `[router].drain_timeout` | `30s` | In-flight time allowed after SIGTERM |
+| `[agent].drain_timeout` | `30s` | Same, for generations on an agent |
+| `[router].first_token_timeout` | `300s` | Retry elsewhere after this long without a token |
+| `[router].max_body_mb` | `32` | HTTP body limit; base64 images count against it |
+| `[router].kv_tenant_isolation` | `true` | Salt prefix digests per tenant |
+| `[router.score_weights].session` | `0.25` | Bonus for a session's preferred node |
+| `[router.admission].wait_queue_per_tenant` | `64` | Requests parked per tenant at `max_queue`; 0 rejects at once |
+| `[router.admission].wait_timeout` | `10s` | Longest a parked request waits |
+| `[router.rate_limit].trusted_proxies` | `[]` | IPs or CIDRs allowed to set `X-Forwarded-For` |
+| `[auth].enforce_scopes` | `true` | Require `chat` / `embed` scopes |
+| `[auth].oidc_groups_claim` | `groups` | JWT claim holding group names |
+| `[auth].oidc_group_scopes` | empty | Group name to scopes granted |
+| `[auth].usage_file` | none | Persists key totals; without it budgets reset on restart |
+| `[kv].allow_insecure_quic` | `false` | Allow plain QUIC on a non-loopback listener |
+| `[kv].quic_server_name` | `cognitora` | SAN every peer certificate must carry under mTLS |
+| `[models.*].tokenizer` | none | Path to `tokenizer.json` |
+| `[models.*].tokenizer_repo` | none | Hugging Face repo to fetch it from at startup |
+| `[models.*.lora]` | empty | Adapter name to path (vLLM, SGLang) |
+
+`[router.rate_limit].redis_url` is parsed but not implemented: limits are
+per-router. The router logs a warning if it is set.
+
 ## Hot reload
 
 The following keys reload *without* restart:
 
-* `[auth].api_keys_file` (sha256 keys file is watched and re-read)
+* `[auth].api_keys_file` (re-read every 15 s)
 * `[router.score_weights]` (router subscribes to etcd
   `/cognitora/routing/policy`)
 * `[router.cascade]` and `[router.disagg]` (same etcd key)

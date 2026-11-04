@@ -9,16 +9,19 @@ non-goals, and an index into the rest of the docs.
 
 ## Pillars (no compromises)
 
-1. **One language, one binary per concern.** All Rust. Six binaries.
-   No Python, no Go, no JVM in any production container.
-2. **mTLS everywhere by default.** External CA or `cgn-ctl pki
-   bootstrap` for dev.
-3. **etcd is the only coordination service.** Everything else is RAM
-   or local disk.
+1. **One language, one binary per concern.** The control plane is all
+   Rust, in seven binaries. Python appears only where an engine needs it:
+   the optional `python/cgn-kv-connector` package runs inside vLLM.
+2. **Authenticated by configuration, not by luck.** mTLS covers gRPC and
+   QUIC when `[security].require_mtls = true`. It is off by default for
+   local use, so anything that would expose data without it, like a public
+   QUIC listener, refuses to start unless explicitly allowed.
+3. **Minimal coordination.** etcd or gossip for discovery, and no other
+   required service. Everything else is RAM or local disk.
 4. **vLLM is just one engine.** The agent ships a stable `Engine`
    trait; SGLang / TRT-LLM / llama.cpp are tracked from day one.
-5. **Performance gated in CI.** Each PR runs the perf harness against
-   the targets in the README.
+5. **Performance tracked in CI.** Each PR reports criterion benches; the
+   gate is soft until shared-runner noise is solved.
 6. **Operator is optional.** Bare-metal first; K8s is just one
    deployment target via the Helm chart and operator.
 
@@ -26,15 +29,20 @@ non-goals, and an index into the rest of the docs.
 
 | Area                    | What ships                                                          |
 |-------------------------|---------------------------------------------------------------------|
-| OpenAI HTTP surface     | `cgn-router` exposes `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/models`, SSE streaming |
-| KV-aware routing        | `cgn-router::routing::score` with local prefix-overlap from agent heartbeats; policy hot-reload from etcd via `arc_swap` |
+| OpenAI HTTP surface     | `cgn-router` exposes `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/models`, `/v1/usage`, SSE streaming, engine-reported usage |
+| Virtual keys            | `model:`, `tenant:`, `tpm:` and `budget:` scopes on API keys; per-router enforcement |
+| Fair queuing            | Per-tenant wait queues at `max_queue`; freed slots rotate across tenants |
+| Session affinity        | `x-session-id` or `user` picks a rendezvous-hashed node, as a score bonus |
+| LoRA                    | `[models.*.lora]` adapters on vLLM and SGLang, routed by name |
+| Reliability             | Retry until the first token, drain on SIGTERM, real `/readyz` |
+| KV-aware routing        | `cgn-router::routing::score` with prefix overlap over real tokenizer ids, live in-flight counts, per-tenant salting; policy hot-reload from etcd via `arc_swap` |
 | Multi-node clustering   | etcd-backed `NodeRegistry` with lease-based liveness in `cgn-agent::health` |
 | KV tiering              | RAM tier in `cgn-kv::RamTier`; SSD tier in `cgn-kv::SsdTier` (file-per-block, atomic rename); RocksDB index |
-| Cross-node KV transport | QUIC `Frame` codec in `cgn-kvcached::transport`; RDMA behind `--features rdma` |
+| Cross-node KV transport | QUIC `Frame` codec in `cgn-kvcached::transport`, mTLS against the cluster CA; RDMA is a stub |
 | Prefill/decode disagg   | `routing::pick_pair` + `gateway::chat::run_prefill` two-stage path |
-| Cascade                 | `cascade::Cascade::run` orchestrates SLM → Mid → LLM with logprob gating |
-| Multi-tenant rate limit | `cgn-ratelimit` ships an in-process governor and a `redis-backend` feature (atomic Lua token bucket) |
-| OIDC SSO                | `cgn-auth::oidc` with group-claim → tenant-scope mapping            |
+| Cascade                 | SLM → Mid → LLM gated on engine logprobs, with a length heuristic for engines that report none |
+| Multi-tenant rate limit | `cgn-ratelimit` in-process governor keyed on the principal; the Redis backend exists but isn't wired into the router |
+| OIDC SSO                | `cgn-auth::oidc` with group-claim → scope mapping                   |
 | Operator                | `cgn-operator` reconciles `InferenceCluster`, `ModelPool`, `RoutingPolicy` via server-side apply |
 | Federation              | `cgn-router::federation` proxies OpenAI requests to peer routers     |
 | Energy-aware autoscaler | `cgn-router::autoscaler` writes drain hints to etcd; operator scales replicas |
@@ -96,148 +104,70 @@ The following are explicit non-goals for the 0.x line. They are not
 
 ## Roadmap
 
-Snapshot view of what we plan to ship next, grouped by milestone.
-Items move out of "next" only when they're tracked by an issue and a
-PR is in flight. The detailed deltas vs NVIDIA Dynamo live in
-[`docs/architecture/vs-dynamo.md`](docs/architecture/vs-dynamo.md);
-the engine-side KV strategy lives in
-[`docs/architecture/kv-strategy.md`](docs/architecture/kv-strategy.md).
-
-### 0.3 — close the credibility gaps · shipped in 0.3.0
-
-Targeted at making every `plan.md` capability claim runnable end to
-end on bare metal. Five of seven items landed in 0.3.0; the remaining
-two carry forward into the 0.3.x patch window below.
-
-* ✓ **`cgn-ctl` is a real client, not a logger.** Shipped in 0.2.1.
-  `cluster nodes / cordon / uncordon / drain` and `model load / unload
-  / ls` read and write the same etcd key prefixes the router watches.
-* ✓ **First-class `/v1/embeddings`.** `Agent.Embed` is on the proto,
-  implemented in `cgn-agent` against the engine's `/v1/embeddings`,
-  and the router's gateway forwards over gRPC mTLS instead of
-  synthesising vectors.
-* ✓ **Real `cgn-metrics` federation scraper.** `[metrics].scrape_targets`
-  is honoured; the union is exposed under `/federate` with a
-  `cgn_target` label injected on every line.
-* ✓ **Single-node installer renderer.** `cgn-ctl install --target
-  single-node` writes `cognitora.toml` and `compose.yaml` into
-  `--out-dir` (defaulting to `./cognitora-single-node`). With
-  `--apply` it also runs `docker compose up -d`; without, it stays a
-  pure-text dry run for review. Engine, image tag, tensor parallelism,
-  and HF repo are CLI flags.
-* (carry-forward) **Fleshed-out terraform modules** — see "0.3.x"
-  below.
-* (carry-forward) **Helm chart redesign** — see "0.3.x" below.
-* ✓ **Soft perf gate in CI.** A new `bench` workflow runs
-  `cargo bench -p cgn-perf --bench prefix --bench routing`, uploads
-  the criterion artefacts, and sticks a Markdown table on every PR.
-  It's intentionally non-blocking — the noise floor on shared runners
-  is too high for hard gating; a hard gate against an S3 baseline
-  arrives in 0.4.
-
-### 0.3.x — patch window
-
-Carry-overs from the 0.3 milestone, now scoped as patch-level work
-because they don't change the public OpenAI surface — they just make
-existing claims more honest.
-
-* **Helm chart redesign.** Today
-  `deploy/kubernetes/helm/cognitora/` requires
-  `[security].require_mtls = true` with no PKI bootstrap and has no
-  engine sidecar option, so `helm install` alone won't produce a
-  working stack. Goal: optional engine sidecar (vLLM / SGLang /
-  llama.cpp / openai-compat), `require_mtls = false` default for dev,
-  conditional pki secret mount, and an OCI chart push from the
-  release workflow so
-  `helm install cognitora oci://ghcr.io/antonellof/charts/cognitora`
-  matches the README claim. Until then the working K8s install path
-  is the quickstart manifest at
-  `deploy/kubernetes/quickstart/cognitora-cpu.yaml`.
-* **Fleshed-out terraform modules.** At least one cloud module
-  (`aws` or `hetzner`) drives a runnable end-to-end install; the
-  others import from it. Today every cloud module ships as a
-  near-empty `main.tf`, with a partial-credit GKE quickstart in
-  `deploy/kubernetes/quickstart/`.
-
-### 0.4 — beat Dynamo on the routing path
-
-The `vs-dynamo.md` deltas where we want to lead, not match.
-
-* **WSPT prefill scheduling** in `cgn-router::admission`. The
-  longest-prefix-overlap signal already exists; the queue restructure
-  (Smith's-rule weighted shortest predicted task) is what's missing.
-* **Federated peer-fetch policy.** A new routing knob,
-  `[router.federation].prefer_local_cache_hit_over_remote_lmcache`,
-  bounds egress when peer-fetching from another cluster.
-* **Smarter federation peer scoring.** `federation::pick_peer` admits
-  to "first healthy wins"; replace it with geo / RTT / cache-overlap
-  weighted scoring.
-* **First-class TOML for SGLang HiCache backend.**
-  `[engine.sglang].hicache_storage_backend = "nixl|mooncake|nvme|s3"`
-  instead of `extra_args` overrides.
-* **`kv_offload = "flexkv"`.** Tencent's
-  [FlexKV](https://github.com/taco-project/FlexKV) connector. Same
-  rendering shape as LMCache; we just need a renderer branch and a
-  recipe.
-
-### 0.5 — close Dynamo credibility gaps
-
-Items that would dismiss a side-by-side comparison if left open.
-Detailed rationale in
+Refreshed for the release after 0.9.2. Older milestones are in
+[`CHANGELOG.md`](CHANGELOG.md). Comparisons with other projects live in
 [`docs/architecture/vs-dynamo.md`](docs/architecture/vs-dynamo.md).
 
-* **Live overlap queries to `cgn-kvcached`.** Today the router scores
-  `kv_overlap` from prefix claims in the agent heartbeat only; it does
-  not call `cgn-kvcached` overlap RPCs. Wire the router to the
-  cross-cluster index for cluster-wide prefix visibility.
-* **In-flight request migration.** Pre-token dispatch retry exists;
-  mid-stream token-state replay on worker failure is not shipped.
-* **Multi-node GPU E2E outside default CI.** Nightly or labelled
-  `run-gpu-e2e` runs on real hardware; default PR CI stays CPU-only.
-* **Delete or implement documented stubs.** RDMA transport behind
-  `--features rdma` is a stub; IPMI/DCGM power paths are planned but
-  not wired. Either land them or remove the docs claims.
-* **Prefix index from engine KV events.** Eviction-aware claims work
-  today; a full block-hash event stream from vLLM/SGLang would tighten
-  overlap accuracy.
+### Now: prove it
 
-Shipped since the last competitive review (no longer roadmap items):
+Everything below rests on evidence we don't have yet.
 
-* ✓ **Streaming cascade.** `gateway::chat::stream_run_cascade` gates
-  on incremental logprob during SSE, not just buffered responses.
-* ✓ **Live engine telemetry in heartbeat.** vLLM/SGLang queue depth
-  and KV occupancy scraped in `cgn-agent::telemetry`.
-* ✓ **Closed autoscaler loop.** Router drain hints + operator replica
-  scaling from queue-depth SLOs.
+* **Datacenter GPU benchmark.** Real inference is measured only on an M2 Pro
+  with llama.cpp ([report](reports/benchmark-request-path-metal.md)). Run
+  `scripts/bench/proof/proof.py gpu` on NVIDIA with vLLM to cover the
+  deployment this project targets, including TLS.
+* **J/token.** Not measured anywhere yet. `proof.py` needs root for
+  `powermetrics` on macOS, or NVML on Linux.
+* **LoRA on a real engine.** Covered only by argument and routing tests.
+* **Disaggregation end to end.** The prefill path is not proven on GPUs, and
+  `prefill_only` is not yet honoured by the agent.
+* **Nightly GPU e2e.** `scripts/e2e-gpu.sh` on a schedule, not only by label.
 
-### 0.5+ — research and infra
+### Next: harden
 
-* **Hard perf gate in CI.** Fail PRs whose criterion baseline
-  regresses > N% on key benches; baseline lives in S3 keyed by
-  `main`'s tip.
-* **RDMA verbs path.** Finish the `rdma` feature gate so the
-  cross-host KV transport has a real ibverbs implementation behind
-  it; QUIC stays the default.
-* **GPU-backed nightly e2e.** Run `scripts/e2e-gpu.sh` on a schedule
-  even when no PR is labelled `run-gpu-e2e`.
-* **Helm values schema.** Ship `values.schema.json` so `helm install`
-  rejects bad inputs locally; `helm lint` is the only check today.
+* **gRPC surface parity.** Router gRPC has no API-key auth, rate limits,
+  carbon admission, retry or token accounting, and trusts `tenant` from the
+  caller. Either bring it to parity or document it as internal only.
+* **Shared limits.** Rate limits and token budgets are per-router, so N
+  routers allow N times the limit. Wire the Redis backend, or remove it.
+* **In-flight migration.** Retries stop at the first token. Mid-stream
+  token-state replay is not shipped.
+* **Prefill for images and real KV events.** Prefix digests are computed
+  router-side; engine block-hash events would tighten accuracy.
+* **Test depth.** `cgn-tls` and `cgn-telemetry` have no tests.
+* **Deployment.** Terraform modules are stubs, and Helm has no
+  `values.schema.json`.
+* **Config strictness.** Unknown TOML keys are silently ignored, which hid
+  wrong key names in the chart and example config for several releases.
+
+### Later: widen
+
+* Multi-tenant fairness by tokens, since request-count rotation favours
+  tenants sending long prompts.
+* Predicted-latency scheduling and predictive autoscaling.
+* `/v1/responses`, Anthropic `/v1/messages`, a batch API.
+* Gateway API Inference Extension endpoint picker.
+* Scale-to-zero, and shared router state for active-active HA.
+* Model fallback chains, semantic cache, guardrails.
+* Object-storage KV tier and an RDMA verbs path, or remove the stub.
+
+### Dropped from earlier roadmaps
+
+* **WSPT prefill scheduling, FlexKV, HiCache TOML, federated peer-fetch
+  policy.** Planned for 0.4 and never built. Nothing depends on them; they
+  return only with a workload that needs them.
 
 ### Out of scope (not on any milestone)
 
 * **Multimodal text+image E/P/D.** Track once vLLM and SGLang ship
-  stable disaggregated multimodal hooks. Until then this is a vendor
-  gap, not a roadmap item.
-* **Native G1 GPU pool inside `cgn-kvcached`.** L2 backends
-  (LMCache / KVBM / HiCache) cover every workload we've benchmarked.
-  Only landing a native G1 if a workload genuinely doesn't fit.
+  stable disaggregated multimodal hooks.
+* **Native G1 GPU pool inside `cgn-kvcached`.** L2 backends (LMCache / KVBM /
+  HiCache) cover the need.
 * **Kubernetes-only deployment paths.** Bare metal stays first-class.
 * **Python control plane.** New control-plane logic stays in Rust.
 * **CRD-as-config.** Recipes stay flat TOML, not custom resources.
 
-The non-goals already listed in the [Out of scope](#out-of-scope)
-section above (training, model registry, FIPS, MPS time-slicing) still
-apply.
+The non-goals in [Out of scope](#out-of-scope) above still apply.
 
 ## Where the architecture lives
 

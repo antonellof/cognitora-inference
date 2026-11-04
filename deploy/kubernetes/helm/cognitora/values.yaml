@@ -76,9 +76,11 @@ router:
     ttftSloMs: 800
     queueTimeoutMs: 30000
   rateLimit:
-    enabled: false
     rpsPerSubject: 50
     burst: 100
+    # Ingress/LB addresses allowed to set X-Forwarded-For. Without this,
+    # unauthenticated clients behind one proxy share a single bucket.
+    trustedProxies: []
   cascade:
     enabled: false
     confidenceThreshold: -1.0

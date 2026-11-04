@@ -1011,6 +1011,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "cgn-auth",
  "cgn-core",
  "cgn-telemetry",
  "chrono",

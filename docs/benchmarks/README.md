@@ -4,6 +4,29 @@ Reproducible harnesses for TTFT/throughput and energy efficiency.
 **Publishable numbers require a Linux GPU host** — the scripts below
 validate on Mac/CI without GPUs via fixture data only.
 
+## Request-path proof
+
+`scripts/bench/proof/proof.py` measures router overhead, KV routing gain and
+J/token. Its modes share a client, so results are comparable:
+
+```bash
+# Any machine, stub engines. Proves router cost and routing decisions only.
+python3 scripts/bench/proof/proof.py local --out reports/benchmark-request-path-local.md
+
+# Real inference on an Apple GPU: two llama-server engines on Metal.
+python3 scripts/bench/proof/proof.py metal --gguf model.gguf \
+  --out reports/benchmark-request-path-metal.md
+
+# GPU cluster. Refuses to run without working nvidia-smi.
+python3 scripts/bench/proof/proof.py gpu --label kv_aware \
+  --router http://ROUTER:8080 --engine http://ENGINE:8000 \
+  --metrics http://ROUTER:9091/metrics --model <model> --out kv.md
+# Set [router.score_weights] kv = 0, load = 1, restart, and repeat
+# with --label load_only for the routing comparison.
+```
+
+Local KV figures use a simulated cache and aren't inference results.
+
 ## Local validation (Mac / CI, no GPU)
 
 ```bash

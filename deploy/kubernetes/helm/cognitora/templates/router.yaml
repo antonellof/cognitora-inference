@@ -17,6 +17,8 @@ spec:
         {{- include "cognitora.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: router
     spec:
+      # Longer than [router].drain_timeout, so streams can finish.
+      terminationGracePeriodSeconds: 45
       serviceAccountName: {{ include "cognitora.fullname" . }}
       containers:
         - name: cgn-router

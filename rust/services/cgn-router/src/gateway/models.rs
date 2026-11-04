@@ -7,34 +7,50 @@
 
 use std::sync::Arc;
 
-use axum::{extract::State, response::IntoResponse, Json};
+use axum::{extract::State, response::IntoResponse, Extension, Json};
+use cgn_auth::Principal;
 
 use crate::state::SharedState;
 
 use super::types::{ModelEntry, ModelsResponse};
 
-pub async fn list(State(state): State<Arc<SharedState>>) -> impl IntoResponse {
-    use std::collections::BTreeSet;
+pub async fn list(
+    State(state): State<Arc<SharedState>>,
+    principal: Option<Extension<Principal>>,
+) -> impl IntoResponse {
+    use std::collections::BTreeMap;
 
-    let mut names: BTreeSet<String> = state.cfg.models.keys().cloned().collect();
+    // id -> parent model, for adapters.
+    let mut names: BTreeMap<String, Option<String>> = BTreeMap::new();
+    for (model, mc) in &state.cfg.models {
+        names.entry(model.clone()).or_default();
+        for adapter in mc.lora.keys() {
+            names.insert(adapter.clone(), Some(model.clone()));
+        }
+    }
     // Augment with whatever live agents currently advertise.
     for kv in state
         .nodes
         .nodes_for(cgn_proto::v1::NodeRole::Unspecified, None)
     {
         if let Some(m) = &kv.model {
-            names.insert(m.clone());
+            names.entry(m.clone()).or_default();
+            for adapter in &kv.adapters {
+                names.insert(adapter.clone(), Some(m.clone()));
+            }
         }
     }
 
     let created = state.started.elapsed().as_secs() as i64;
     let data = names
         .into_iter()
-        .map(|id| ModelEntry {
+        .filter(|(id, _)| principal.as_ref().is_none_or(|p| p.allows_model(id)))
+        .map(|(id, parent)| ModelEntry {
             id,
             object: "model",
             created,
             owned_by: "cognitora",
+            parent,
         })
         .collect();
 
@@ -42,4 +58,21 @@ pub async fn list(State(state): State<Arc<SharedState>>) -> impl IntoResponse {
         object: "list",
         data,
     })
+}
+
+/// `GET /v1/usage`: the caller's own token totals and limits.
+pub async fn usage(
+    State(state): State<Arc<SharedState>>,
+    principal: Option<Extension<Principal>>,
+) -> axum::response::Response {
+    match principal {
+        Some(p) => Json(state.usage.report(&p)).into_response(),
+        None => (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "error": { "message": "usage needs auth enabled", "type": "not_found_error" }
+            })),
+        )
+            .into_response(),
+    }
 }

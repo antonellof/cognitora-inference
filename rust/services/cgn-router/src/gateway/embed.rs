@@ -21,8 +21,9 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
+    Extension, Json,
 };
+use cgn_auth::Principal;
 use cgn_proto::v1::{EmbedRequest as PEmbedRequest, NodeRole};
 use serde_json::json;
 use tracing::{info, warn};
@@ -34,8 +35,13 @@ use super::types::{EmbedItem, EmbedRequest, EmbedResponse, Usage};
 
 pub async fn embeddings(
     State(state): State<Arc<SharedState>>,
+    principal: Option<Extension<Principal>>,
     Json(req): Json<EmbedRequest>,
 ) -> Response {
+    let caller = match super::authz::authorize(&state, principal.as_deref(), "embed", &req.model) {
+        Ok(c) => c,
+        Err(resp) => return resp,
+    };
     let inputs = req.input.into_vec();
     if inputs.is_empty() {
         return error_with(
@@ -45,19 +51,32 @@ pub async fn embeddings(
         );
     }
 
-    let token_ids = routing::prompt::approximate_token_ids(&inputs.join(" "));
+    let token_ids = state
+        .tokenizers
+        .token_ids(&req.model, &inputs.join(" "))
+        .await;
     let prompt_tokens = token_ids.len() as u32;
-    let _permit = match crate::admission::try_admit_request(&state, &req.model, prompt_tokens) {
-        Ok(p) => p,
-        Err(e) => {
-            return error_with(
-                StatusCode::TOO_MANY_REQUESTS,
-                "server_error",
-                &e.to_string(),
-            );
-        }
+    let _permit =
+        match crate::admission::admit_request(&state, &req.model, prompt_tokens, &caller.tenant)
+            .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                return error_with(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "server_error",
+                    &e.to_string(),
+                );
+            }
+        };
+    let salt = routing::prefix_salt(&state, &req.model, &caller.tenant);
+    let key = routing::RouteKey {
+        model: &req.model,
+        salt: &salt,
+        session: None,
+        token_ids: &token_ids,
     };
-    let decision = match routing::pick(&state, &req.model, NodeRole::Both, &token_ids).await {
+    let decision = match routing::pick(&state, &key, NodeRole::Both).await {
         Ok(d) => d,
         Err(e) => {
             return error_with(
@@ -67,6 +86,7 @@ pub async fn embeddings(
             );
         }
     };
+    let _node = state.track_node(&decision.node.node_id);
     info!(
         node = %decision.node.node_id,
         score = decision.score.total,
@@ -89,7 +109,7 @@ pub async fn embeddings(
     let proto = PEmbedRequest {
         model: req.model.clone(),
         inputs: inputs.clone(),
-        tenant: req.user.unwrap_or_default(),
+        tenant: caller.tenant.clone(),
     };
 
     let resp = match client.embed(proto).await {
@@ -136,14 +156,21 @@ pub async fn embeddings(
         resp.model
     };
 
+    let tokens = if resp.tokens > 0 {
+        resp.tokens
+    } else {
+        prompt_tokens
+    };
+    caller.charge(&state, tokens, 0);
+
     Json(EmbedResponse {
         object: "list",
         data,
         model: model_name,
         usage: Usage {
-            prompt_tokens: resp.tokens,
+            prompt_tokens: tokens,
             completion_tokens: 0,
-            total_tokens: resp.tokens,
+            total_tokens: tokens,
         },
     })
     .into_response()

@@ -14,5 +14,6 @@ pub mod grpc;
 pub mod prompt;
 pub mod score;
 pub mod selector;
+pub mod tokenize;
 
-pub use selector::{pick, pick_excluding, pick_pair};
+pub use selector::{pick, pick_excluding, pick_pair, prefix_salt, RouteKey};

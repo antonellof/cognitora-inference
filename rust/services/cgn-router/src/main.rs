@@ -22,6 +22,7 @@ mod federation;
 mod gateway;
 mod routing;
 mod state;
+mod usage;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -30,7 +31,7 @@ use std::sync::Arc;
 use cgn_core::{config::Config, Error, Result};
 use clap::Parser;
 use tokio::signal;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::state::SharedState;
 
@@ -72,23 +73,55 @@ async fn main() -> Result<()> {
         .parse()
         .map_err(|e| Error::Config(format!("router.listen_admin: {e}")))?;
 
-    let http = tokio::spawn(gateway::serve(state.clone(), listen_http));
-    let admin = tokio::spawn(serve_admin(listen_admin));
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let listener = gateway::bind(listen_http).await?;
+    let mut http = tokio::spawn(gateway::serve(state.clone(), listener, shutdown_rx));
+    let admin = tokio::spawn(serve_admin(state.clone(), listen_admin));
     let grpc = tokio::spawn(serve_grpc(state.clone()));
+    spawn_usage_persist(state.clone());
 
     tokio::select! {
-        r = http  => log_exit("http",  r),
+        r = &mut http => log_exit("http",  r),
         r = admin => log_exit("admin", r),
         r = grpc  => log_exit("grpc",  r),
-        _ = shutdown_signal() => info!("shutdown signal"),
+        _ = shutdown_signal() => {
+            // Fail readiness first so load balancers stop sending traffic,
+            // then let in-flight streams finish within the budget.
+            info!("shutdown signal; draining");
+            state.draining.store(true, std::sync::atomic::Ordering::Release);
+            let _ = shutdown_tx.send(true);
+            let budget = state.cfg.router.drain_timeout;
+            match tokio::time::timeout(budget, &mut http).await {
+                Ok(r) => log_exit("http", r),
+                Err(_) => warn!(?budget, "drain timed out; dropping remaining streams"),
+            }
+        }
     }
 
-    state.drain().await;
+    if let Err(e) = state.usage.persist() {
+        error!(error = ?e, "usage persist failed");
+    }
     Ok(())
 }
 
-async fn serve_admin(addr: SocketAddr) -> Result<()> {
-    let app = cgn_telemetry::admin_router();
+/// Save token totals periodically, so a crash loses little budget state.
+fn spawn_usage_persist(state: Arc<SharedState>) {
+    if state.cfg.auth.usage_file.is_none() {
+        return;
+    }
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(30));
+        loop {
+            tick.tick().await;
+            if let Err(e) = state.usage.persist() {
+                warn!(error = ?e, "usage persist failed");
+            }
+        }
+    });
+}
+
+async fn serve_admin(state: Arc<SharedState>, addr: SocketAddr) -> Result<()> {
+    let app = cgn_telemetry::admin_router_with_ready(move || state.readiness());
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .map_err(Error::Io)?;

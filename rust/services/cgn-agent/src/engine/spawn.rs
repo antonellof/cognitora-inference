@@ -123,6 +123,11 @@ fn render_tensorrt_llm(cfg: &EngineConfig, spec: &ModelSpec) -> Vec<String> {
     argv
 }
 
+/// `name=path` arguments, the form both vLLM and SGLang accept.
+fn lora_pairs(spec: &ModelSpec) -> Vec<String> {
+    spec.lora.iter().map(|(n, p)| format!("{n}={p}")).collect()
+}
+
 fn render_vllm(cfg: &EngineConfig, spec: &ModelSpec, role: NodeRoleCfg) -> Result<Vec<String>> {
     let mut argv: Vec<String> = vec![
         cfg.vllm.binary.clone(),
@@ -146,6 +151,11 @@ fn render_vllm(cfg: &EngineConfig, spec: &ModelSpec, role: NodeRoleCfg) -> Resul
         if cfg.lmcache.disable_hybrid_kv_cache_manager {
             argv.push("--disable-hybrid-kv-cache-manager".into());
         }
+    }
+    if !spec.lora.is_empty() {
+        argv.push("--enable-lora".into());
+        argv.push("--lora-modules".into());
+        argv.extend(lora_pairs(spec));
     }
     argv.extend(cfg.vllm.extra_args.clone());
     argv.extend(spec.extra_args.clone());
@@ -181,6 +191,10 @@ fn render_sglang(cfg: &EngineConfig, spec: &ModelSpec) -> Vec<String> {
     ];
     argv.extend(sglang_hicache_args(cfg.kv_offload));
     argv.extend(sglang_lmcache_args(cfg.kv_offload));
+    if !spec.lora.is_empty() {
+        argv.push("--lora-paths".into());
+        argv.extend(lora_pairs(spec));
+    }
     argv.extend(cfg.sglang.extra_args.clone());
     argv.extend(spec.extra_args.clone());
     argv
@@ -780,6 +794,7 @@ mod tests {
     fn spec(name: &str, path: Option<&str>) -> ModelSpec {
         ModelSpec {
             name: name.into(),
+            lora: Default::default(),
             tp: 1,
             max_model_len: Some(2048),
             extra_args: vec![],
@@ -810,6 +825,19 @@ mod tests {
             activation_encoding: "f16".into(),
         });
         s
+    }
+
+    #[test]
+    fn lora_adapters_render_for_vllm_and_sglang() {
+        let mut spec = spec("m", None);
+        spec.lora.insert("sql".into(), "/lora/sql".into());
+        let v = render_argv(&vllm_cfg(), &spec, NodeRoleCfg::Both, None).unwrap();
+        let at = v.iter().position(|a| a == "--lora-modules").unwrap();
+        assert!(v.contains(&"--enable-lora".to_string()));
+        assert_eq!(v[at + 1], "sql=/lora/sql");
+        let s = render_argv(&sglang_cfg(), &spec, NodeRoleCfg::Both, None).unwrap();
+        let at = s.iter().position(|a| a == "--lora-paths").unwrap();
+        assert_eq!(s[at + 1], "sql=/lora/sql");
     }
 
     #[test]
@@ -999,11 +1027,13 @@ mod tests {
 
     #[test]
     fn lmcache_server_argv_matches_mp_quickstart() {
-        let mut cfg = LmcacheEngineConfig::default();
-        cfg.mode = LmcacheMode::Mp;
-        cfg.host = "tcp://localhost".into();
-        cfg.isolated_ipc = true;
-        cfg.server_extra_args = vec!["--transport".into(), "grpc".into()];
+        let cfg = LmcacheEngineConfig {
+            mode: LmcacheMode::Mp,
+            host: "tcp://localhost".into(),
+            isolated_ipc: true,
+            server_extra_args: vec!["--transport".into(), "grpc".into()],
+            ..LmcacheEngineConfig::default()
+        };
         let argv = lmcache_server_argv(&cfg);
         assert_eq!(argv[0], "lmcache");
         assert_eq!(argv[1], "server");

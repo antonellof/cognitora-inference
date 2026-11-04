@@ -283,6 +283,9 @@ mod tests {
             vram_total_mb: 0,
             cordoned,
             kv_epoch: 0,
+            ready: true,
+            draining: false,
+            adapters: vec![],
             last_heartbeat: std::time::Instant::now(),
         }
     }
@@ -292,24 +295,8 @@ mod tests {
         let registry = NodeRegistry::new();
         registry.upsert(entry("n1", 3, 250.0, false));
         registry.upsert(entry("n2", 0, 90.5, true));
-        let state = SharedState {
-            cfg: Default::default(),
-            nodes: Arc::new(registry),
-            prefix: Arc::new(cgn_core::prefix::PrefixIndex::new(
-                std::time::Duration::from_secs(60),
-            )),
-            started: std::time::Instant::now(),
-            policy: Arc::new(arc_swap::ArcSwap::from_pointee(
-                crate::state::RoutingPolicy {
-                    kv: 0.55,
-                    load: 0.25,
-                    power: 0.10,
-                    capacity: 0.10,
-                },
-            )),
-            carbon: Arc::new(crate::carbon::CarbonTracker::new()),
-            admission: Arc::new(crate::admission::Admission::new()),
-        };
+        let mut state = SharedState::build(Default::default());
+        state.nodes = Arc::new(registry);
 
         refresh(&state);
         assert_eq!(NODES_TOTAL.get(), 2);

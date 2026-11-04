@@ -68,13 +68,37 @@ pub fn init(service: &'static str) {
 /// GET text with no credentials, so the permissive origin is safe; keep
 /// the admin listener on an internal interface as usual.
 pub fn admin_router() -> Router {
+    base_admin_router().route("/readyz", get(|| async { "ok" }))
+}
+
+/// [`admin_router`] with a real readiness check. `ready` returns `Err` with
+/// the reason when the process should not receive traffic (HTTP 503).
+pub fn admin_router_with_ready<F>(ready: F) -> Router
+where
+    F: Fn() -> Result<(), String> + Clone + Send + Sync + 'static,
+{
+    base_admin_router().route(
+        "/readyz",
+        get(move || {
+            let ready = ready.clone();
+            async move {
+                use axum::http::StatusCode;
+                match ready() {
+                    Ok(()) => (StatusCode::OK, "ok".to_string()),
+                    Err(why) => (StatusCode::SERVICE_UNAVAILABLE, why),
+                }
+            }
+        }),
+    )
+}
+
+fn base_admin_router() -> Router {
     Router::new()
         .route(
             "/metrics",
             get(metrics_handler).options(|| async { cors_preflight() }),
         )
         .route("/healthz", get(|| async { "ok" }))
-        .route("/readyz", get(|| async { "ok" }))
 }
 
 fn cors_preflight() -> axum::response::Response {

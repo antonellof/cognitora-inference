@@ -24,8 +24,7 @@ pub async fn serve(supervisor: Arc<Supervisor>, addr: SocketAddr) -> Result<()> 
     info!(%addr, "agent grpc listening");
 
     // Long-running `Generate` streams (MLX first download/compile, huge
-    // prompts) can exceed a short tonic server timeout; 2h matches the
-    // reqwest engine client budget in `openai_http`.
+    // prompts) can exceed a short tonic server timeout.
     let mut builder = Server::builder().timeout(std::time::Duration::from_secs(7200));
 
     if supervisor.cfg.security.require_mtls {
@@ -48,7 +47,11 @@ pub async fn serve(supervisor: Arc<Supervisor>, addr: SocketAddr) -> Result<()> 
         supervisor: supervisor.clone(),
     };
     builder
-        .add_service(AgentServer::new(svc))
+        .add_service(
+            AgentServer::new(svc)
+                .max_decoding_message_size(cgn_core::MAX_GRPC_MESSAGE_BYTES)
+                .max_encoding_message_size(cgn_core::MAX_GRPC_MESSAGE_BYTES),
+        )
         .serve(addr)
         .await
         .map_err(|e| Error::Internal(format!("agent grpc serve: {e}")))
@@ -77,7 +80,9 @@ impl Agent for AgentSvc {
         let (tx, rx) = mpsc::channel::<Result<Token, Status>>(64);
         let engine = self.supervisor.engine.clone();
         let supervisor = self.supervisor.clone();
+        let inflight = crate::supervisor::InflightGuard::new(&supervisor);
         tokio::spawn(async move {
+            let _inflight = inflight;
             let messages: Vec<crate::engine::ChatMessage> = first
                 .messages
                 .iter()
@@ -89,18 +94,6 @@ impl Agent for AgentSvc {
                     tool_call_id: m.tool_call_id.clone(),
                 })
                 .collect();
-            // Legacy plain-prompt fallback used only if the caller
-            // somehow gave us no messages (e.g. raw `/v1/completions`).
-            let prompt = if messages.is_empty() {
-                first
-                    .messages
-                    .iter()
-                    .map(|m| m.content.clone())
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            } else {
-                String::new()
-            };
             let p = first.params.unwrap_or_default();
             let confirmed_digests = first.digests.clone();
             let resident_digests =
@@ -113,21 +106,30 @@ impl Agent for AgentSvc {
                 id: first.id,
                 model: first.model,
                 messages,
-                prompt,
-                max_tokens: if p.max_tokens == 0 { 256 } else { p.max_tokens },
+                prompt: first.prompt,
+                max_tokens: p.max_tokens,
                 temperature: p.temperature,
                 top_p: p.top_p,
                 stop: p.stop,
                 stream: true,
+                seed: p.seed,
+                frequency_penalty: p.frequency_penalty,
+                presence_penalty: p.presence_penalty,
+                repetition_penalty: p.repetition_penalty,
+                top_k: p.top_k,
+                logprobs: p.logprobs,
                 extensions_json: first.extensions_json,
                 prefix_digests: first.digests,
                 resident_digests,
             };
             let (e_tx, mut e_rx) = mpsc::channel::<Token>(64);
             let gen = engine.generate(req, e_tx);
-            let pump = async {
+            // `move`: e_rx must drop as soon as the client disconnects, or
+            // the engine call stays blocked on a full channel forever.
+            let pump_tx = tx.clone();
+            let pump = async move {
                 while let Some(t) = e_rx.recv().await {
-                    if tx.send(Ok(t)).await.is_err() {
+                    if pump_tx.send(Ok(t)).await.is_err() {
                         break;
                     }
                 }

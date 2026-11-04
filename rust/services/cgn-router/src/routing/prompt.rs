@@ -12,10 +12,9 @@ use cgn_proto::v1::Message as PMessage;
 /// Join chat-style messages into one stable string for prefix-hashing
 /// purposes. Stable across versions; not the model's chat template.
 ///
-/// Multimodal content (`content_json` set) contributes only its textual
-/// parts: image bytes don't affect prompt-prefix KV reuse in the engines
-/// we route to, and hashing megabyte-scale data URLs would be pure
-/// overhead.
+/// Multimodal content (`content_json` set) contributes its text plus a
+/// digest of each image reference: engines embed images in the prefix, so
+/// two prompts differing only in the image must not look like a KV hit.
 pub fn join_messages(msgs: &[PMessage]) -> String {
     let mut out = String::with_capacity(msgs.iter().map(|m| m.content.len() + 16).sum());
     for m in msgs {
@@ -29,6 +28,11 @@ pub fn join_messages(msgs: &[PMessage]) -> String {
                         if let Some(t) = p.get("text").and_then(|t| t.as_str()) {
                             out.push_str(t);
                             out.push('\n');
+                        } else if let Some(url) = p.pointer("/image_url/url") {
+                            let url = url.as_str().unwrap_or_default();
+                            out.push_str("<image:");
+                            out.push_str(blake3::hash(url.as_bytes()).to_hex().as_str());
+                            out.push_str(">\n");
                         }
                     }
                 }
@@ -41,18 +45,67 @@ pub fn join_messages(msgs: &[PMessage]) -> String {
     out
 }
 
-/// Quick, dependency-free approximation: split on whitespace and hash
-/// each word to a synthetic token id. Used only when the full tokenizer
-/// hasn't been resolved for the model yet (cold start). The real path
-/// uses `tokenizers::Tokenizer::encode`.
+/// Text a request is hashed over: the raw prompt, or the joined messages.
+pub fn request_text(prompt: &str, msgs: &[PMessage]) -> String {
+    if prompt.is_empty() {
+        join_messages(msgs)
+    } else {
+        prompt.to_string()
+    }
+}
+
+/// Characters per synthetic token for runs of ordinary text, close to what
+/// real tokenizers produce for English.
+const CHARS_PER_TOKEN: usize = 4;
+
+/// Scripts where one character is about one token and whitespace is rare.
+fn is_cjk(c: char) -> bool {
+    matches!(c,
+        '\u{3040}'..='\u{30ff}'   // Hiragana, Katakana
+        | '\u{3400}'..='\u{4dbf}' // CJK Extension A
+        | '\u{4e00}'..='\u{9fff}' // CJK Unified
+        | '\u{ac00}'..='\u{d7af}' // Hangul
+        | '\u{f900}'..='\u{faff}' // CJK Compatibility
+        | '\u{20000}'..='\u{2ffff}')
+}
+
+/// Dependency-free stand-in for a tokenizer, used when no `tokenizer.json`
+/// is configured. Pieces are deterministic in the prompt's prefix, so
+/// prefix hashing still works: CJK emits one token per character, other
+/// text one per [`CHARS_PER_TOKEN`] characters of each word.
 pub fn approximate_token_ids(s: &str) -> Vec<u32> {
-    s.split_whitespace()
-        .map(|w| {
-            let h = blake3::hash(w.as_bytes());
-            let b = h.as_bytes();
-            u32::from_le_bytes([b[0], b[1], b[2], b[3]])
-        })
-        .collect()
+    fn emit(piece: &str, out: &mut Vec<u32>) {
+        let h = blake3::hash(piece.as_bytes());
+        let b = h.as_bytes();
+        out.push(u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    }
+    let mut out = Vec::with_capacity(s.len() / CHARS_PER_TOKEN + 1);
+    let mut piece = String::new();
+    let mut chars = 0;
+    for c in s.chars() {
+        let cjk = is_cjk(c);
+        if c.is_whitespace() || cjk || chars == CHARS_PER_TOKEN {
+            if !piece.is_empty() {
+                emit(&piece, &mut out);
+                piece.clear();
+                chars = 0;
+            }
+            if c.is_whitespace() {
+                continue;
+            }
+        }
+        piece.push(c);
+        chars += 1;
+        if cjk {
+            emit(&piece, &mut out);
+            piece.clear();
+            chars = 0;
+        }
+    }
+    if !piece.is_empty() {
+        emit(&piece, &mut out);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -97,6 +150,42 @@ mod tests {
         let a = approximate_token_ids("the quick brown fox");
         let b = approximate_token_ids("the quick brown fox");
         assert_eq!(a, b);
-        assert_eq!(a.len(), 4);
+        assert_eq!(a.len(), 6);
+    }
+
+    #[test]
+    fn cjk_prompts_produce_enough_tokens_for_prefix_blocks() {
+        // 80 characters with no spaces: whitespace splitting saw one token.
+        let text = "\u{4f60}\u{597d}\u{4e16}\u{754c}".repeat(20);
+        assert_eq!(approximate_token_ids(&text).len(), 80);
+    }
+
+    #[test]
+    fn long_unbroken_ascii_still_splits() {
+        assert_eq!(approximate_token_ids(&"a".repeat(40)).len(), 10);
+    }
+
+    #[test]
+    fn approximation_is_prefix_stable() {
+        let a = approximate_token_ids("shared system prompt, then one question");
+        let b = approximate_token_ids("shared system prompt, then another one");
+        assert_eq!(a[..5], b[..5]);
+    }
+
+    #[test]
+    fn different_images_do_not_share_a_prefix() {
+        let image = |url: &str| {
+            format!(
+                r#"[{{"type":"image_url","image_url":{{"url":"{url}"}}}},{{"type":"text","text":"q"}}]"#
+            )
+        };
+        let a = join_messages(&[msg("user", "", &image("data:a"))]);
+        let b = join_messages(&[msg("user", "", &image("data:b"))]);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn raw_prompt_takes_precedence() {
+        assert_eq!(request_text("raw", &[msg("user", "x", "")]), "raw");
     }
 }

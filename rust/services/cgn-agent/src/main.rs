@@ -23,7 +23,7 @@ use std::path::PathBuf;
 
 use cgn_core::{config::Config, Error, Result};
 use clap::Parser;
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -53,16 +53,29 @@ async fn main() -> Result<()> {
         .parse()
         .map_err(|e| Error::Config(format!("agent.listen: {e}")))?;
 
+    // gRPC and the heartbeat run as tasks so they outlive the shutdown
+    // branch: a drain needs both to keep serving and to advertise itself.
+    let mut grpc_task = tokio::spawn(grpc::serve(supervisor.clone(), listen));
+    let mut health_task = tokio::spawn(health::loop_emit(supervisor.clone()));
+
     tokio::select! {
-        r = grpc::serve(supervisor.clone(), listen) => r,
-        r = health::loop_emit(supervisor.clone()) => r,
+        r = &mut grpc_task => flatten(r),
+        r = &mut health_task => flatten(r),
         r = supervisor.clone().supervise() => r,
         _ = shutdown() => {
-            info!("agent shutting down");
+            info!("agent draining");
+            let left = supervisor.drain(cfg.agent.drain_timeout).await;
+            if left > 0 {
+                warn!(left, "drain timed out with generations still running");
+            }
             supervisor.shutdown().await;
             Ok(())
         }
     }
+}
+
+fn flatten(r: std::result::Result<Result<()>, tokio::task::JoinError>) -> Result<()> {
+    r.map_err(|e| Error::Internal(format!("task: {e}")))?
 }
 
 async fn shutdown() {

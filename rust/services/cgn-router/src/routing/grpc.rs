@@ -72,8 +72,18 @@ impl Router for RouterGrpc {
         if body.inputs.is_empty() {
             return Err(Status::invalid_argument("inputs must be non-empty"));
         }
-        let token_ids = super::prompt::approximate_token_ids(&body.inputs.join(" "));
-        let decision = super::pick(&self.state, &body.model, NodeRole::Both, &token_ids)
+        let token_ids = self
+            .state
+            .tokenizers
+            .token_ids(&body.model, &body.inputs.join(" "))
+            .await;
+        let key = super::RouteKey {
+            model: &body.model,
+            salt: &body.model,
+            session: None,
+            token_ids: &token_ids,
+        };
+        let decision = super::pick(&self.state, &key, NodeRole::Both)
             .await
             .map_err(Status::from)?;
 
@@ -96,17 +106,14 @@ async fn forward(
 ) -> cgn_core::Result<()> {
     use cgn_core::Error;
 
-    // Approximate prefix tokens; a future revision uses the model's real
-    // tokenizer. Shared with the HTTP gateway so both surfaces compute
-    // identical prefix hashes for the same prompt.
-    let token_ids =
-        super::prompt::approximate_token_ids(&super::prompt::join_messages(&req.messages));
+    // Shared with the HTTP gateway so both surfaces compute identical
+    // prefix hashes for the same prompt.
+    let text = super::prompt::request_text(&req.prompt, &req.messages);
+    let token_ids = state.tokenizers.token_ids(&req.model, &text).await;
 
-    let _permit = crate::admission::try_admit_request(
-        &state,
-        &req.model,
-        token_ids.len() as u32,
-    )?;
+    let _permit =
+        crate::admission::admit_request(&state, &req.model, token_ids.len() as u32, &req.tenant)
+            .await?;
 
     let role = if state.cfg.router.disagg.enabled
         && (token_ids.len() as u32) >= state.cfg.router.disagg.colocate_below_tokens
@@ -116,7 +123,15 @@ async fn forward(
         NodeRole::Both
     };
 
-    let decision = super::pick(&state, &req.model, role, &token_ids).await?;
+    let salt = super::prefix_salt(&state, &req.model, &req.tenant);
+    let key = super::RouteKey {
+        model: &req.model,
+        salt: &salt,
+        session: (!req.session.is_empty()).then_some(req.session.as_str()),
+        token_ids: &token_ids,
+    };
+    let decision = super::pick(&state, &key, role).await?;
+    let _node = state.track_node(&decision.node.node_id);
     tracing::info!(
         node = %decision.node.node_id,
         score = decision.score.total,
@@ -129,7 +144,7 @@ async fn forward(
 
     let agent_req = AgentGenerateRequest {
         id: uuid::Uuid::new_v4().to_string(),
-        model: req.model,
+        model: req.model.clone(),
         messages: req.messages,
         params: req.params,
         prefill_only: false,
@@ -139,6 +154,7 @@ async fn forward(
         tracestate: req.tracestate,
         extensions_json: req.extensions_json,
         digests: decision.digests.iter().map(|d| d.to_vec()).collect(),
+        prompt: req.prompt.clone(),
     };
 
     let req_stream = futures::stream::iter(vec![agent_req]);

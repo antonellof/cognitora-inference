@@ -109,6 +109,18 @@ pub struct RouterConfig {
     pub disagg: DisaggConfig,
     pub federation: FederationConfig,
     pub autoscaler: AutoscalerConfig,
+    /// How long in-flight requests may finish after SIGTERM.
+    #[serde(with = "humantime_serde")]
+    pub drain_timeout: Duration,
+    /// Give up on a node that has produced no token after this long and
+    /// retry elsewhere. Generous by default: cold starts count.
+    #[serde(with = "humantime_serde")]
+    pub first_token_timeout: Duration,
+    /// Maximum HTTP request body. Base64 images inflate quickly.
+    pub max_body_mb: u32,
+    /// Salt KV prefix digests per tenant so tenants never share cached
+    /// prefixes. Set false only when every tenant trusts the others.
+    pub kv_tenant_isolation: bool,
 }
 impl Default for RouterConfig {
     fn default() -> Self {
@@ -124,6 +136,10 @@ impl Default for RouterConfig {
             disagg: DisaggConfig::default(),
             federation: FederationConfig::default(),
             autoscaler: AutoscalerConfig::default(),
+            drain_timeout: Duration::from_secs(30),
+            first_token_timeout: Duration::from_secs(300),
+            max_body_mb: 32,
+            kv_tenant_isolation: true,
         }
     }
 }
@@ -135,6 +151,8 @@ pub struct ScoreWeights {
     pub load: f32,
     pub power: f32,
     pub capacity: f32,
+    /// Bonus for a session's rendezvous-hash node.
+    pub session: f32,
 }
 impl Default for ScoreWeights {
     fn default() -> Self {
@@ -143,6 +161,7 @@ impl Default for ScoreWeights {
             load: 0.25,
             power: 0.10,
             capacity: 0.10,
+            session: 0.25,
         }
     }
 }
@@ -166,6 +185,12 @@ pub struct AdmissionConfig {
     #[serde(with = "humantime_serde")]
     pub ttft_slo: Duration,
     pub max_concurrent_per_replica: u32,
+    /// Requests each tenant may park while `max_queue` is saturated.
+    /// Freed slots are handed to tenants round-robin. 0 rejects at once.
+    pub wait_queue_per_tenant: u32,
+    /// Longest a parked request waits before a 429.
+    #[serde(with = "humantime_serde")]
+    pub wait_timeout: Duration,
 }
 impl Default for AdmissionConfig {
     fn default() -> Self {
@@ -173,6 +198,8 @@ impl Default for AdmissionConfig {
             max_queue: 1024,
             ttft_slo: Duration::from_millis(800),
             max_concurrent_per_replica: 16,
+            wait_queue_per_tenant: 64,
+            wait_timeout: Duration::from_secs(10),
         }
     }
 }
@@ -183,6 +210,9 @@ pub struct RateLimitConfig {
     pub rps: u32,
     pub burst: u32,
     pub redis_url: Option<String>,
+    /// Proxies (IPs or CIDRs) whose `X-Forwarded-For` is believed.
+    /// Empty ignores the header: clients can set it to anything.
+    pub trusted_proxies: Vec<String>,
 }
 impl Default for RateLimitConfig {
     fn default() -> Self {
@@ -190,6 +220,7 @@ impl Default for RateLimitConfig {
             rps: 50,
             burst: 200,
             redis_url: None,
+            trusted_proxies: Vec::new(),
         }
     }
 }
@@ -358,6 +389,9 @@ impl Default for CarbonProviderKind {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AgentConfig {
+    /// How long in-flight generations may finish after SIGTERM.
+    #[serde(with = "humantime_serde")]
+    pub drain_timeout: Duration,
     pub listen: String,
     pub role: NodeRoleCfg,
     pub node_id: String,
@@ -379,6 +413,7 @@ pub struct AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
+            drain_timeout: Duration::from_secs(30),
             listen: format!("0.0.0.0:{}", crate::ports::AGENT_GRPC),
             role: NodeRoleCfg::Both,
             node_id: default_node_id("agent"),
@@ -865,6 +900,12 @@ pub struct KvConfig {
     pub index_dir: PathBuf,
     pub transport: KvTransport,
     pub quic_listen: String,
+    /// Allow unauthenticated peer QUIC on a non-loopback listener when
+    /// `[security].require_mtls` is false. Off by default: kvcached
+    /// refuses to start rather than expose KV blocks to the network.
+    pub allow_insecure_quic: bool,
+    /// Name every peer certificate must carry in its SANs under mTLS.
+    pub quic_server_name: String,
     pub block_size_tokens: u32,
     /// SSD blocks not accessed for this many seconds are deleted by the
     /// background eviction loop. 0 disables the TTL pass.
@@ -886,6 +927,8 @@ impl Default for KvConfig {
             index_dir: PathBuf::from("/var/lib/cognitora/index"),
             transport: KvTransport::Quic,
             quic_listen: format!("0.0.0.0:{}", crate::ports::KV_QUIC),
+            allow_insecure_quic: false,
+            quic_server_name: "cognitora".into(),
             block_size_tokens: 16,
             ssd_ttl_secs: 86_400,
             evict_interval_ms: 1_000,
@@ -918,7 +961,7 @@ pub struct SecurityConfig {
 // Auth
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AuthConfig {
     /// Enable authentication on the OpenAI surface. Off by default to ease
@@ -927,6 +970,28 @@ pub struct AuthConfig {
     pub oidc_issuer: Option<String>,
     pub oidc_audience: Option<String>,
     pub api_keys_file: Option<PathBuf>,
+    /// Require scopes on every request: `chat` / `embed`, or `*`.
+    pub enforce_scopes: bool,
+    /// JWT claim holding group memberships.
+    pub oidc_groups_claim: Option<String>,
+    /// Group name -> scopes granted to its members.
+    pub oidc_group_scopes: std::collections::BTreeMap<String, Vec<String>>,
+    /// JSON file persisting per-key token totals across restarts.
+    pub usage_file: Option<PathBuf>,
+}
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            oidc_issuer: None,
+            oidc_audience: None,
+            api_keys_file: None,
+            enforce_scopes: true,
+            oidc_groups_claim: None,
+            oidc_group_scopes: Default::default(),
+            usage_file: None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -989,6 +1054,15 @@ pub struct ModelConfig {
     pub tp: u32,
     pub max_model_len: Option<u32>,
     pub extra_args: Vec<String>,
+    /// `tokenizer.json` used by the router for prefix hashing and token
+    /// counts. Without one the router falls back to an estimate.
+    pub tokenizer: Option<PathBuf>,
+    /// Hugging Face repo to fetch `tokenizer.json` from at startup when
+    /// `tokenizer` is unset (e.g. `Qwen/Qwen3-8B`).
+    pub tokenizer_repo: Option<String>,
+    /// LoRA adapters served alongside the base model: name -> path. Each
+    /// name is requested as a model id, so prefix digests stay per-adapter.
+    pub lora: std::collections::BTreeMap<String, String>,
     /// Filesystem path to the model weights. Required for `engine.kind =
     /// "llama_cpp"` (a `.gguf` file). Optional for `vllm` (which resolves
     /// the model name as a HuggingFace repo id).
@@ -1018,6 +1092,9 @@ impl Default for ModelConfig {
             tp: 1,
             max_model_len: None,
             extra_args: vec![],
+            tokenizer: None,
+            tokenizer_repo: None,
+            lora: Default::default(),
             path: None,
             pipeline: None,
             min_vram_mb: None,
