@@ -66,17 +66,24 @@ will dial; in K8s the operator generates SANs for each Service.
 route. Authentication path:
 
 1. If the request carries `Authorization: Bearer <token>`:
-   - If `<token>` matches the sha256 of an entry in `[auth].api_keys_file`,
-     the request proceeds with `subject = "key:<id>"`.
-   - Otherwise the token is treated as a JWT and validated against the
-     configured OIDC issuer's JWKS. The `sub` claim becomes
-     `subject = "oidc:<sub>"`.
-2. The middleware sets the `x-cgn-subject` header on the inner
-   request so `cgn-ratelimit` and the gateway handlers can read it
-   without re-doing the lookup.
-3. If no auth material is present and `[auth].enabled = true`, the
-   request is rejected with `401`. If `[auth].enabled = false`, the
-   middleware no-ops (dev / smoke tests only).
+   - If the token's sha256 matches an entry in `[auth].api_keys_file`,
+     the request proceeds as `apikey:<hash prefix>`.
+   - Otherwise it is treated as a JWT and validated against the
+     configured OIDC issuer's JWKS. The `sub` claim becomes the subject.
+     An unknown key id triggers a JWKS refresh, at most every 30 s.
+2. The middleware attaches the `Principal` as a request extension, where
+   `cgn-ratelimit` and the handlers read it. Nothing is carried in a
+   header, so clients can't forge an identity.
+3. If `[auth].enabled = true` and no valid credential is present, the
+   request gets `401`. If `[auth].enabled = false`, the middleware
+   no-ops (dev / smoke tests only).
+4. Each handler checks scopes, model access and token limits, returning
+   `403` or `429`. See [scopes](../api/openai.md#scopes).
+
+Rate limits key on the principal, else the client IP. `X-Forwarded-For`
+counts only when the socket peer is in
+`[router.rate_limit].trusted_proxies`, and then the right-most untrusted
+hop is the client.
 
 ## Distroless
 
@@ -87,8 +94,7 @@ vLLM image because the engine wants Python + CUDA at runtime.
 
 ## Auditing
 
-Every authenticated request emits:
-
-* a `tracing` span with `subject`, `model`, and `request_id`,
-* a Prometheus counter `cgn_router_requests_total{auth, model}`,
-* an OTLP span when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
+There is no audit log yet. Per-key spend is available through
+`GET /v1/usage` and `cgn_router_tenant_tokens_total{tenant,kind}`, and the
+router logs each routing decision at `info`, but neither records who sent
+which request.

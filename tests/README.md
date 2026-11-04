@@ -16,14 +16,16 @@ the binary behaves correctly under realistic process layouts.
 
 ## End-to-end smoke (no GPU, no model)
 
-These three scripts only need the release binaries and Python 3 — they
-spin up real daemons against stub engines.
+These scripts only need the release binaries and Python 3 — they spin up
+real daemons against stub engines. `request_path.py` also needs `etcd` on
+`PATH`, and starts its own.
 
 | Script                          | What it covers                                                          | Time  |
 |---------------------------------|-------------------------------------------------------------------------|-------|
 | [`e2e/multi_engine.sh`](e2e/multi_engine.sh)   | Plugin layer (vllm/llama_cpp/openai_compat argv), auth (401/200), rate-limit (429), agent registration. | ~3 s |
 | [`e2e/single_node.sh`](e2e/single_node.sh)     | Full single-host bring-up: router + agent + fake engine, OpenAI surface, gRPC handoff. | ~10 s |
 | [`e2e/multi_node_kv.sh`](e2e/multi_node_kv.sh) | Multi-node control plane: etcd node discovery, KV-aware routing dispatch across 4 seeded nodes, cordon watch propagation, plus a real data path — 2 `cgn-agent`s (openai_compat, [`e2e/stub_engine.py`](e2e/stub_engine.py)) self-register in etcd, serve a routed 200, and prove KV prefix-affinity. Needs a reachable etcd. | ~25 s |
+| [`e2e/request_path.py`](e2e/request_path.py)   | What clients observe: status codes, SSE framing, usage, parameters reaching the engine, retry, auth, budgets, session affinity, cascade, cancellation, drain | ~1 min |
 
 Run any of them from the repo root:
 
@@ -31,7 +33,11 @@ Run any of them from the repo root:
 cargo build --release --no-default-features \
   -p cgn-router -p cgn-agent -p cgn-kvcached -p cgn-ctl
 ./tests/e2e/multi_engine.sh
+python3 tests/e2e/request_path.py --bin-dir target/release
 ```
+
+`stub_engine.py` takes fault injection through `POST /behave`: failures,
+dropped connections, delays, logprobs and a simulated prefix cache.
 
 For a tight dev loop, set `CGN_SKIP_BUILD=1` to skip the workspace
 re-build between runs (the script will warn if a binary is missing).

@@ -2,120 +2,160 @@
 
 The router's job is to pick the best node for each request in
 sub-millisecond p99. "Best" is a four-term linear combination of
-signals scraped from every live agent.
+signals from every live agent.
 
 ## The score
 
-For every healthy node `n` that hosts the requested model, we
+For every ready node `n` serving the requested model or adapter, we
 compute:
 
 ```
-score(n) = w_kv  · overlap(prefix, n)
-         + w_load · (1 − util(n))
-         + w_pwr  · (1 − norm_watts(n))
+score(n) = w_kv   · overlap(prefix, n)
+         + w_load · load(n)
+         + w_pwr  · power(n)
          + w_cap  · capacity(n)
+         + w_session        (only on the session's preferred node)
 ```
 
-Each term is normalised to `[0, 1]`; the four weights are read live
+The four main terms are normalised to `[0, 1]`. Weights are read live
 from etcd at `/cognitora/routing/policy` (defaults `0.55, 0.25, 0.10,
-0.10`) and applied via an `arc_swap::ArcSwap` so policy changes are
-zero-cost on the hot path.
+0.10`, session `0.25`) and applied via an `arc_swap::ArcSwap`, so policy
+changes are zero-cost on the hot path.
+
+Before scoring, candidates are filtered: nodes that are cordoned,
+draining, not ready, or excluded by a failed attempt are removed, as are
+nodes failing `min_vram_mb` / `require_gpu`. If any candidate is under
+its `watt_limit`, nodes over theirs are removed too.
+
+### Tokens and digests
+
+The router tokenizes the prompt with the model's `tokenizer.json`
+(`[models.*].tokenizer` or `tokenizer_repo`). Without one it estimates:
+one token per CJK character, otherwise one per four characters of each
+word. `cgn_router_tokenizer_fallback_total{model}` counts estimates.
+
+Tokens are hashed into a chain of BLAKE3 digests, one per 32-token
+chunk, over the whole prompt. The salt is the model, plus the tenant
+when `[router].kv_tenant_isolation` is on, so tenants never match each
+other's prefixes. A LoRA adapter is requested as its own model, so its
+digests stay separate from the base model's. Image parts contribute a
+digest of their URL, so prompts differing only by image don't match.
+
+The hashed text is the joined messages, not the model's chat template,
+so chunk boundaries approximate what the engine caches rather than
+matching it exactly.
 
 ### `overlap(prefix, n)`
 
-The router hashes the prompt's first ~64 tokens to a chain of
-BLAKE3 digests (one per 16-token block). For each candidate node it
-walks the in-memory prefix index (fed by confirmed-KV etcd keys,
-optimistic post-dispatch inserts, and agent-reported `kv_epoch` /
-eviction-burst pruning) to find the longest contiguous cached prefix.
-The fraction of matched blocks is the overlap signal. This is the
-single most-important term; it's why KV-aware routing exists.
+For each candidate the router walks the in-memory prefix index to find
+the longest contiguous cached prefix, as a fraction of the prompt's
+chunks. The index is fed by confirmed-KV etcd keys, optimistic
+post-dispatch inserts, and agent-reported `kv_epoch` / eviction-burst
+pruning. This is the single most-important term; it's why KV-aware
+routing exists.
 
-**Today this is local scoring only.** The router does not call
-`cgn-kvcached` on the hot path; overlap comes from agent heartbeat
-prefix claims, Confirmed-KV etcd keys, and optimistic post-dispatch
-inserts. Live overlap queries against `cgn-kvcached` are on the
-[v0.5 roadmap](../../plan.md#05--close-dynamo-credibility-gaps) — see
-also [vs Dynamo](vs-dynamo.md#credibility-gaps-were-closing).
+**This is local scoring only.** The router does not call `cgn-kvcached`
+on the hot path, and it does not consume engine block-hash events.
 
-### `util(n)`
+### `load(n)`
 
-Each `cgn-agent` publishes its in-flight request count and total
-GPU SM utilisation every `[agent].heartbeat` (default 5 s). The
-router computes
-`util = max(in_flight / max_concurrent, sm_pct)`
-and uses `(1 − util)` so a busy node loses score linearly.
+`1 − queue / 64`, clamped to `[0, 1]`. `queue` is the larger of the
+engine queue depth from the last heartbeat and this router's in-flight
+count for the node. Heartbeats arrive every 5 s, so the live count is
+what spreads a burst. Other routers' traffic is visible only through
+the heartbeat.
 
-### `norm_watts(n)`
+### `power(n)`
 
-`cgn-metrics` exports `cgn_power_watts{component=...}` per host.
-The router fetches a 30 s rolling average and normalises by the
-fleet's max so an idle node with low watts wins, all else equal.
-This is the only term whose default weight is small (`0.10`); turn
-it up for energy-aware clusters.
+`1 − watts / max_watts`, using the node power reported in heartbeats and
+the highest value among the candidates. An idle low-power node wins, all
+else equal. Turn the weight up for energy-aware clusters.
 
 ### `capacity(n)`
 
-Static metadata: TP size, dtype, VRAM, free model slots. Mostly
-breaks ties when two nodes are equally busy and equally cached.
+`free_blocks / total_blocks` from engine telemetry, or 0 for engines
+that don't report it.
+
+## Session affinity
+
+`x-session-id`, or the `user` field, names a conversation. The candidate
+with the highest `H(session, node)` (rendezvous hashing) gets the
+`session` bonus, so removing a node only moves the sessions it owned.
+It is a bonus rather than a pin: a busy node can still lose.
 
 ## Tie-break
 
-When two nodes score within ε (`0.01` default) the router falls back
-to a stable hash of `(node_id, prefix_hash)`. That keeps a
-prefix-bound request hitting the same node across retries; the
-stickiness is what makes KV-aware routing worth it under burst
-traffic.
+The first highest scorer wins. Ties are rare in practice because the
+in-flight count separates identical nodes as soon as one takes work.
 
 ## Admission
 
-After scoring, the router calls `Admission::try_admit(model, role)` on
-the HTTP gateway and gRPC `Generate` paths before dispatch. The
-admission counter is per-(model, role) and bounded by
-`[router.admission].max_queue`. A `Permit` is held for the lifetime
-of the request and decrements on drop (RAII). When the queue is
-full the router returns `429` immediately without calling the agent.
-When `[router.autoscaler].deadline_admission = true`, requests whose
-estimated TTFT exceeds their deadline are rejected after routing.
+`Admission::admit` takes a slot on the HTTP and gRPC paths before
+routing. Slots are per-(model, role), capped by
+`[router.admission].max_queue`, and held by an RAII `Permit` for the
+life of the request.
 
-We deliberately don't queue: queueing inflates TTFT and the
-client's deadline budget is more useful at the source. The queue
-parameter is therefore a **hard cap on concurrency**, not a buffer.
+At the cap, requests park in a per-tenant queue
+(`wait_queue_per_tenant`) for up to `wait_timeout`. A released slot goes
+to the next tenant in rotation, so a tenant with a large backlog can't
+starve the others. A full queue or an expired wait returns `429`.
+Rotation counts requests, not tokens, so tenants sending long prompts
+still get more compute.
+
+When `[router.autoscaler].deadline_admission = true`, requests whose
+estimated TTFT exceeds their deadline are rejected after routing. The
+deadline comes from `x-cgn-deadline-ms`, else the configured SLO.
+
+## Retries
+
+The gateway waits for the first token before committing to a response.
+Until then it makes up to three attempts, excluding each failed node.
+It retries connection failures, engine errors, 429 and 503 from the
+engine, empty streams, and silence past `first_token_timeout`. Client
+errors such as a 400 from the engine are returned as they are.
+
+After the first token, nothing retries: the client has already seen
+output. Mid-stream migration is not implemented.
 
 ## Cascade
 
 Optional. When `[router.cascade].enabled = true` and the request's
 model has a `cascade` chain configured, the router runs the request
-against the smallest model first. After the response comes back, the
-mean log-probability across emitted tokens is compared against
-`[router.cascade].confidence_threshold`. If it's below threshold the
-router escalates to the next model in the chain.
+against the smallest model first and asks the engine for logprobs. The
+mean logprob of the answer is compared against
+`[router.cascade].confidence_threshold`; below it, or on failure, the
+router escalates to the next model.
+
+Early steps always run buffered, because confidence needs the whole
+answer, so a cascade adds their full latency to TTFT. Only the last step
+streams live. Engines that report no logprobs fall back to a length
+heuristic, shown by `cgn_router_cascade_confidence_total{source}`.
+Requests with `tools`, `tool_choice` or `response_format` skip the
+cascade, since they must run on the model the client named.
 
 The score function above runs once per cascade step, so each step
-goes to the best-suited node for *that* model. The cascade FSM lives
-in `cgn-router/src/cascade.rs`; the gateway invokes it as a wrapper
-around `routing::pick`.
+goes to the best-suited node for *that* model.
 
 ## Disaggregation
 
 Optional. When `[router.disagg].enabled = true` and the prompt
 exceeds `colocate_below_tokens`, the router asks for **two** nodes:
-a prefill agent that runs the first forward pass and emits KV blocks
-into `cgn-kvcached`, and a decode agent that picks up those blocks
-(via QUIC/RDMA) and streams tokens. The handshake adds one round
-trip but pays for itself on long-prompt / short-completion workloads
-because decode-only nodes can be smaller / cheaper.
+a prefill agent and a decode agent. Moving KV between them is the
+engine's job, through its NIXL or LMCache connector, configured by
+`[engine].kv_offload`.
 
-The QUIC transport is the default; RDMA is available behind the
-`rdma` feature flag on Linux hosts with ibverbs.
+**This path is unproven.** `cgn-agent` does not act on `prefill_only`
+yet, and no benchmark covers it. See [`plan.md`](../../plan.md).
 
 ## Where the code lives
 
 | File                                                  | Role                                  |
 |-------------------------------------------------------|---------------------------------------|
 | `rust/services/cgn-router/src/routing/score.rs`       | the score function above              |
-| `rust/services/cgn-router/src/routing/selector.rs`    | `pick`: scoring + admission + tie     |
-| `rust/services/cgn-router/src/admission.rs`           | per-(model,role) queue + RAII permit  |
+| `rust/services/cgn-router/src/routing/selector.rs`    | `pick`: filtering, scoring, sessions  |
+| `rust/services/cgn-router/src/routing/tokenize.rs`    | per-model tokenizers                  |
+| `rust/services/cgn-router/src/gateway/generate.rs`    | admission, dispatch, retry, streaming |
+| `rust/services/cgn-router/src/admission.rs`           | slots, tenant wait queues, RAII permit |
 | `rust/services/cgn-router/src/cascade.rs`             | cascade FSM                           |
 | `rust/services/cgn-router/src/disagg.rs`              | prefill/decode plan                   |
 | `rust/services/cgn-router/src/cluster/{registry,watcher}.rs` | etcd-backed node registry      |

@@ -15,16 +15,10 @@ line to stdout. Fields the platform always emits:
 |---------------|---------|---------------------------------------------|
 | `timestamp`   | RFC3339 | UTC                                         |
 | `level`       | string  | `INFO`/`WARN`/`ERROR`/`DEBUG`               |
-| `service`     | string  | `cgn-router` / `cgn-agent` / …              |
-| `version`     | string  | `Cargo.toml` version                        |
-| `node_id`     | string  | from `[cluster].node_id` (12-char prefix)   |
-| `request_id`  | string  | propagated through `x-request-id`           |
-| `subject`     | string  | from `cgn-auth` (`key:<id>` / `oidc:<sub>`) |
+| `fields`      | object  | `message` plus event fields, such as `node` and `overlap` on routing decisions |
 | `target`      | string  | tracing target (Rust module path)           |
-| `message`     | string  | free text                                   |
 
-Override the level with `RUST_LOG=cgn_router=debug,info` or
-`COGNITORA__LOG_LEVEL=debug`.
+Override the level with `RUST_LOG=cgn_router=debug,info`.
 
 ## Metrics
 
@@ -59,69 +53,54 @@ every 5 s, plus `cgn_cluster_nodes_total` and
 
 | Metric                                    | Type      | Labels                       |
 |-------------------------------------------|-----------|------------------------------|
-| `cgn_router_requests_total`               | counter   | `model`, `subject`, `outcome`|
-| `cgn_router_routing_decision_seconds`     | histogram | `model`                      |
+| `cgn_router_chat_requests_total`          | counter   | `model`, `status`            |
+| `cgn_router_chat_latency_seconds`         | histogram | `model`, `stream`            |
+| `cgn_router_chat_ttft_seconds`            | histogram | `model`                      |
+| `cgn_router_chat_completion_tokens_total` | counter   | `model`                      |
+| `cgn_router_tenant_tokens_total`          | counter   | `tenant`, `kind`             |
+| `cgn_router_token_limit_rejected_total`   | counter   | `limit`                      |
+| `cgn_router_rate_limited_total`           | counter   | —                            |
 | `cgn_router_admission_inflight`           | gauge     | `model`, `role`              |
+| `cgn_router_admission_waiting`            | gauge     | `model`                      |
 | `cgn_router_admission_rejected_total`     | counter   | `model`, `reason`            |
-| `cgn_router_cache_hit_ratio`              | gauge     | `model`                      |
-| `cgn_agent_engine_ready`                  | gauge     | `model`                      |
-| `cgn_agent_generate_seconds`              | histogram | `model`                      |
-| `cgn_agent_kv_blocks_total`               | counter   | `tier`, `op`                 |
-| `cgn_kvcached_lookup_seconds`             | histogram | `tier`, `outcome`            |
-| `cgn_kvcached_blocks`                     | gauge     | `tier`                       |
-| `cgn_kvcached_bytes`                      | gauge     | `tier`                       |
-| `cgn_power_watts`                         | gauge     | `component`                  |
-| `cgn_carbon_intensity_gco2_per_kwh`       | gauge     | `zone`                       |
-| `cgn_router_carbon_admission_rejected_total` | counter | —                         |
+| `cgn_router_cascade_confidence_total`     | counter   | `source`                     |
+| `cgn_router_tokenizer_fallback_total`     | counter   | `model`                      |
+| `cgn_router_federation_forwards_total`    | counter   | `model`, `peer`              |
+| `cgn_router_prefix_index_digests`         | gauge     | —                            |
 | `cgn_router_prefix_index_pruned_total`    | counter   | `node`, `reason`             |
+| `cgn_router_carbon_admission_rejected_total` | counter | —                           |
+| `cgn_carbon_intensity_gco2_per_kwh`       | gauge     | `zone`                       |
+| `cgn_cluster_nodes_total`                 | gauge     | —                            |
+| `cgn_cluster_node_up`, `_cordoned`, `_queue_depth`, `_power_watts`, `_watt_limit`, `_kv_free_blocks`, `_kv_total_blocks`, `_vram_total_mb`, `_info` | gauge | `node`, plus identity labels on `_info` |
 | `cgn_cluster_power_watts_total`           | gauge     | —                            |
 | `cgn_cluster_tokens_per_watt`             | gauge     | —                            |
+| `cgn_power_watts_gpu`, `cgn_power_watts_chassis` | gauge | see `cgn-metrics`         |
+| `cgn_metrics_scrape_errors_total`         | counter   | see `cgn-metrics`            |
+
+`cgn-agent` and `cgn-kvcached` export no Prometheus metrics of their own
+yet. Node health reaches Prometheus through the router's `cgn_cluster_node_*`
+gauges, and the block cache reports through its `Kv.Stats` RPC. No metric
+reports the prefix cache hit rate; the router logs `overlap` on each routing
+decision instead.
 
 `cgn_cluster_power_watts_total` sums `cgn_cluster_node_power_watts` across
 live nodes (refreshed every 5 s). `cgn_cluster_tokens_per_watt` is the
 recent completion-token rate divided by fleet power — use it with
-`scripts/bench/energy/` for published J/token and tokens/s per W numbers.
+`scripts/bench/energy/` or `scripts/bench/proof/` for J/token numbers.
 
-`outcome` ∈ {`ok`, `error`, `rate_limited`, `admission_rejected`}.
-`reason` ∈ {`queue_full`, `ttft_violation`, `unavailable`, `carbon_intensity`}.
-`component` ∈ {`chassis`, `psu0`, `gpu0`, …}.
-
-### Recording rules
-
-The Helm chart ships a Prometheus rules ConfigMap with these
-recording rules so dashboards stay cheap:
-
-```yaml
-- record: cgn:router_p99_routing_us
-  expr:  histogram_quantile(0.99,
-           sum by (le, model) (rate(cgn_router_routing_decision_seconds_bucket[5m]))) * 1e6
-- record: cgn:cache_hit_ratio_5m
-  expr:  avg_over_time(cgn_router_cache_hit_ratio[5m])
-- record: cgn:tokens_per_watt_5m
-  expr:  sum(rate(cgn_agent_tokens_total[5m]))
-       / sum(cgn_power_watts{component=~"gpu.*|chassis"})
-```
+`status` ∈ {`200`, `429`, `5xx`}, where `5xx` also counts client errors
+returned by the engine. `reason` ∈ {`queue_full`, `wait_timeout`,
+`ttft_violation`}. `limit` ∈ {`tpm`, `budget`}. `source` ∈ {`logprobs`,
+`heuristic`}. `kind` ∈ {`prompt`, `completion`}.
 
 ## Traces
 
 Set `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317` and every
-binary will export OTLP/gRPC spans. The default sample rate is the
-parent-based ratio sampler at 1% (override with
-`OTEL_TRACES_SAMPLER_ARG=0.1` for 10%).
+binary exports OTLP/gRPC spans from `tracing`. The router's HTTP trace layer
+is the main source; there are no custom routing or engine spans yet.
 
-Span structure:
-
-- **Root span** at the gateway: `gateway.chat` (or `gateway.embed`).
-  Attributes: `model`, `subject`, `prompt_tokens`, `cache_hit`.
-- **Routing**: child span `router.pick` with `score`, `node_id`,
-  `kv_overlap`, `load`, `power`.
-- **Agent**: child span `agent.generate` propagated from the router
-  via gRPC metadata.
-- **Engine**: child span `engine.forward` emitted by the engine
-  driver. vLLM writes the OTLP span itself when launched with
-  `--otlp-endpoint=$OTEL_EXPORTER_OTLP_ENDPOINT`; `llama_cpp` and
-  `openai_compat` engines fall back to a router-side span tagged
-  with the upstream HTTP latency.
+W3C `traceparent` and `tracestate` from the client are forwarded to agents
+in the gRPC request, but the agent does not continue the trace yet.
 
 ## Dashboards
 
@@ -140,12 +119,18 @@ Grafana sidecar picks up automatically. Panels:
 ## Alerting
 
 A `PrometheusRule` ships at
-[`deploy/kubernetes/helm/cognitora/templates/prometheus-rule.yaml`](../../deploy/kubernetes/helm/cognitora/templates/prometheus-rule.yaml).
-Enable with `metrics.prometheusRule.enabled = true` (requires the
-prometheus-operator CRDs). The included rules fire when:
+[`deploy/kubernetes/helm/cognitora/templates/prometheus-rule.yaml`](../../deploy/kubernetes/helm/cognitora/templates/prometheus-rule.yaml),
+enabled with `metrics.prometheusRule.enabled = true`.
 
-- TTFT p99 > `[router.admission].ttft_slo_ms` for 5 min
-- `cgn:cache_hit_ratio_5m` < 0.30 for 15 min on a multi-replica model
-- `cgn_agent_engine_ready == 0` for 2 min on any node
-- `cgn_router_admission_rejected_total{reason="queue_full"}` rate
-  > 0 for 5 min
+**Most of these rules don't work yet.** Only `CognitoraRouterDown` is built
+on a metric that exists. The others use `cgn_router_routing_decision_seconds`,
+`cgn_router_kv_cache_hits_total`, `cgn_agent_ready` and similar names the code
+doesn't export, so they can never fire. Until the chart is fixed, write alerts
+on the metrics above. Useful ones:
+
+```promql
+cgn_cluster_nodes_total == 0
+histogram_quantile(0.99, sum by (le, model) (rate(cgn_router_chat_ttft_seconds_bucket[5m]))) > 1
+rate(cgn_router_admission_rejected_total[5m]) > 0
+cgn_router_admission_waiting > 0
+```

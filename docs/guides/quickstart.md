@@ -57,9 +57,7 @@ export CGN_KEY=cgn-c782...   # paste the printed token
 ```bash
 cat > /tmp/cognitora/cognitora.toml <<'EOF'
 [cluster]
-name     = "demo"
-data_dir = "/tmp/cognitora"
-etcd     = []                      # single-node, no etcd
+name = "demo"
 
 [security]
 require_mtls = false
@@ -74,7 +72,6 @@ listen_grpc  = "127.0.0.1:7070"
 listen_admin = "127.0.0.1:9091"
 
 [models.demo]
-hf_repo = "fake://demo"            # fake engine for the smoke test
 EOF
 ```
 

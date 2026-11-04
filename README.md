@@ -115,7 +115,7 @@ NVIDIA Dynamo is the closest peer in this space. We agree on most fundamentals (
 | Concern | Cognitora | NVIDIA Dynamo |
 |---------|-----------|---------------|
 | **Positioning** | Engine-agnostic orchestration above vLLM / SGLang / llama.cpp / TRT-LLM / MLX | Engine-agnostic orchestration above vLLM / SGLang / TRT-LLM |
-| **Runtime artefact** | Six single-file binaries; no Python control plane, JVM, or operator runtime | Rust core + Python frontend / extensibility layer |
+| **Runtime artefact** | Seven single-file binaries; no Python control plane, JVM, or operator runtime | Rust core + Python frontend / extensibility layer |
 | **First-class engines** | vLLM · SGLang · llama.cpp · MLX (Apple Silicon) · TensorRT-LLM spawn driver (`trtllm-serve`; no default recipe yet) · OpenAI-compat | vLLM · SGLang · TRT-LLM |
 | **KV routing signal** | Sequence-chained BLAKE3 digests + longest-prefix overlap (positionally correct), scored locally from agent heartbeat prefix claims and live engine telemetry; live `cgn-kvcached` overlap queries on the roadmap | RadixTree on chained block hashes, fed by engine KV events |
 | **KV offload backends** | `none / nixl / lmcache / hicache / kvbm`, selected per recipe via one TOML knob and auto-rendered into the engine argv | KVBM (built-in) + LMCache + FlexKV (separate launch scripts per backend) |
@@ -123,7 +123,7 @@ NVIDIA Dynamo is the closest peer in this space. We agree on most fundamentals (
 | **Cross-cluster federation** | QUIC peer fetch + cgn-router federation | Single cluster |
 | **Disaggregated prefill/decode** | Recipe-level (`vllm/disagg-*`, NIXL) | Recipe-level (1P1D, 2P2D, NIXL) |
 | **Autoscaling** | Closed loop: energy-aware drain hints → operator cordons/restores capacity; SLA planner scales decode replicas from queue-depth SLOs | Planner (SLA/TCO-driven) + AIConfigurator |
-| **Request retry / failover** | Pre-token dispatch retry against next-best node | In-flight request migration (token-state replay) |
+| **Request retry / failover** | Retry on the next-best node until the first token, including engine failures and stalls | In-flight request migration (token-state replay) |
 | **Multi-model cascade (SLM→LLM)** | First-class (confidence gating, buffered **and** streaming) | — |
 | **Tool calling / structured output** | Yes: passthrough to engine (vLLM/SGLang tool parsing + guided decoding), streaming included | Yes (engine-level) |
 | **Multimodal / video** | Image inputs (OpenAI content parts, passthrough); video pipelines not yet | Yes: image E/P/D, FastVideo, SGLang Diffusion |
@@ -131,7 +131,7 @@ NVIDIA Dynamo is the closest peer in this space. We agree on most fundamentals (
 | **Energy / power telemetry** | Yes: Redfish + NVML (rocm-smi on AMD) in the routing score, per-node soft watt caps (IPMI/DCGM on the roadmap) | No routing-level power term |
 | **Service discovery** | etcd or dependency-free UDP gossip (`state_backend = "gossip"`); single-node needs nothing | K8s-native / etcd / file backends |
 | **Deployment surfaces** | Bare metal (systemd) · Kubernetes (Helm) · Terraform (AWS / GCP / Azure / Hetzner), same binaries | Kubernetes-first (operator + CRDs); local dev via container |
-| **Install surface** | One curl line, six static binaries, no runtime | `pip install ai-dynamo`, container, or operator |
+| **Install surface** | One curl line, seven static binaries, no runtime | `pip install ai-dynamo`, container, or operator |
 | **License** | Apache-2.0 | Apache-2.0 |
 
 The full comparison, including the **credibility gaps (v0.5)** table, is in [`docs/architecture/vs-dynamo.md`](docs/architecture/vs-dynamo.md).
@@ -277,12 +277,12 @@ Tagged builds are produced by [`.github/workflows/release.yml`](.github/workflow
 for every `v*.*.*` tag. Each release ships:
 
 - `cognitora-vX.Y.Z-linux-x86_64.tar.gz` and `cognitora-vX.Y.Z-linux-arm64.tar.gz`.
-  Each tarball carries **all six binaries** (`cgn-router`, `cgn-agent`,
-  `cgn-kvcached`, `cgn-metrics`, `cgn-ctl`, `cgn-operator`).
+  Each tarball carries **all seven binaries** (`cgn-router`, `cgn-agent`,
+  `cgn-kvcached`, `cgn-metrics`, `cgn-ctl`, `cgn-operator`, `cgn-infer`).
 - `<archive>.sha256` per tarball plus an aggregated `SHA256SUMS` manifest.
 - One multi-arch container image: `ghcr.io/antonellof/cognitora:vX.Y.Z`
   (and `:latest`) for `linux/amd64` + `linux/arm64`. The image holds all
-  six binaries; pods pick one via `command:` (the Helm chart already does this).
+  seven binaries; pods pick one via `command:` (the Helm chart already does this).
 
 To dry-run the full publish flow locally:
 
@@ -307,7 +307,7 @@ cognitora/
                               (common · router · agent · kv · control · metrics)
 
   rust/
-    services/                 Binary crates (six)
+    services/                 Binary crates (seven)
       cgn-router/             OpenAI gateway + KV-aware router (hot path)
       cgn-agent/              Per-node engine supervisor (vLLM / llama.cpp / OpenAI-compat)
       cgn-kvcached/           Tiered KV daemon
@@ -328,7 +328,7 @@ cognitora/
       cgn-power/              Redfish + NVML power readers
 
   deploy/
-    docker/                   distroless Dockerfile (one image, six binaries)
+    docker/                   distroless Dockerfile (one image, seven binaries)
     systemd/                  *.service units (single-node / bare metal)
     kubernetes/
       crds/                   InferenceCluster, ModelPool, RoutingPolicy

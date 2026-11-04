@@ -46,7 +46,7 @@ boxes is fine for clusters < 50 GPUs:
 
 ```toml
 [cluster]
-etcd = ["10.0.0.5:2379"]
+etcd_endpoints = ["http://10.0.0.5:2379"]
 ```
 
 ## Sizing

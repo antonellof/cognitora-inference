@@ -30,7 +30,7 @@ does not query `cgn-kvcached` on the hot path** — it uses local
 heartbeat prefix claims and Confirmed-KV etcd keys (see
 [`routing.md`](routing.md#overlapprefix-n)). Live overlap queries
 against `cgn-kvcached` are on the
-[v0.5 roadmap](../../plan.md#05--close-dynamo-credibility-gaps) — see
+[roadmap](../../plan.md#roadmap) — see
 also [vs Dynamo](vs-dynamo.md#credibility-gaps-were-closing). When
 vLLM evicts a block the agent emits a `block_evicted` event over
 the local UDS.
@@ -117,13 +117,6 @@ The LRU walks happen in a background tokio task at 1 Hz.
 
 ## Observability
 
-| Metric                                    | Tier   |
-|-------------------------------------------|--------|
-| `cgn_kvcached_blocks{tier=ram\|ssd}`      | gauge  |
-| `cgn_kvcached_bytes{tier=ram\|ssd}`       | gauge  |
-| `cgn_kvcached_lookup_seconds{tier,outcome}` | histogram |
-| `cgn_kvcached_evictions_total{tier}`      | counter |
-| `cgn_kvcached_quic_pulls_total{outcome}`  | counter |
-
-`cgn-router` joins these with its own `cgn_router_cache_hit_ratio`
-to drive routing decisions.
+The `Kv.Stats` RPC reports per-tier block counts, bytes and hit counters.
+`cgn-kvcached` has no Prometheus metrics yet, and the router does not use
+these numbers for routing.

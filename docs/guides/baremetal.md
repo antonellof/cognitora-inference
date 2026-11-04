@@ -98,3 +98,14 @@ rm -rf /etc/cognitora /var/lib/cognitora /var/log/cognitora /run/cognitora
 userdel cognitora
 rm -f /usr/local/bin/cgn-{ctl,router,agent,kvcached,metrics,operator}
 ```
+
+## Going to production
+
+- Set `[security].require_mtls = true`. `cgn-kvcached` won't start on a public
+  QUIC address otherwise, unless you set `[kv].allow_insecure_quic = true`.
+- Turn on `[auth]`, and give every key the scopes it needs. Keys without
+  scopes get 403.
+- Behind a proxy, list it in `[router.rate_limit].trusted_proxies`.
+- Set `[auth].usage_file` if you use token budgets, so they survive restarts.
+- Run one router if you rely on exact limits. Rate limits and budgets are
+  per router, so N routers allow N times the limit.

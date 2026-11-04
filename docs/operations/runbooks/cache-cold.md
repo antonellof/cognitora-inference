@@ -5,16 +5,17 @@ model, p99 TTFT spikes, GPU utilisation low (no prefix reuse).
 
 ## Triage
 
-1. Confirm the metric:
-   ```promql
-   avg_over_time(cgn_router_cache_hit_ratio[5m]) by (model)
+1. Confirm it. No metric reports the hit rate, so read `overlap` from the
+   router's routing decisions (`0` to `1`, logged at `info`):
+   ```bash
+   kubectl -n cognitora logs <router-pod> | jq -r 'select(.fields.overlap != null) | .fields.overlap' | sort -n | uniq -c
    ```
    Was the model recently deployed? Cold starts always look bad for
    the first ~5 min; give it a window and re-check.
 
 2. Check sticky routing:
    ```promql
-   sum(rate(cgn_router_requests_total[5m])) by (model, node_id)
+   cgn_cluster_node_queue_depth
    ```
    If the load is fanned out evenly across nodes for a high-prefix-
    reuse workload, the score weights are off:
@@ -25,11 +26,8 @@ model, p99 TTFT spikes, GPU utilisation low (no prefix reuse).
    The router picks up the change in < 1 s via etcd.
 
 3. Check kvcached health:
-   ```promql
-   cgn_kvcached_blocks{tier="ram"}
-   cgn_kvcached_lookup_seconds_count{outcome="miss"} / cgn_kvcached_lookup_seconds_count
-   ```
-   - `blocks` near 0 → the daemon restarted and lost its in-memory
+   Query the daemon's `Kv.Stats` RPC for block counts and hit rates per tier.
+   - Block count near 0 → the daemon restarted and lost its in-memory
      state. Expected; warms back in a few minutes.
    - High miss rate on RAM with low miss rate on SSD → SSD is
      holding the working set but the eviction policy on RAM is too
@@ -37,12 +35,14 @@ model, p99 TTFT spikes, GPU utilisation low (no prefix reuse).
 
 4. Check that prompts actually share prefixes. The most common
    "false miss" is a client adding a per-request system prompt
-   timestamp. Sample:
-   ```bash
-   kubectl -n cognitora logs <router-pod> | jq 'select(.target=="cgn_router::routing") | .prefix_hash' | sort -u | head -20
-   ```
-   If every hash is unique, the workload doesn't reuse prefixes, and
-   the metric is reporting truth.
+   timestamp. If `overlap` stays near 0 for repeated prompts, compare the
+   start of two prompts from your client.
+
+5. Check tenancy and tokenizers. Tenants don't share prefixes by design, so
+   the same prompt from two API keys is a miss unless they share a
+   `tenant:` scope or `[router].kv_tenant_isolation` is off. If
+   `cgn_router_tokenizer_fallback_total` is rising, configure
+   `[models.*].tokenizer` for accurate chunking.
 
 ## Knobs to twist (in order of safety)
 

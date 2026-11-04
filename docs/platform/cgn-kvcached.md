@@ -9,7 +9,7 @@
 ## Features
 
 - gRPC **`cognitora.v1.Kv`** for router/agent queries
-- **QUIC** listener for peer fetch (`[kv].listen_quic`, default `0.0.0.0:7073`)
+- **QUIC** listener for peer fetch (`[kv].quic_listen`, default `0.0.0.0:7072`), authenticated with mTLS
 - RocksDB-backed metadata + SSD layout under `[kv].ssd_dir` / `[kv].index_dir`
 - RAM cap via `[kv].ram_gib`, SSD cap via `[kv].ssd_gib`
 - Tunable eviction and optional mirror behaviour (see example config and [KV tiering](../architecture/kv-tiering.md))
@@ -22,26 +22,33 @@
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `[kv].listen_grpc` | string | `0.0.0.0:7072` | Kv gRPC service |
-| `[kv].listen_quic` | string | `0.0.0.0:7073` | Peer fetch transport |
-| `[kv].ram_gib` | u32 | `8` | RAM tier budget |
-| `[kv].ssd_gib` | u32 | `256` | SSD tier budget |
-| `[kv].ssd_dir` | path | `/var/lib/cognitora/kv/ssd` | Cold tier files |
-| `[kv].index_dir` | path | `/var/lib/cognitora/kv/index` | RocksDB index |
+| `[kv].listen` | string | `0.0.0.0:7071` | Kv gRPC service |
+| `[kv].quic_listen` | string | `0.0.0.0:7072` | Peer fetch transport |
+| `[kv].allow_insecure_quic` | bool | `false` | Allow plain QUIC on a non-loopback listener |
+| `[kv].quic_server_name` | string | `cognitora` | SAN every peer cert needs under mTLS |
+| `[kv].ram_gib` | u32 | `32` | RAM tier budget |
+| `[kv].ssd_gib` | u32 | `1024` | SSD tier budget |
+| `[kv].ssd_dir` | path | `/var/lib/cognitora/kv` | Cold tier files |
+| `[kv].index_dir` | path | `/var/lib/cognitora/index` | RocksDB index |
+
+Without `[security].require_mtls = true`, the daemon refuses to start on a
+non-loopback `quic_listen` unless `allow_insecure_quic` is set. With mTLS,
+issue certificates with the SAN above: `cgn-ctl pki bootstrap` includes it
+by default, and `--san` replaces the defaults, so list it yourself there.
 
 ## Example
 
 ```toml
 [cluster]
 name = "prod"
-etcd = ["http://etcd:2379"]
+etcd_endpoints = ["http://etcd:2379"]
 
 [security]
 require_mtls = true
 
 [kv]
-listen_grpc = "0.0.0.0:7072"
-listen_quic = "0.0.0.0:7073"
+listen      = "0.0.0.0:7071"
+quic_listen = "0.0.0.0:7072"
 ram_gib     = 16
 ssd_gib     = 512
 ssd_dir     = "/var/lib/cognitora/kv/ssd"

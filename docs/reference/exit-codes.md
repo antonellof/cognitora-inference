@@ -3,21 +3,18 @@
 All Cognitora binaries follow the same exit-code convention so
 systemd, Kubernetes, and shell pipelines can react sensibly.
 
-| Code | Meaning                  | Examples                                                      |
-|-----:|--------------------------|---------------------------------------------------------------|
-| `0`  | clean exit               | normal `SIGTERM` shutdown after draining in-flight work       |
-| `1`  | generic failure          | runtime panic, unhandled error                                |
-| `2`  | bad invocation           | unknown flag, malformed `--config` path                       |
-| `3`  | configuration invalid    | `cognitora.toml` parse error or schema validation failure     |
-| `4`  | dependency unavailable   | etcd unreachable on startup, missing `helm` binary on PATH    |
-| `5`  | TLS / PKI error          | cert/key mismatch, expired CA, missing `client_ca_file`       |
-| `6`  | engine failure           | `cgn-agent`: engine binary not found, ready probe never green |
-| `7`  | port bind failure        | another process is using `[router].listen_http` etc.          |
-| `8`  | storage error            | `cgn-kvcached`: index dir not writable, SSD tier path missing |
-| `9`  | feature unsupported      | `--features rdma` build needed but called on an unsupported OS |
-|`10`  | gracefully drained       | `cgn-agent` exited because `cgn-ctl cluster drain` finished   |
-|`130` | `SIGINT`                 | Ctrl-C during interactive run                                 |
-|`143` | `SIGTERM`                | normal stop signal under systemd / Kubernetes                 |
+| Code | Meaning            | Examples                                                 |
+|-----:|--------------------|----------------------------------------------------------|
+| `0`  | clean exit         | `SIGTERM` or Ctrl-C handled, in-flight work drained or timed out |
+| `1`  | any failure        | config error, port in use, TLS error, runtime error      |
+| `2`  | bad invocation     | unknown flag (from `clap`)                               |
+
+Signals that kill a process before it installs its handlers give the usual
+`128 + n`. The cause of a failure is in the log, not the exit code.
+
+`cgn_core::exit_code` maps errors to finer codes, but no binary calls it
+yet, so don't branch on them. Exit code `10` is reserved in the shipped
+systemd units and is never produced.
 
 ## How to use this in systemd
 
@@ -28,8 +25,7 @@ Restart=on-failure
 SuccessExitStatus=10 130 143
 ```
 
-so a clean drain (`10`), a Ctrl-C (`130`), or a `systemctl stop`
-(`143`) won't trigger a restart, but a real crash (`1`) or a config
+so a clean drain (`0`) or a `systemctl stop` won't trigger a restart, but a real crash (`1`) or a config
 error (`3`) will.
 
 ## How to use this in Kubernetes

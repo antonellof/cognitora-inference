@@ -1,40 +1,21 @@
 # Environment variables
 
-Every TOML key in [`configs/cognitora.toml.example`](../../configs/cognitora.toml.example)
-has a matching environment variable. Cognitora layers values in this
-order, last-wins:
+Configuration lives in the TOML file. There are no per-key environment
+overrides: Cognitora does not read `COGNITORA__*` variables. Secrets are
+referenced by file path in TOML, such as `[auth].api_keys_file` and
+`[security].key_file`, so Kubernetes Secrets can be mounted as files.
 
-1. Compiled defaults (in `cgn-core::config`).
-2. TOML file at `--config` / `$COGNITORA_CONFIG` / `/etc/cognitora/cognitora.toml`.
-3. Environment variables matching `COGNITORA__<SECTION>__<KEY>`.
-4. Command-line flags.
+## Cognitora variables
 
-## Naming rule
-
-```
-COGNITORA__<section>__<key>          # one section
-COGNITORA__<sec>__<sub>__<key>       # nested
-```
-
-Always two underscores between segments, SCREAMING_SNAKE for the
-keys. Booleans accept `true`/`false`/`1`/`0`. Durations accept the
-humantime forms (`30s`, `5m`, `1h`).
-
-## Examples
-
-| Variable                                        | Maps to                              |
-|-------------------------------------------------|--------------------------------------|
-| `COGNITORA__CLUSTER__NAME`                      | `[cluster].name`                     |
-| `COGNITORA__SECURITY__REQUIRE_MTLS`             | `[security].require_mtls`            |
-| `COGNITORA__AUTH__ENABLED`                      | `[auth].enabled`                     |
-| `COGNITORA__AUTH__OIDC_ISSUER`                  | `[auth].oidc_issuer`                 |
-| `COGNITORA__ROUTER__LISTEN_HTTP`                | `[router].listen_http`               |
-| `COGNITORA__ROUTER__SCORE_WEIGHTS__KV`          | `[router.score_weights].kv`          |
-| `COGNITORA__ROUTER__ADMISSION__MAX_QUEUE`       | `[router.admission].max_queue`       |
-| `COGNITORA__ROUTER__CASCADE__ENABLED`           | `[router.cascade].enabled`           |
-| `COGNITORA__AGENT__ENGINE_BINARY`               | `[agent].engine_binary`              |
-| `COGNITORA__KV__RAM_GIB`                        | `[kv].ram_gib`                       |
-| `COGNITORA__METRICS__SCRAPE_INTERVAL`           | `[metrics].scrape_interval`          |
+| Variable | Effect |
+|----------|--------|
+| `CGN_CONFIG` | Config path when `--config` isn't passed; the fallback is `/etc/cognitora/cognitora.toml` |
+| `CGN_CACHE_DIR` | Where downloaded tokenizers are cached; defaults to the system temp directory |
+| `CGN_RECIPES_DIR` | Recipe directory for `cgn-ctl recipe` |
+| `CGN_HELM_BIN` | `helm` binary for `cgn-ctl` |
+| `COGNITORA_ETCD` | etcd endpoint for `cgn-ctl` |
+| `HF_TOKEN` | Bearer token for `tokenizer_repo` downloads, needed for gated repos |
+| `HF_ENDPOINT` | Hugging Face mirror for `tokenizer_repo` |
 
 ## Standard runtime variables
 
@@ -46,16 +27,5 @@ These aren't Cognitora-specific but shape the runtime:
 | `OTEL_EXPORTER_OTLP_ENDPOINT`     | enable OTLP/gRPC traces                     |
 | `OTEL_TRACES_SAMPLER_ARG`         | sample rate (0.0 – 1.0)                     |
 | `OTEL_RESOURCE_ATTRIBUTES`        | extra resource tags                         |
-| `TOKIO_WORKER_THREADS`            | overrides `[router].worker_threads = 0`     |
+| `TOKIO_WORKER_THREADS`            | Tokio worker count                          |
 | `RUST_BACKTRACE`                  | `1` / `full` for crash diagnostics          |
-
-## Secrets-friendly knobs
-
-Some configs accept a `*_FILE` variant that reads the value from disk
-so you can mount Kubernetes Secrets without quoting them:
-
-| Variable                                       | Reads                                   |
-|------------------------------------------------|-----------------------------------------|
-| `COGNITORA__AUTH__API_KEYS_FILE`               | path to sha256 keys file                |
-| `COGNITORA__SECURITY__KEY_FILE`                | path to PEM-encoded TLS private key     |
-| `COGNITORA__METRICS__REDFISH_PASS_FILE`        | path to a file containing the password  |

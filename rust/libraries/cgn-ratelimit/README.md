@@ -11,13 +11,14 @@ Two backends:
 * **In-process** (default) — `governor` per-key token bucket. Cheap and
   precise, but each replica keeps its own state.
 * **Redis-backed** (`features = ["redis-backend"]`) — atomic GCRA with an
-  `INCR / PEXPIRE` round-trip per request. Use when running multiple
-  `cgn-router` replicas behind a load balancer where the in-process
-  bucket would let bursts slip through one replica.
+  `INCR / PEXPIRE` round-trip per request. `cgn-router` doesn't use this
+  backend yet, so its limits are per replica.
 
-The middleware keys on the authenticated subject when present (via
-[`cgn-auth`](https://crates.io/crates/cgn-auth)), otherwise on the source
-IP from `X-Forwarded-For` (last hop) or the socket addr.
+The middleware keys on the authenticated
+[`cgn-auth`](https://crates.io/crates/cgn-auth) principal, otherwise on the
+client IP. The IP is the socket peer unless that peer is a trusted proxy
+(`RateLimit::with_trusted_proxies`), in which case it is the right-most
+untrusted `X-Forwarded-For` hop. Client headers alone never pick a bucket.
 
 ## Use
 

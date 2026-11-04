@@ -25,11 +25,11 @@ KV events flow to **`cgn-kvcached`** over the Unix socket configured in your pro
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `[agent].listen_grpc` | string | `0.0.0.0:7071` | Agent gRPC listen address |
-| `[agent].listen_admin` | string | `127.0.0.1:9091` | Admin + `/metrics` |
-| `[agent].heartbeat` | duration | `5s` | etcd lease refresh |
-| `[agent].ready_probe_url` | string | engine `/v1/models` | Readiness gate |
-| `[engine].kind` | enum | `vllm` | `vllm`, `sglang`, `llama_cpp`, `mlx`, `openai_compat` |
+| `[agent].listen` | string | `0.0.0.0:7070` | Agent gRPC listen address |
+| `[agent].role` | enum | `both` | `prefill`, `decode` or `both` |
+| `[agent].drain_timeout` | duration | `30s` | In-flight time after SIGTERM |
+| `[agent].watt_limit` | f32 | none | Soft power cap published in heartbeats |
+| `[engine].kind` | enum | `vllm` | `vllm`, `sglang`, `llama_cpp`, `mlx`, `tensorrt_llm`, `cgn_infer`, `openai_compat` |
 | `[engine].url` | string | `http://127.0.0.1:8000` | Engine HTTP base |
 | `[engine].kv_offload` | enum | `none` | Engine-side KV connector |
 
@@ -40,23 +40,21 @@ Full engine tables (vLLM/SGLang/llama.cpp flags) live in [Configuration referenc
 ```toml
 [cluster]
 name = "prod"
-etcd = ["http://etcd:2379"]
+etcd_endpoints = ["http://etcd:2379"]
 
 [security]
 require_mtls = true
 
 [agent]
-listen_grpc = "0.0.0.0:7071"
-listen_admin = "127.0.0.1:9091"
-heartbeat = "5s"
+listen = "0.0.0.0:7070"
 
 [engine]
 kind       = "vllm"
 url        = "http://127.0.0.1:8000"
 kv_offload = "nixl"
 
-[models."llama3-70b"]
-hf_repo = "meta-llama/Meta-Llama-3-70B-Instruct"
+# vLLM treats the model name as the Hugging Face repo id.
+[models."meta-llama/Meta-Llama-3-70B-Instruct"]
 tp      = 4
 ```
 
@@ -73,3 +71,10 @@ tp      = 4
 - [Runbook: Agent stuck](../operations/runbooks/agent-stuck.md)
 
 **Source:** [`rust/services/cgn-agent/`](../../rust/services/cgn-agent/)
+
+## Shutdown
+
+On SIGTERM the agent publishes `draining` in its heartbeat so routers stop
+sending work, waits up to `drain_timeout` for running generations, then
+stops the engine. Set the Kubernetes termination grace period above
+`drain_timeout`; the Helm chart uses 45 s.

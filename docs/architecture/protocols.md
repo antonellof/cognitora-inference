@@ -30,8 +30,8 @@ issues.
 
 `cgn-agent` ↔ colocated `cgn-kvcached` use a UDS at
 `/run/cognitora/kv.sock`. No TLS; filesystem permissions
-(`0660`, owned by `cognitora:cognitora`) guard the channel. This is
-the only deliberate exception to "mTLS everywhere".
+(`0660`, owned by `cognitora:cognitora`) guard the channel, since this
+traffic never leaves the host.
 
 The choice is intentional: the agent and kvcached are always on the
 same host (Helm uses a DaemonSet for the agent and an emptyDir for
@@ -61,8 +61,11 @@ etcd talks TLS by default; the credentials come from `[cluster].etcd`
 ### QUIC
 
 `cgn-kvcached` exposes a QUIC listener (`quinn`) on
-`[kv].listen_quic`. Used for cross-host KV block fetches. mTLS-
-rooted at the same cluster CA. 0-RTT enabled for repeat peers.
+`[kv].quic_listen`. Used for cross-host KV block fetches. With
+`[security].require_mtls = true`, both sides present certificates from
+the cluster CA carrying the `[kv].quic_server_name` SAN. Without mTLS the
+listener must be loopback, or `[kv].allow_insecure_quic = true` must
+accept unauthenticated traffic explicitly.
 
 Wire format: a `Frame` header (bincode) + a raw block payload. The
 codec lives in `cgn-kv::transport::quic`.

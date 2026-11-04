@@ -37,10 +37,10 @@ It merges everything with labels so dashboards stay consistent. Details: [Observ
 ```toml
 [cluster]
 name = "prod"
-etcd = ["http://etcd:2379"]
+etcd_endpoints = ["http://etcd:2379"]
 
 [metrics]
-listen_admin    = "0.0.0.0:9092"
+listen          = "0.0.0.0:9092"
 scrape_interval = "10s"
 
 scrape_targets = [

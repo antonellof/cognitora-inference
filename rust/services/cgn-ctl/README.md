@@ -37,7 +37,7 @@ cargo install cgn-ctl
 ```bash
 cgn-ctl install bare-metal
 cgn-ctl recipe up vllm/qwen2.5-7b-instruct/single-host
-cgn-ctl key create --scopes chat,embed alice
+cgn-ctl key create --scopes chat,embed
 cgn-ctl bench chat --concurrency 32 --duration 60s
 ```
 

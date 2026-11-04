@@ -35,6 +35,10 @@ cgn-ctl pki bootstrap --out /tmp/pki --san localhost
 # Mint an API key into the file referenced by [auth].api_keys_file
 cgn-ctl key create --file /tmp/cognitora/api-keys --scopes "chat,embed"
 
+# A virtual key: one model, one tenant, token limits
+cgn-ctl key create --file /tmp/cognitora/api-keys \
+  --scopes "chat,model:llama3-8b,tenant:acme,tpm:60000,budget:5000000"
+
 # Live tuning of routing weights (non-K8s clusters)
 cgn-ctl cluster set-policy --kv 0.6 --load 0.2 --power 0.1 --capacity 0.1
 

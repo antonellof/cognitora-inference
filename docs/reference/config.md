@@ -306,21 +306,11 @@ Pipeline mode is limited to `llama`/`qwen2` GGUF architectures.
 but emit a one-time warning. Migrate them to `[engine].url` and
 `[engine.vllm].extra_args` respectively.
 
-## Overrides
+## Unknown keys
 
-Every TOML key has a corresponding environment variable: prepend
-`COGNITORA__`, separate sections with `__`, and use SCREAMING_SNAKE.
-
-```bash
-# Override [router].listen_http
-COGNITORA__ROUTER__LISTEN_HTTP=0.0.0.0:8000
-
-# Disable auth for a dev run
-COGNITORA__AUTH__ENABLED=false
-```
-
-CLI flags take precedence over the env, which takes precedence over the
-TOML file, which takes precedence over compiled defaults.
+Unknown keys are ignored without a warning, so a misspelled option has no
+effect. There are no environment overrides for individual keys; see
+[Environment variables](env.md).
 
 ## Request path
 
