@@ -17,4 +17,6 @@ ssd_gib           = 1024
 index_dir         = "/var/lib/cognitora/kv-index"
 transport         = "quic"
 quic_listen       = "0.0.0.0:7091"
+# No mTLS in this recipe. Set [security].require_mtls = true before exposing it.
+allow_insecure_quic = true
 block_size_tokens = 256

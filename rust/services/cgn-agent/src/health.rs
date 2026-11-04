@@ -179,7 +179,10 @@ async fn emit_with_lease(supervisor: &Supervisor, endpoints: &[String]) -> Resul
             Err(_) => {}
         }
 
-        tokio::time::sleep(HEARTBEAT_INTERVAL).await;
+        tokio::select! {
+            _ = tokio::time::sleep(HEARTBEAT_INTERVAL) => {}
+            _ = supervisor.drain_notify.notified() => {}
+        }
     }
 }
 
@@ -452,6 +455,14 @@ fn node_record_json(
         "vram_total_mb": gpu.vram_total_mb,
         "kv_epoch": kv_epoch,
         "ready": ready,
+        "draining": supervisor.draining.load(std::sync::atomic::Ordering::Acquire),
+        "adapters": supervisor
+            .cfg
+            .models
+            .values()
+            .next()
+            .map(|m| m.lora.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default(),
         "servable": true,
         "version": env!("CARGO_PKG_VERSION"),
     })

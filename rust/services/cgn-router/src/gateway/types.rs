@@ -15,8 +15,31 @@ pub struct ChatRequest {
     pub top_p: Option<f32>,
     #[serde(default)]
     pub max_tokens: Option<u32>,
+    /// Newer spelling of `max_tokens`; wins when both are set.
+    #[serde(default)]
+    pub max_completion_tokens: Option<u32>,
+    /// Number of choices. Only 1 is supported.
+    #[serde(default)]
+    pub n: Option<u32>,
     #[serde(default)]
     pub stream: Option<bool>,
+    #[serde(default)]
+    pub stream_options: Option<StreamOptions>,
+    #[serde(default)]
+    pub logprobs: Option<bool>,
+    #[serde(default)]
+    pub top_logprobs: Option<u32>,
+    #[serde(default)]
+    pub logit_bias: Option<serde_json::Value>,
+    #[serde(default)]
+    pub parallel_tool_calls: Option<bool>,
+    /// vLLM/SGLang sampling extensions.
+    #[serde(default)]
+    pub top_k: Option<u32>,
+    #[serde(default)]
+    pub min_p: Option<f32>,
+    #[serde(default)]
+    pub repetition_penalty: Option<f32>,
     #[serde(default)]
     pub stop: Option<StopSpec>,
     #[serde(default)]
@@ -37,6 +60,54 @@ pub struct ChatRequest {
     /// forwarded verbatim — the engine's guided decoding enforces it.
     #[serde(default)]
     pub response_format: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct StreamOptions {
+    #[serde(default)]
+    pub include_usage: bool,
+}
+
+/// Legacy `/v1/completions` body.
+#[derive(Debug, Deserialize)]
+pub struct CompletionRequest {
+    pub model: String,
+    pub prompt: PromptSpec,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    #[serde(default)]
+    pub top_p: Option<f32>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub n: Option<u32>,
+    #[serde(default)]
+    pub stream: Option<bool>,
+    #[serde(default)]
+    pub stream_options: Option<StreamOptions>,
+    #[serde(default)]
+    pub stop: Option<StopSpec>,
+    #[serde(default)]
+    pub frequency_penalty: Option<f32>,
+    #[serde(default)]
+    pub presence_penalty: Option<f32>,
+    #[serde(default)]
+    pub seed: Option<u32>,
+    #[serde(default)]
+    pub echo: Option<bool>,
+    #[serde(default)]
+    pub logprobs: Option<u32>,
+    #[serde(default)]
+    pub user: Option<String>,
+}
+
+/// `prompt` as a string, or an array of strings. Token-id arrays are
+/// rejected at parse time with a 422.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum PromptSpec {
+    One(String),
+    Many(Vec<String>),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -122,9 +193,32 @@ pub struct ChatChoice {
     pub index: u32,
     pub message: ChatMessage,
     pub finish_reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logprobs: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Serialize, Default)]
+/// Legacy `/v1/completions` response. The same shape carries streaming
+/// chunks, with `usage` only on the last one.
+#[derive(Debug, Serialize)]
+pub struct TextCompletion {
+    pub id: String,
+    pub object: &'static str,
+    pub created: i64,
+    pub model: String,
+    pub choices: Vec<TextChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TextChoice {
+    pub index: u32,
+    pub text: String,
+    pub finish_reason: Option<String>,
+    pub logprobs: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Default)]
 pub struct Usage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
@@ -139,6 +233,8 @@ pub struct ChatChunk {
     pub created: i64,
     pub model: String,
     pub choices: Vec<ChatChunkChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
 }
 
 #[derive(Debug, Serialize)]
@@ -147,6 +243,8 @@ pub struct ChatChunkChoice {
     pub delta: ChatDelta,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finish_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logprobs: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -222,4 +320,7 @@ pub struct ModelEntry {
     pub object: &'static str, // "model"
     pub created: i64,
     pub owned_by: &'static str,
+    /// Base model of a LoRA adapter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
 }

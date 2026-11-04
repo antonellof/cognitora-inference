@@ -113,6 +113,9 @@ mod tests {
             vram_total_mb: 0,
             cordoned: false,
             kv_epoch: 0,
+            ready: true,
+            draining: false,
+            adapters: vec![],
             last_heartbeat: std::time::Instant::now(),
         }
     }
@@ -120,23 +123,7 @@ mod tests {
     #[test]
     fn admits_when_disabled() {
         let cfg = Config::default();
-        let prefix = cgn_core::prefix::PrefixIndex::new(Duration::from_secs(60));
-        let state = SharedState {
-            cfg,
-            nodes: std::sync::Arc::new(crate::cluster::NodeRegistry::new()),
-            prefix: std::sync::Arc::new(prefix),
-            started: std::time::Instant::now(),
-            policy: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
-                crate::state::RoutingPolicy {
-                    kv: 0.55,
-                    load: 0.25,
-                    power: 0.10,
-                    capacity: 0.10,
-                },
-            )),
-            carbon: std::sync::Arc::new(crate::carbon::CarbonTracker::new()),
-            admission: std::sync::Arc::new(crate::admission::Admission::new()),
-        };
+        let state = SharedState::build(cfg);
         let req = GenerateRequest::default();
         assert_eq!(
             check(&state, &req, &make_node(1000)),
@@ -150,23 +137,7 @@ mod tests {
         cfg.router.autoscaler.deadline_admission = true;
         cfg.router.admission.ttft_slo = Duration::from_millis(100);
         cfg.router.admission.max_concurrent_per_replica = 1;
-        let prefix = cgn_core::prefix::PrefixIndex::new(Duration::from_secs(60));
-        let state = SharedState {
-            cfg,
-            nodes: std::sync::Arc::new(crate::cluster::NodeRegistry::new()),
-            prefix: std::sync::Arc::new(prefix),
-            started: std::time::Instant::now(),
-            policy: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
-                crate::state::RoutingPolicy {
-                    kv: 0.55,
-                    load: 0.25,
-                    power: 0.10,
-                    capacity: 0.10,
-                },
-            )),
-            carbon: std::sync::Arc::new(crate::carbon::CarbonTracker::new()),
-            admission: std::sync::Arc::new(crate::admission::Admission::new()),
-        };
+        let state = SharedState::build(cfg);
         let req = GenerateRequest {
             deadline_ms: 200,
             ..Default::default()

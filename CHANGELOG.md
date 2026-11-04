@@ -10,6 +10,124 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+The "production path" release. A review of the request path found API and
+security bugs that unit tests could not see, so this release fixes them and
+adds `tests/e2e/request_path.py`, which drives real binaries and asserts what
+clients observe.
+
+### Breaking
+
+- **Scopes are enforced** (`[auth].enforce_scopes`, default `true`). Chat needs
+  `chat`, embeddings need `embed`, or `*`. Keys with no scopes get 403, and so
+  do OIDC tokens without a matching `scope` claim or group mapping. Set
+  `enforce_scopes = false` while migrating.
+- **`cgn-kvcached` refuses a non-loopback `quic_listen` without mTLS.** Enable
+  `[security].require_mtls`, bind to loopback, or set
+  `[kv].allow_insecure_quic = true`. Under mTLS every peer cert needs the
+  `[kv].quic_server_name` SAN (default `cognitora`). Add it with
+  `cgn-ctl pki bootstrap --san cognitora` or your CA. Recipes and the Helm
+  chart opt in where they run without mTLS.
+- **`X-Forwarded-For` is ignored** unless the socket peer is listed in
+  `[router.rate_limit].trusted_proxies`. Behind a proxy, set this or
+  unauthenticated clients share one bucket. `X-CGN-Subject` is no longer read.
+- **`user` no longer sets the tenant.** Tenants come from the credential: the
+  `tenant:<id>` scope, else the key or subject. `user` now feeds session
+  affinity. Tenants stop sharing cached prefixes, which lowers hit rates for
+  workloads that relied on it. `[router].kv_tenant_isolation = false` restores
+  sharing.
+- **A failed stream ends with an error event and no `[DONE]`.** The old
+  `finish_reason: "error:<code>"` is gone, and failures before the first token
+  are real HTTP errors rather than an empty 200.
+- **`max_tokens` is no longer defaulted to 256.** Unset means the engine's
+  default.
+- **`/v1/completions` is a real legacy endpoint.** It takes `prompt`, returns
+  `text_completion`, and applies no chat template. `n > 1`, `echo`, `logprobs`
+  and token-array prompts get an error instead of being ignored.
+- **`SamplingParams.seed` is now `optional`** in the proto, so 0 is a real seed.
+  Wire-compatible; Rust callers see `Option<u32>`.
+
+### Security
+
+- **QUIC peer traffic is authenticated.** It previously used a throwaway
+  certificate, skipped server verification and had no client auth in every
+  build, so anyone reaching the port could read or write KV blocks.
+- **Rate limits key on the authenticated principal.** Clients could previously
+  rotate `X-CGN-Subject` or `X-Forwarded-For` to get a new bucket per request.
+  Buckets are now swept, so rotation can't grow memory.
+- **Scope and model authorization.** New `model:<name>` scopes; `/v1/models`
+  shows only what a key may use. OIDC group mapping is wired up through
+  `[auth].oidc_group_scopes` and `oidc_groups_claim`.
+- **Per-tenant KV isolation.** Prefix digests are salted by tenant, and vLLM
+  gets `cache_salt` so isolation holds inside its own cache.
+- OIDC refreshes keys on an unknown `kid` instead of rejecting tokens for up to
+  an hour after rotation.
+- API-key changes apply within 15 s, so revocation works without a restart.
+
+### Fixed
+
+- Streaming failures returned HTTP 200 with an empty stream, including
+  admission rejection and no available nodes. They now return the real status.
+- `max_completion_tokens`, `seed`, `frequency_penalty` and `presence_penalty`
+  never reached the engine. `top_k`, `min_p`, `repetition_penalty`,
+  `logit_bias`, `parallel_tool_calls`, `logprobs` and `top_logprobs` now do too.
+- `usage.prompt_tokens` was always 0 and streaming reported no usage. Usage now
+  comes from the engine, and `stream_options.include_usage` works. When an
+  engine reports nothing, the router falls back to its own estimate.
+- Clients saw two `finish_reason` chunks, and buffered responses lost `length`.
+- A dropped engine connection looked like a normal end of answer. It is now an
+  error.
+- A client disconnect left the engine generating until its channel filled.
+  The engine call is now cancelled.
+- Cascade confidence was a length heuristic. It now uses engine logprobs, with
+  the heuristic as a fallback visible in
+  `cgn_router_cascade_confidence_total{source}`.
+- Prefix hashing split on whitespace, so CJK prompts produced almost no blocks.
+- Images were left out of prefix hashes, so different images looked like a
+  cache hit.
+- `traceparent`, `tracestate` and `x-cgn-deadline-ms` headers were dropped.
+- Generations were cut off at 10 minutes. Only a stalled stream times out now.
+- Bodies over 2 MB got a 413, and gRPC limited messages to 4 MB, which blocked
+  base64 images. See `[router].max_body_mb` (default 32).
+- `/healthz` could pass before the HTTP port was bound.
+- `[kv]` keys in the Helm chart and example config were ignored because they
+  used the wrong names, as were several `[router.admission]` and
+  `[router.rate_limit]` keys.
+
+### Added
+
+- **Retry before the first token.** Engine failures, stalls
+  (`[router].first_token_timeout`) and empty streams now retry on another node.
+  Client errors such as a 400 are not retried.
+- **Graceful drain.** On SIGTERM the router fails `/readyz` and finishes
+  in-flight streams (`[router].drain_timeout`). Agents advertise `draining`,
+  stop receiving work, finish theirs and then stop the engine
+  (`[agent].drain_timeout`).
+- **Real `/readyz`**, on both listeners: 503 while draining or with no ready
+  node. Routers now skip nodes whose engine isn't ready.
+- **Real tokenizers.** `[models.*].tokenizer` or `tokenizer_repo` load
+  `tokenizer.json` for prefix hashing and token counts.
+  `cgn_router_tokenizer_fallback_total` shows when the estimate was used.
+- **Live in-flight tracking and connection pooling.** Routing counts its own
+  requests per node, so bursts spread instead of waiting for a heartbeat. One
+  multiplexed gRPC channel per agent replaces a new connection per request.
+- **Virtual keys.** `tpm:<n>` and `budget:<n>` scopes cap tokens per minute and
+  lifetime tokens. `GET /v1/usage` reports spend, `[auth].usage_file` persists
+  it, and `cgn_router_tenant_tokens_total{tenant,kind}` exports it.
+- **Fair queuing.** At `max_queue`, requests park per tenant
+  (`wait_queue_per_tenant`, `wait_timeout`) and freed slots rotate across
+  tenants. `cgn_router_admission_waiting{model}` tracks the backlog.
+- **Session affinity.** `x-session-id` or `user` pins a conversation to a
+  rendezvous-hashed node through a score bonus (`score_weights.session`), which
+  load can still override.
+- **LoRA.** `[models.*.lora]` starts adapters on vLLM and SGLang. Each is
+  requested by name, advertised in heartbeats, listed in `/v1/models` with its
+  `parent`, and hashed separately.
+- **`scripts/bench/proof/proof.py`** measures overhead, KV routing gain and
+  J/token, against stubs (`local`), Apple GPUs (`metal`) or a cluster (`gpu`).
+  [`reports/benchmark-request-path-metal.md`](reports/benchmark-request-path-metal.md)
+  has real inference on an M2 Pro. NVIDIA and vLLM numbers, and J/token, are
+  still outstanding.
+
 ## [0.9.2] - 2026-09-23
 
 The "LMCache multiprocess" release. vLLM can attach to a standalone

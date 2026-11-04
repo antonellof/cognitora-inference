@@ -18,6 +18,8 @@ spec:
         app.kubernetes.io/component: agent
     spec:
       serviceAccountName: {{ include "cognitora.fullname" . }}
+      # Longer than [agent].drain_timeout, so generations can finish.
+      terminationGracePeriodSeconds: 45
       {{- with .Values.agent.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

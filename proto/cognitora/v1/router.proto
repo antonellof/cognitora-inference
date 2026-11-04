@@ -33,6 +33,11 @@ message GenerateRequest {
   // `tools`, `tool_choice`, `response_format`. Forwarded verbatim to
   // the engine's chat-completions request. Empty = none supplied.
   string         extensions_json = 11;
+  // Legacy `/v1/completions` raw prompt. When set, `messages` is empty and
+  // the engine must not apply a chat template.
+  string         prompt       = 12;
+  // Stable conversation key for session affinity. Empty = none.
+  string         session      = 13;
 }
 
 // EmbedRequest / EmbedResponse moved to common.proto so Agent and Router

@@ -11,8 +11,8 @@
 use std::sync::LazyLock;
 
 use cgn_core::prefix::PrefixIndex;
-use cgn_telemetry::prometheus::IntCounterVec;
 use cgn_telemetry::counter_vec;
+use cgn_telemetry::prometheus::IntCounterVec;
 use dashmap::DashMap;
 
 use super::NodeEntry;
@@ -40,11 +40,7 @@ pub struct CacheStateTracker {
 impl CacheStateTracker {
     /// Reconcile prefix claims after a fresh node heartbeat. Returns the
     /// action taken, if any.
-    pub fn reconcile(
-        &self,
-        prefix: &PrefixIndex,
-        entry: &NodeEntry,
-    ) -> Option<PruneReason> {
+    pub fn reconcile(&self, prefix: &PrefixIndex, entry: &NodeEntry) -> Option<PruneReason> {
         let had_prev = self.inner.contains_key(&entry.node_id);
         let prev = self
             .inner
@@ -148,6 +144,9 @@ mod tests {
             vram_total_mb: 0,
             cordoned: false,
             kv_epoch: epoch,
+            ready: true,
+            draining: false,
+            adapters: vec![],
             last_heartbeat: std::time::Instant::now(),
         }
     }

@@ -1,7 +1,6 @@
 # Security model
 
-Cognitora is mTLS-by-default and hard to mis-configure into "open
-internet" mode. This page describes the trust boundaries, key material,
+This page describes the trust boundaries, key material,
 and the auth flow for the OpenAI HTTP surface.
 
 ## Trust boundaries
@@ -25,9 +24,28 @@ and the auth flow for the OpenAI HTTP surface.
 * **Public** surface (HTTP): any OpenAI client. Authenticated via API
   key (`Authorization: Bearer <key>`) or OIDC bearer token.
 * **Internal** surface (gRPC + QUIC): only Cognitora processes,
-  authenticated by mTLS leaf certificates rooted at a cluster CA.
+  authenticated by mTLS leaf certificates rooted at a cluster CA when
+  `[security].require_mtls = true`. The binary default is off, for local
+  use. Production deployments must turn it on; gRPC has no other
+  authentication.
+* **KV peer traffic** (QUIC) carries data derived from prompts. With mTLS it
+  requires a cluster-CA certificate holding the `[kv].quic_server_name` SAN.
+  Without mTLS, `cgn-kvcached` refuses a non-loopback listener unless
+  `[kv].allow_insecure_quic = true`.
 * **Admin** surface (HTTP `:9091`/`:9092`): bound to `127.0.0.1` by
   default. The Helm chart never exposes these as Services.
+
+## Tenancy
+
+The tenant comes from the credential (`tenant:<id>` scope, else the key or
+subject), never from a request field. Prefix digests are salted per tenant,
+and vLLM receives a matching `cache_salt`, so one tenant can't probe another's
+prompts through cache timing. Other engines rely on the router's routing
+separation only: they keep a shared in-process cache.
+
+The router's gRPC surface takes `tenant` from the caller and relies on mTLS.
+It has no API-key auth, rate limits or token budgets, so expose it only to
+trusted services.
 
 ## PKI
 

@@ -52,6 +52,8 @@ pub struct ModelSpec {
     pub max_model_len: Option<u32>,
     pub extra_args: Vec<String>,
     pub path: Option<std::path::PathBuf>,
+    /// LoRA adapters to serve alongside the base model: name -> path.
+    pub lora: std::collections::BTreeMap<String, String>,
     /// cgn-infer layer-pipeline topology (`[models.*.pipeline]`).
     pub pipeline: Option<cgn_core::config::PipelineTopologyConfig>,
 }
@@ -81,11 +83,20 @@ pub struct GenerateReq {
     /// Legacy plain-text completion path. Only used when `messages`
     /// is empty (e.g. raw `/v1/completions` with no chat history).
     pub prompt: String,
+    /// 0 omits the field so the engine applies its own default.
     pub max_tokens: u32,
     pub temperature: f32,
     pub top_p: f32,
     pub stop: Vec<String>,
     pub stream: bool,
+    pub seed: Option<u32>,
+    pub frequency_penalty: f32,
+    pub presence_penalty: f32,
+    /// 1.0 (or 0, unset on the wire) leaves the engine default.
+    pub repetition_penalty: f32,
+    pub top_k: u32,
+    /// Ask the engine for per-token logprobs. Reported on `Token.logprob`.
+    pub logprobs: bool,
     /// OpenAI extension passthrough (`tools` / `tool_choice` /
     /// `response_format`), JSON object verbatim. Merged into the
     /// engine's chat-completions body. Empty = none.

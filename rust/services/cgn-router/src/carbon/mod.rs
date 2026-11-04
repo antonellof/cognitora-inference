@@ -84,23 +84,22 @@ impl CarbonTracker {
             stale: false,
         });
         self.sample.store(sample);
-        INTENSITY_GAUGE
-            .with_label_values(&[zone])
-            .set(intensity);
+        INTENSITY_GAUGE.with_label_values(&[zone]).set(intensity);
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CarbonAdmission {
     Admit,
-    Reject {
-        intensity: f64,
-        threshold: f64,
-    },
+    Reject { intensity: f64, threshold: f64 },
 }
 
 /// Evaluate whether a request should be admitted given the current sample.
-pub fn check_admission(cfg: &CarbonConfig, sample: &CarbonSample, priority: RequestPriority) -> CarbonAdmission {
+pub fn check_admission(
+    cfg: &CarbonConfig,
+    sample: &CarbonSample,
+    priority: RequestPriority,
+) -> CarbonAdmission {
     if !cfg.enabled || priority != RequestPriority::Low {
         return CarbonAdmission::Admit;
     }
@@ -308,6 +307,9 @@ mod tests {
     fn priority_header_parsing() {
         assert_eq!(RequestPriority::parse_header("low"), RequestPriority::Low);
         assert_eq!(RequestPriority::parse_header("HIGH"), RequestPriority::High);
-        assert_eq!(RequestPriority::parse_header("nope"), RequestPriority::Normal);
+        assert_eq!(
+            RequestPriority::parse_header("nope"),
+            RequestPriority::Normal
+        );
     }
 }

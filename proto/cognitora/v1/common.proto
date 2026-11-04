@@ -33,7 +33,8 @@ message SamplingParams {
   uint32   max_tokens        = 4;
   repeated string stop       = 5;
   bool     logprobs          = 6;
-  uint32   seed              = 7;
+  // Absent means "engine picks"; 0 is a valid seed.
+  optional uint32 seed       = 7;
   float    frequency_penalty = 8;
   float    presence_penalty  = 9;
   float    repetition_penalty = 10;
@@ -52,6 +53,12 @@ message Token {
   // when the engine emits tool-call deltas. Forwarded unchanged from
   // engine SSE → agent → router → client.
   string tool_calls_json = 7;
+  // Engine-reported usage. Set on the terminal token only; 0 when the
+  // engine did not report it.
+  uint32 prompt_tokens = 8;
+  uint32 completion_tokens = 9;
+  // Raw OpenAI `logprobs` object of this chunk, when requested.
+  string logprobs_json = 10;
 }
 
 // ----------------------------------------------------------------------------

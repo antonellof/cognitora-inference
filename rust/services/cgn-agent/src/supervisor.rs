@@ -52,6 +52,31 @@ pub struct Supervisor {
     /// published to etcd as truth-fed KV claims. Filled by the gRPC
     /// `Generate` handler, drained by the health/heartbeat loop.
     pub kv_confirmed: Mutex<Vec<Vec<u8>>>,
+    /// Set on SIGTERM. The heartbeat advertises it so routers stop
+    /// sending new work while in-flight generations finish.
+    pub draining: std::sync::atomic::AtomicBool,
+    /// Wakes the heartbeat loop so a drain is published immediately.
+    pub drain_notify: tokio::sync::Notify,
+    /// Generations currently running on this node.
+    pub inflight: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+/// Counts one generation for the lifetime of the guard.
+pub struct InflightGuard(Arc<std::sync::atomic::AtomicUsize>);
+
+impl InflightGuard {
+    pub fn new(supervisor: &Supervisor) -> Self {
+        supervisor
+            .inflight
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Self(supervisor.inflight.clone())
+    }
+}
+
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
 }
 
 impl Supervisor {
@@ -76,6 +101,9 @@ impl Supervisor {
             engine,
             children: Mutex::new(Vec::new()),
             kv_confirmed: Mutex::new(Vec::new()),
+            draining: std::sync::atomic::AtomicBool::new(false),
+            drain_notify: tokio::sync::Notify::new(),
+            inflight: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         };
         s.spawn_engine_for_default_model().await?;
         Ok(s)
@@ -85,6 +113,7 @@ impl Supervisor {
         let (name, m) = self.cfg.models.iter().next()?;
         Some(ModelSpec {
             name: name.clone(),
+            lora: m.lora.clone(),
             tp: m.tp,
             max_model_len: m.max_model_len,
             extra_args: m.extra_args.clone(),
@@ -178,6 +207,22 @@ impl Supervisor {
         for mut child in children {
             let _ = child.start_kill();
             let _ = tokio::time::timeout(Duration::from_secs(30), child.wait()).await;
+        }
+    }
+
+    /// Advertise the drain, then wait for in-flight generations to finish
+    /// or `timeout` to pass. Returns how many were still running.
+    pub async fn drain(&self, timeout: Duration) -> usize {
+        use std::sync::atomic::Ordering;
+        self.draining.store(true, Ordering::Release);
+        self.drain_notify.notify_one();
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            let running = self.inflight.load(Ordering::Acquire);
+            if running == 0 || std::time::Instant::now() >= deadline {
+                return running;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 

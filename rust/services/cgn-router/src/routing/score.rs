@@ -29,18 +29,21 @@ pub struct Score {
 ///
 /// Inputs:
 /// * `node`  — the candidate node's last-known telemetry.
+/// * `queue_depth` — best estimate of work queued on the node; heartbeats
+///   lag by seconds, so the selector merges in the router's own count.
 /// * `kv_overlap` — fraction of request chunks this node holds (`[0,1]`).
 /// * `peer_max_power` — highest power draw seen across all candidates,
 ///   used to normalise this node's power into `[0,1]`.
 pub fn score_node(
     policy: &RoutingPolicy,
     node: &NodeEntry,
+    queue_depth: u32,
     kv_overlap: f32,
     peer_max_power: f32,
 ) -> Score {
     // Queue depth: assume 64 is "full" at p99 for a single replica.
     const QUEUE_FULL: f32 = 64.0;
-    let load = (1.0 - (node.queue_depth as f32 / QUEUE_FULL)).clamp(0.0, 1.0);
+    let load = (1.0 - (queue_depth as f32 / QUEUE_FULL)).clamp(0.0, 1.0);
 
     let power = if peer_max_power > 0.0 {
         (1.0 - (node.power_watts / peer_max_power)).clamp(0.0, 1.0)
@@ -78,6 +81,7 @@ mod tests {
             load: 0.25,
             power: 0.10,
             capacity: 0.10,
+            session: 0.25,
         }
     }
 
@@ -98,6 +102,9 @@ mod tests {
             vram_total_mb: 0,
             cordoned: false,
             kv_epoch: 0,
+            ready: true,
+            draining: false,
+            adapters: vec![],
             last_heartbeat: std::time::Instant::now(),
         }
     }
@@ -106,15 +113,15 @@ mod tests {
     fn idle_full_cache_beats_busy_cold_cache() {
         let n_idle = node(0, 100, 100, 200.0);
         let n_busy = node(60, 100, 100, 200.0);
-        let s_idle = score_node(&pol(), &n_idle, 1.0, 200.0);
-        let s_busy = score_node(&pol(), &n_busy, 0.0, 200.0);
+        let s_idle = score_node(&pol(), &n_idle, n_idle.queue_depth, 1.0, 200.0);
+        let s_busy = score_node(&pol(), &n_busy, n_busy.queue_depth, 0.0, 200.0);
         assert!(s_idle.total > s_busy.total);
     }
 
     #[test]
     fn signals_in_unit_range() {
         let n = node(10, 50, 100, 150.0);
-        let s = score_node(&pol(), &n, 0.5, 200.0);
+        let s = score_node(&pol(), &n, n.queue_depth, 0.5, 200.0);
         for v in [s.kv, s.load, s.power, s.capacity, s.total] {
             assert!((0.0..=1.0).contains(&v), "{v} out of range");
         }

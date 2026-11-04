@@ -35,7 +35,7 @@ pub async fn run(cmd: Cmd) -> Result<()> {
             std::fs::create_dir_all(&out)
                 .map_err(|e| Error::Internal(format!("mkdir {}: {e}", out.display())))?;
             let sans = if sans.is_empty() {
-                vec!["localhost".into()]
+                vec!["localhost".into(), "cognitora".into()]
             } else {
                 sans
             };

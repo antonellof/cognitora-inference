@@ -42,6 +42,8 @@ message AgentGenerateRequest {
   // publishes these to etcd as *confirmed* KV claims, replacing the
   // router's optimistic guess with completion-confirmed truth.
   repeated bytes digests      = 11;
+  // Legacy raw prompt, see GenerateRequest.prompt.
+  string         prompt       = 12;
 }
 
 message KvHandoffSpec {

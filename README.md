@@ -356,7 +356,14 @@ cognitora/
   .github/workflows/          ci.yml, release.yml, e2e.yml
 ```
 
-## Performance targets (CI gates)
+## Performance targets
+
+Measured so far, on one M2 Pro with two `llama-server` engines on Metal and no
+TLS ([report](reports/benchmark-request-path-metal.md)): the router adds 1 to
+2 ms p50 and 1.5 to 4 ms p99, so the p99 target isn't reliably met yet. KV-aware
+routing cut p50 TTFT from about 1.5 s to 0.2 s on a multi-turn workload. The
+other rows are targets, not results. NVIDIA, vLLM and J/token numbers aren't
+published yet.
 
 | Metric                                      | Target          |
 | ------------------------------------------- | --------------- |

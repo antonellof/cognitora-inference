@@ -7,9 +7,8 @@ use cgn_core::{config::Config, Error, Result};
 use cgn_proto::v1::{
     block_info::Tier as PTier,
     kv_server::{Kv, KvServer},
-    BlockInfo, BlockInfoList, Hash, HashList, PullSpec, PutBlockSpec, PushSpec, StatsRequest,
-    StatsResponse,
-    Status as PStatus,
+    BlockInfo, BlockInfoList, Hash, HashList, PullSpec, PushSpec, PutBlockSpec, StatsRequest,
+    StatsResponse, Status as PStatus,
 };
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::info;

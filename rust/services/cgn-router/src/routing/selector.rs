@@ -11,7 +11,9 @@
 //!    prefill the node can skip — not just a count of matching chunks.
 //! 3. Score each node via [`score_node`], using
 //!    `prefix_length / total_chunks` as the KV signal.
-//! 4. Pick the highest scorer; randomise on ties.
+//! 4. Pick the highest scorer. A session's rendezvous-hash node gets a
+//!    bonus, and queue depth includes the router's own in-flight count, so
+//!    identical idle nodes share a burst instead of one taking all of it.
 
 use std::sync::Arc;
 
@@ -36,14 +38,45 @@ pub struct RoutingDecision {
     pub digests: Vec<[u8; 32]>,
 }
 
-/// Pick the best node for `(model, role, token_ids)`.
+/// What is being routed.
+#[derive(Debug, Clone, Copy)]
+pub struct RouteKey<'a> {
+    pub model: &'a str,
+    /// Prefix-hash salt: the model, plus the tenant under KV isolation.
+    pub salt: &'a str,
+    /// Conversation key for session affinity.
+    pub session: Option<&'a str>,
+    pub token_ids: &'a [u32],
+}
+
+/// Build the digest salt. An empty tenant keeps the bare model name.
+pub fn prefix_salt(state: &SharedState, model: &str, tenant: &str) -> String {
+    if tenant.is_empty() || !state.cfg.router.kv_tenant_isolation {
+        model.to_string()
+    } else {
+        format!("{model}\0{tenant}")
+    }
+}
+
+/// Rendezvous hash: the candidate with the highest `H(session, node)`.
+/// Adding or removing a node only moves the sessions it owned.
+pub fn rendezvous<'a>(session: &str, nodes: &'a [Arc<NodeEntry>]) -> Option<&'a Arc<NodeEntry>> {
+    nodes.iter().max_by_key(|n| {
+        let mut h = blake3::Hasher::new();
+        h.update(session.as_bytes());
+        h.update(&[0]);
+        h.update(n.node_id.as_bytes());
+        *h.finalize().as_bytes()
+    })
+}
+
+/// Pick the best node for `key`.
 pub async fn pick(
     state: &SharedState,
-    model: &str,
+    key: &RouteKey<'_>,
     role: NodeRole,
-    token_ids: &[u32],
 ) -> Result<RoutingDecision> {
-    pick_excluding(state, model, role, token_ids, &[]).await
+    pick_excluding(state, key, role, &[]).await
 }
 
 /// Like [`pick`], but never returns a node whose id is in `exclude`.
@@ -51,11 +84,11 @@ pub async fn pick(
 /// to accept a request is excluded from the immediate re-pick.
 pub async fn pick_excluding(
     state: &SharedState,
-    model: &str,
+    key: &RouteKey<'_>,
     role: NodeRole,
-    token_ids: &[u32],
     exclude: &[String],
 ) -> Result<RoutingDecision> {
+    let model = key.model;
     let mut candidates = state.nodes.nodes_for(role, Some(model));
     candidates.retain(|n| !exclude.iter().any(|x| x == &n.node_id));
 
@@ -103,7 +136,7 @@ pub async fn pick_excluding(
     // 0..N, so equal digests imply identical prefixes. This is what makes
     // longest-prefix matching correct (independent per-window hashes would
     // falsely cross-match windows from unrelated requests).
-    let digests = cgn_core::hash::hash_seq_chunks(model, token_ids);
+    let digests = cgn_core::hash::hash_seq_chunks(key.salt, key.token_ids);
 
     // Step 2: per-node *longest contiguous prefix length* in chunks.
     // This is the actual prefill we'd skip if we routed here — Smith's-rule
@@ -122,6 +155,10 @@ pub async fn pick_excluding(
 
     // Step 4: score everyone.
     let policy = state.policy.load();
+    let session_node = key
+        .session
+        .and_then(|s| rendezvous(s, &candidates))
+        .map(|n| n.node_id.clone());
     let mut best: Option<(Arc<NodeEntry>, Score, f32)> = None;
     for node in &candidates {
         let prefix_chunks = prefix_len_by_node.get(&node.node_id).copied().unwrap_or(0);
@@ -130,7 +167,11 @@ pub async fn pick_excluding(
         } else {
             prefix_chunks as f32 / digests.len() as f32
         };
-        let s = score_node(&policy, node, overlap, peer_max_power);
+        let queue = state.effective_queue(node);
+        let mut s = score_node(&policy, node, queue, overlap, peer_max_power);
+        if session_node.as_deref() == Some(node.node_id.as_str()) {
+            s.total += policy.session;
+        }
         match &best {
             Some((_, prev, _)) if prev.total >= s.total => {}
             _ => best = Some((node.clone(), s, overlap)),
@@ -160,13 +201,13 @@ pub async fn pick_excluding(
 /// `Colocate`-style single-node routing and returns the same node twice.
 pub async fn pick_pair(
     state: &SharedState,
-    model: &str,
+    key: &RouteKey<'_>,
     prefill_role: NodeRole,
     decode_role: NodeRole,
-    token_ids: &[u32],
     exclude: &[String],
 ) -> Result<(RoutingDecision, RoutingDecision)> {
-    let prefill = pick_excluding(state, model, prefill_role, token_ids, exclude).await?;
+    let model = key.model;
+    let prefill = pick_excluding(state, key, prefill_role, exclude).await?;
 
     // Decode node: re-pick filtering out the prefill node when possible.
     // We avoid the same node id; if the only eligible decode node is the
@@ -195,7 +236,7 @@ pub async fn pick_pair(
         .fold(0.0_f32, f32::max);
     let mut best: Option<(Arc<NodeEntry>, Score)> = None;
     for n in &distinct {
-        let s = score_node(&policy, n, 0.0, peer_max_power);
+        let s = score_node(&policy, n, state.effective_queue(n), 0.0, peer_max_power);
         match &best {
             Some((_, prev)) if prev.total >= s.total => {}
             _ => best = Some((n.clone(), s)),
@@ -230,33 +271,25 @@ pub fn decision_for_test(node: Arc<NodeEntry>, score: Score) -> RoutingDecision 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cluster::NodeRegistry;
-    use crate::state::RoutingPolicy;
+
+    /// A route for model `llama3` with no tenant or session.
+    fn key(ids: &[u32]) -> RouteKey<'_> {
+        RouteKey {
+            model: "llama3",
+            salt: "llama3",
+            session: None,
+            token_ids: ids,
+        }
+    }
 
     fn fake_state() -> SharedState {
-        let cfg = cgn_core::config::Config::default();
-        // Bypass async with a blocking helper in tests.
-        let prefix = cgn_core::prefix::PrefixIndex::new(std::time::Duration::from_secs(60));
-        SharedState {
-            cfg,
-            nodes: Arc::new(NodeRegistry::new()),
-            prefix: Arc::new(prefix),
-            started: std::time::Instant::now(),
-            policy: Arc::new(arc_swap::ArcSwap::from_pointee(RoutingPolicy {
-                kv: 0.55,
-                load: 0.25,
-                power: 0.10,
-                capacity: 0.10,
-            })),
-            carbon: Arc::new(crate::carbon::CarbonTracker::new()),
-            admission: Arc::new(crate::admission::Admission::new()),
-        }
+        SharedState::build(cgn_core::config::Config::default())
     }
 
     #[tokio::test]
     async fn returns_unavailable_when_no_nodes() {
         let s = fake_state();
-        let r = pick(&s, "llama3", NodeRole::Both, &[1, 2, 3]).await;
+        let r = pick(&s, &key(&[1, 2, 3]), NodeRole::Both).await;
         assert!(matches!(r, Err(Error::Unavailable(_))));
     }
 
@@ -283,6 +316,9 @@ mod tests {
             vram_total_mb: vram_mb,
             cordoned: false,
             kv_epoch: 0,
+            ready: true,
+            draining: false,
+            adapters: vec![],
             last_heartbeat: std::time::Instant::now(),
         }
     }
@@ -294,9 +330,7 @@ mod tests {
         s.nodes.upsert(entry("n1", 400.0, 350.0, "", 0));
         s.nodes.upsert(entry("n2", 200.0, 350.0, "", 0));
         for _ in 0..8 {
-            let d = pick(&s, "llama3", NodeRole::Both, &[1, 2, 3])
-                .await
-                .unwrap();
+            let d = pick(&s, &key(&[1, 2, 3]), NodeRole::Both).await.unwrap();
             assert_eq!(d.node.node_id, "n2");
         }
     }
@@ -306,9 +340,7 @@ mod tests {
         let s = fake_state();
         // Every node over cap: still serve rather than fail.
         s.nodes.upsert(entry("n1", 400.0, 350.0, "", 0));
-        let d = pick(&s, "llama3", NodeRole::Both, &[1, 2, 3])
-            .await
-            .unwrap();
+        let d = pick(&s, &key(&[1, 2, 3]), NodeRole::Both).await.unwrap();
         assert_eq!(d.node.node_id, "n1");
     }
 
@@ -334,7 +366,7 @@ mod tests {
             .upsert(entry("big", 0.0, 0.0, "NVIDIA H100 80GB HBM3", 81_000));
 
         for _ in 0..8 {
-            let d = pick(&state, "llama3", NodeRole::Both, &[1, 2, 3])
+            let d = pick(&state, &key(&[1, 2, 3]), NodeRole::Both)
                 .await
                 .unwrap();
             assert_ne!(d.node.node_id, "small");
@@ -357,9 +389,157 @@ mod tests {
             .nodes
             .upsert(entry("mi", 0.0, 0.0, "AMD Instinct MI300X", 192_000));
 
-        let d = pick(&state, "llama3", NodeRole::Both, &[1, 2, 3])
+        let d = pick(&state, &key(&[1, 2, 3]), NodeRole::Both)
             .await
             .unwrap();
         assert_eq!(d.node.node_id, "mi");
+    }
+
+    #[tokio::test]
+    async fn burst_spreads_before_the_next_heartbeat() {
+        let s = fake_state();
+        s.nodes.upsert(entry("n1", 0.0, 0.0, "", 0));
+        s.nodes.upsert(entry("n2", 0.0, 0.0, "", 0));
+        let mut guards = Vec::new();
+        let mut seen = std::collections::HashMap::<String, u32>::new();
+        for _ in 0..10 {
+            let d = pick(&s, &key(&[]), NodeRole::Both).await.unwrap();
+            guards.push(s.track_node(&d.node.node_id));
+            *seen.entry(d.node.node_id.clone()).or_default() += 1;
+        }
+        assert_eq!(seen.get("n1"), Some(&5), "{seen:?}");
+        assert_eq!(seen.get("n2"), Some(&5), "{seen:?}");
+    }
+
+    #[tokio::test]
+    async fn inflight_count_is_released_with_the_guard() {
+        let s = fake_state();
+        let g = s.track_node("n1");
+        assert_eq!(s.node_inflight("n1"), 1);
+        drop(g);
+        assert_eq!(s.node_inflight("n1"), 0);
+    }
+
+    #[tokio::test]
+    async fn session_sticks_while_load_is_equal() {
+        let s = fake_state();
+        for id in ["n1", "n2", "n3", "n4"] {
+            s.nodes.upsert(entry(id, 0.0, 0.0, "", 0));
+        }
+        let keyed = RouteKey {
+            session: Some("conversation-7"),
+            ..key(&[])
+        };
+        let first = pick(&s, &keyed, NodeRole::Both)
+            .await
+            .unwrap()
+            .node
+            .node_id
+            .clone();
+        for _ in 0..8 {
+            let d = pick(&s, &keyed, NodeRole::Both).await.unwrap();
+            assert_eq!(d.node.node_id, first);
+        }
+    }
+
+    #[tokio::test]
+    async fn sessions_land_across_nodes() {
+        let nodes: Vec<_> = ["n1", "n2", "n3", "n4"]
+            .iter()
+            .map(|id| Arc::new(entry(id, 0.0, 0.0, "", 0)))
+            .collect();
+        let hit: std::collections::HashSet<_> = (0..200)
+            .map(|i| {
+                rendezvous(&format!("s{i}"), &nodes)
+                    .unwrap()
+                    .node_id
+                    .clone()
+            })
+            .collect();
+        assert_eq!(hit.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn removing_a_node_only_moves_its_own_sessions() {
+        let all: Vec<_> = ["n1", "n2", "n3", "n4"]
+            .iter()
+            .map(|id| Arc::new(entry(id, 0.0, 0.0, "", 0)))
+            .collect();
+        let fewer: Vec<_> = all.iter().filter(|n| n.node_id != "n4").cloned().collect();
+        for i in 0..200 {
+            let s = format!("s{i}");
+            let before = rendezvous(&s, &all).unwrap().node_id.clone();
+            let after = rendezvous(&s, &fewer).unwrap().node_id.clone();
+            if before != "n4" {
+                assert_eq!(before, after);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn tenants_never_see_each_others_prefix_claims() {
+        let s = fake_state();
+        s.nodes.upsert(entry("n1", 0.0, 0.0, "", 0));
+        let ids: Vec<u32> = (0..64).collect();
+        let salt_a = prefix_salt(&s, "llama3", "a");
+        let salt_b = prefix_salt(&s, "llama3", "b");
+        let of = |salt: &'_ str| {
+            let salt = salt.to_string();
+            let ids = ids.clone();
+            let s = &s;
+            async move {
+                let k = RouteKey {
+                    salt: &salt,
+                    ..key(&ids)
+                };
+                pick(s, &k, NodeRole::Both).await.unwrap()
+            }
+        };
+        let a = of(&salt_a).await;
+        s.prefix.insert_many(&a.digests, "n1");
+        assert_eq!(of(&salt_a).await.overlap, 1.0);
+        assert_eq!(of(&salt_b).await.overlap, 0.0);
+    }
+
+    #[test]
+    fn isolation_can_be_turned_off_and_is_skipped_without_a_tenant() {
+        let s = fake_state();
+        assert_eq!(prefix_salt(&s, "m", ""), "m");
+        assert_ne!(prefix_salt(&s, "m", "t"), "m");
+        let mut c = cgn_core::config::Config::default();
+        c.router.kv_tenant_isolation = false;
+        assert_eq!(prefix_salt(&SharedState::build(c), "m", "t"), "m");
+    }
+
+    #[tokio::test]
+    async fn draining_and_unready_nodes_get_no_new_work() {
+        let s = fake_state();
+        let mut draining = entry("draining", 0.0, 0.0, "", 0);
+        draining.draining = true;
+        let mut cold = entry("cold", 0.0, 0.0, "", 0);
+        cold.ready = false;
+        s.nodes.upsert(draining);
+        s.nodes.upsert(cold);
+        assert!(pick(&s, &key(&[]), NodeRole::Both).await.is_err());
+        s.nodes.upsert(entry("live", 0.0, 0.0, "", 0));
+        let d = pick(&s, &key(&[]), NodeRole::Both).await.unwrap();
+        assert_eq!(d.node.node_id, "live");
+    }
+
+    #[tokio::test]
+    async fn lora_adapters_route_to_nodes_serving_them() {
+        let s = fake_state();
+        let mut with = entry("with-adapter", 0.0, 0.0, "", 0);
+        with.adapters = vec!["sql".into()];
+        s.nodes.upsert(with);
+        s.nodes.upsert(entry("without", 0.0, 0.0, "", 0));
+        let k = RouteKey {
+            model: "sql",
+            salt: "sql",
+            session: None,
+            token_ids: &[],
+        };
+        let d = pick(&s, &k, NodeRole::Both).await.unwrap();
+        assert_eq!(d.node.node_id, "with-adapter");
     }
 }

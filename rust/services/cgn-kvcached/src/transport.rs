@@ -12,9 +12,21 @@
 //! The same module exposes both the server (`serve_quic`) and a small
 //! client (`peer_push`, `peer_pull`) that the gRPC `Push`/`Pull` handlers
 //! drive.
+//!
+//! # Transport security
+//!
+//! Peer traffic carries KV blocks derived from user prompts, so it is
+//! authenticated whenever it can leave the host:
+//!
+//! * `[security].require_mtls = true`: both sides present certificates
+//!   chained to the cluster CA (`[security].ca_file`). Peers without one
+//!   fail the handshake.
+//! * Otherwise the listener must be loopback, or the operator must opt in
+//!   with `[kv].allow_insecure_quic = true`. Startup fails instead of
+//!   silently exposing an unauthenticated endpoint.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
@@ -36,8 +48,80 @@ const MAX_BLOCK_BYTES: u64 = 16 * 1024 * 1024;
 // Server
 // ---------------------------------------------------------------------------
 
-pub async fn serve_quic(store: Arc<Store>, addr: SocketAddr) -> Result<()> {
-    let server_config = build_server_config(addr)?;
+/// How this process authenticates QUIC peers.
+#[derive(Debug, Clone)]
+pub enum QuicSecurity {
+    /// Mutual TLS against the cluster CA.
+    Mtls {
+        ca: std::path::PathBuf,
+        cert: std::path::PathBuf,
+        key: std::path::PathBuf,
+        /// Name peers must present in their certificate SANs.
+        server_name: String,
+    },
+    /// Encrypted but unauthenticated. Only reachable through
+    /// [`QuicSecurity::from_config`] on loopback or by explicit opt-in.
+    Insecure,
+}
+
+impl QuicSecurity {
+    /// Resolve the policy for `listen`. Fails closed: a non-loopback
+    /// listener without mTLS needs `allow_insecure_quic = true`.
+    pub fn from_config(cfg: &cgn_core::config::Config, listen: SocketAddr) -> Result<Self> {
+        if cfg.security.require_mtls {
+            let (Some(ca), Some(cert), Some(key)) = (
+                cfg.security.ca_file.clone(),
+                cfg.security.cert_file.clone(),
+                cfg.security.key_file.clone(),
+            ) else {
+                return Err(Error::Config(
+                    "require_mtls=true but [security].ca_file/cert_file/key_file are not set"
+                        .into(),
+                ));
+            };
+            return Ok(Self::Mtls {
+                ca,
+                cert,
+                key,
+                server_name: cfg.kv.quic_server_name.clone(),
+            });
+        }
+        if listen.ip().is_loopback() {
+            return Ok(Self::Insecure);
+        }
+        if cfg.kv.allow_insecure_quic {
+            warn!(%listen, "kv quic is UNAUTHENTICATED: allow_insecure_quic=true on a non-loopback listener");
+            return Ok(Self::Insecure);
+        }
+        Err(Error::Config(format!(
+            "kv.quic_listen {listen} is not loopback and [security].require_mtls is false; \
+             enable mTLS, bind to 127.0.0.1, or set [kv].allow_insecure_quic = true"
+        )))
+    }
+
+    fn server_name(&self) -> &str {
+        match self {
+            Self::Mtls { server_name, .. } => server_name,
+            Self::Insecure => "cognitora",
+        }
+    }
+}
+
+static SECURITY: OnceLock<QuicSecurity> = OnceLock::new();
+
+/// Install the process-wide policy used by [`peer_pull`] / [`peer_push`].
+pub fn install_security(sec: QuicSecurity) {
+    let _ = SECURITY.set(sec);
+}
+
+fn security() -> Result<&'static QuicSecurity> {
+    SECURITY
+        .get()
+        .ok_or_else(|| Error::Internal("quic security policy not installed".into()))
+}
+
+pub async fn serve_quic(store: Arc<Store>, addr: SocketAddr, sec: QuicSecurity) -> Result<()> {
+    let server_config = build_server_config(addr, &sec)?;
     let endpoint = Endpoint::server(server_config, addr)
         .map_err(|e| Error::Internal(format!("quic listen: {e}")))?;
 
@@ -130,8 +214,16 @@ async fn handle_connection(store: Arc<Store>, conn: Connection) -> Result<()> {
 /// Open a one-shot connection to a peer and request the named block.
 /// Returns the block bytes (possibly empty if the peer replied with a miss).
 pub async fn peer_pull(remote: SocketAddr, addr: BlockAddress) -> Result<Bytes> {
-    let endpoint = build_client_endpoint()?;
-    let conn = connect(&endpoint, remote).await?;
+    peer_pull_with(security()?, remote, addr).await
+}
+
+async fn peer_pull_with(
+    sec: &QuicSecurity,
+    remote: SocketAddr,
+    addr: BlockAddress,
+) -> Result<Bytes> {
+    let endpoint = build_client_endpoint(sec)?;
+    let conn = connect(&endpoint, remote, sec.server_name()).await?;
     let (mut send, mut recv) = conn
         .open_bi()
         .await
@@ -164,8 +256,9 @@ pub async fn peer_pull(remote: SocketAddr, addr: BlockAddress) -> Result<Bytes> 
 
 /// Push `bytes` into the named block on the peer.
 pub async fn peer_push(remote: SocketAddr, addr: BlockAddress, bytes: Bytes) -> Result<()> {
-    let endpoint = build_client_endpoint()?;
-    let conn = connect(&endpoint, remote).await?;
+    let sec = security()?;
+    let endpoint = build_client_endpoint(sec)?;
+    let conn = connect(&endpoint, remote, sec.server_name()).await?;
     let (mut send, mut recv) = conn
         .open_bi()
         .await
@@ -185,9 +278,9 @@ pub async fn peer_push(remote: SocketAddr, addr: BlockAddress, bytes: Bytes) -> 
     Ok(())
 }
 
-async fn connect(endpoint: &Endpoint, remote: SocketAddr) -> Result<Connection> {
+async fn connect(endpoint: &Endpoint, remote: SocketAddr, name: &str) -> Result<Connection> {
     let conn = endpoint
-        .connect(remote, "cognitora")
+        .connect(remote, name)
         .map_err(|e| Error::Internal(format!("quic connect: {e}")))?
         .await
         .map_err(|e| Error::Unavailable(format!("quic connect await: {e}")))?;
@@ -234,26 +327,63 @@ async fn write_frame(send: &mut quinn::SendStream, frame: &Frame) -> Result<()> 
 // TLS / endpoint setup
 // ---------------------------------------------------------------------------
 
-fn build_server_config(addr: SocketAddr) -> Result<ServerConfig> {
-    let pki = cgn_tls::generate_dev_pki(
-        "cgn-kvcached",
-        vec![
-            "localhost".into(),
-            addr.ip().to_string(),
-            "cognitora".into(),
-        ],
-    )?;
+fn read_certs(path: &std::path::Path) -> Result<Vec<rustls_pki_types::CertificateDer<'static>>> {
+    let pem =
+        std::fs::read(path).map_err(|e| Error::Tls(format!("read {}: {e}", path.display())))?;
+    rustls_pemfile::certs(&mut pem.as_slice())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|e| Error::Tls(format!("parse {}: {e}", path.display())))
+}
 
-    let cert_chain = vec![rustls_pki_types::CertificateDer::from(pem_decode(
-        &pki.leaf_cert_pem,
-    )?)];
-    let key = rustls_pki_types::PrivateKeyDer::try_from(pem_decode(&pki.leaf_key_pem)?)
-        .map_err(|e| Error::Tls(format!("private key: {e}")))?;
+fn read_key(path: &std::path::Path) -> Result<rustls_pki_types::PrivateKeyDer<'static>> {
+    let pem =
+        std::fs::read(path).map_err(|e| Error::Tls(format!("read {}: {e}", path.display())))?;
+    rustls_pemfile::private_key(&mut pem.as_slice())
+        .map_err(|e| Error::Tls(format!("parse {}: {e}", path.display())))?
+        .ok_or_else(|| Error::Tls(format!("no private key in {}", path.display())))
+}
 
-    let mut rustls_cfg = rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(cert_chain, key)
-        .map_err(|e| Error::Tls(format!("rustls server: {e}")))?;
+fn root_store(ca: &std::path::Path) -> Result<Arc<rustls::RootCertStore>> {
+    let mut roots = rustls::RootCertStore::empty();
+    for cert in read_certs(ca)? {
+        roots
+            .add(cert)
+            .map_err(|e| Error::Tls(format!("ca {}: {e}", ca.display())))?;
+    }
+    Ok(Arc::new(roots))
+}
+
+fn build_server_config(addr: SocketAddr, sec: &QuicSecurity) -> Result<ServerConfig> {
+    let mut rustls_cfg = match sec {
+        QuicSecurity::Mtls { ca, cert, key, .. } => {
+            let verifier = rustls::server::WebPkiClientVerifier::builder(root_store(ca)?)
+                .build()
+                .map_err(|e| Error::Tls(format!("client verifier: {e}")))?;
+            rustls::ServerConfig::builder()
+                .with_client_cert_verifier(verifier)
+                .with_single_cert(read_certs(cert)?, read_key(key)?)
+                .map_err(|e| Error::Tls(format!("rustls server: {e}")))?
+        }
+        QuicSecurity::Insecure => {
+            let pki = cgn_tls::generate_dev_pki(
+                "cgn-kvcached",
+                vec![
+                    "localhost".into(),
+                    addr.ip().to_string(),
+                    "cognitora".into(),
+                ],
+            )?;
+            let cert_chain = vec![rustls_pki_types::CertificateDer::from(pem_decode(
+                &pki.leaf_cert_pem,
+            )?)];
+            let key = rustls_pki_types::PrivateKeyDer::try_from(pem_decode(&pki.leaf_key_pem)?)
+                .map_err(|e| Error::Tls(format!("private key: {e}")))?;
+            rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(cert_chain, key)
+                .map_err(|e| Error::Tls(format!("rustls server: {e}")))?
+        }
+    };
     rustls_cfg.alpn_protocols = vec![ALPN.to_vec()];
 
     let mut server_config = ServerConfig::with_crypto(Arc::new(
@@ -273,14 +403,17 @@ fn build_server_config(addr: SocketAddr) -> Result<ServerConfig> {
     Ok(server_config)
 }
 
-fn build_client_endpoint() -> Result<Endpoint> {
-    // Dev mode: trust any cert (matches the dev PKI on the server side).
-    // Production deployments wire this through the cluster CA via
-    // `cgn-tls`; see `docs/architecture/security.md`.
-    let mut crypto = rustls::ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(SkipServerVerification::new())
-        .with_no_client_auth();
+fn build_client_endpoint(sec: &QuicSecurity) -> Result<Endpoint> {
+    let mut crypto = match sec {
+        QuicSecurity::Mtls { ca, cert, key, .. } => rustls::ClientConfig::builder()
+            .with_root_certificates(root_store(ca)?)
+            .with_client_auth_cert(read_certs(cert)?, read_key(key)?)
+            .map_err(|e| Error::Tls(format!("rustls client: {e}")))?,
+        QuicSecurity::Insecure => rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(SkipServerVerification::new())
+            .with_no_client_auth(),
+    };
     crypto.alpn_protocols = vec![ALPN.to_vec()];
     let mut client_config = ClientConfig::new(Arc::new(
         quinn::crypto::rustls::QuicClientConfig::try_from(crypto)
@@ -360,4 +493,158 @@ fn pem_decode(s: &str) -> Result<Vec<u8>> {
         rustls_pemfile::Item::Sec1Key(d) => d.secret_sec1_der().to_vec(),
         _ => return Err(Error::Tls("unsupported pem item".into())),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cgn_core::config::{KvConfig, SecurityConfig};
+    use std::net::{IpAddr, Ipv4Addr, UdpSocket};
+
+    struct Pki {
+        _dir: tempfile::TempDir,
+        ca: std::path::PathBuf,
+        cert: std::path::PathBuf,
+        key: std::path::PathBuf,
+    }
+
+    fn pki() -> Pki {
+        let dir = tempfile::tempdir().unwrap();
+        let p = cgn_tls::generate_dev_pki("peer", vec!["cognitora".into()]).unwrap();
+        let (ca, cert, key) = (
+            dir.path().join("ca.pem"),
+            dir.path().join("leaf.pem"),
+            dir.path().join("leaf.key"),
+        );
+        std::fs::write(&ca, p.ca_cert_pem).unwrap();
+        std::fs::write(&cert, p.leaf_cert_pem).unwrap();
+        std::fs::write(&key, p.leaf_key_pem).unwrap();
+        Pki {
+            _dir: dir,
+            ca,
+            cert,
+            key,
+        }
+    }
+
+    fn mtls(ca: &Pki, id: &Pki) -> QuicSecurity {
+        QuicSecurity::Mtls {
+            ca: ca.ca.clone(),
+            cert: id.cert.clone(),
+            key: id.key.clone(),
+            server_name: "cognitora".into(),
+        }
+    }
+
+    fn free_addr() -> SocketAddr {
+        UdpSocket::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+    }
+
+    fn addr() -> BlockAddress {
+        BlockAddress {
+            digest: [7u8; 32],
+            layer: 0,
+        }
+    }
+
+    async fn server(sec: QuicSecurity) -> (SocketAddr, Arc<Store>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = KvConfig {
+            ram_gib: 1,
+            ssd_gib: 1,
+            ssd_dir: dir.path().join("ssd"),
+            index_dir: dir.path().join("idx"),
+            ..KvConfig::default()
+        };
+        let store = Arc::new(Store::open(&cfg).await.unwrap());
+        store
+            .put_ram(addr(), Bytes::from_static(b"secret"), "")
+            .unwrap();
+        let listen = free_addr();
+        tokio::spawn(serve_quic(store.clone(), listen, sec));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        (listen, store, dir)
+    }
+
+    #[tokio::test]
+    async fn mtls_peer_with_cluster_cert_reads_block() {
+        let p = pki();
+        let (listen, _s, _d) = server(mtls(&p, &p)).await;
+        let got = peer_pull_with(&mtls(&p, &p), listen, addr()).await.unwrap();
+        assert_eq!(&got[..], b"secret");
+    }
+
+    #[tokio::test]
+    async fn mtls_rejects_client_without_certificate() {
+        let p = pki();
+        let (listen, _s, _d) = server(mtls(&p, &p)).await;
+        // Insecure client presents no certificate. TLS 1.3 client auth
+        // fails after the client thinks the handshake finished, so the
+        // rejection may surface on the first stream instead of connect.
+        let got = tokio::time::timeout(
+            Duration::from_secs(5),
+            peer_pull_with(&QuicSecurity::Insecure, listen, addr()),
+        )
+        .await
+        .expect("handshake must fail, not hang");
+        assert!(got.is_err(), "client without a cert read a block: {got:?}");
+    }
+
+    #[tokio::test]
+    async fn mtls_rejects_client_from_another_ca() {
+        let (cluster, rogue) = (pki(), pki());
+        let (listen, _s, _d) = server(mtls(&cluster, &cluster)).await;
+        let got = tokio::time::timeout(
+            Duration::from_secs(5),
+            peer_pull_with(&mtls(&cluster, &rogue), listen, addr()),
+        )
+        .await
+        .expect("handshake must fail, not hang");
+        assert!(got.is_err(), "rogue client read a block: {got:?}");
+    }
+
+    #[tokio::test]
+    async fn mtls_client_rejects_server_from_another_ca() {
+        let (cluster, rogue) = (pki(), pki());
+        let (listen, _s, _d) = server(mtls(&rogue, &rogue)).await;
+        let got = peer_pull_with(&mtls(&cluster, &cluster), listen, addr()).await;
+        assert!(got.is_err(), "client trusted a rogue server");
+    }
+
+    fn cfg(require_mtls: bool, allow_insecure: bool) -> cgn_core::config::Config {
+        cgn_core::config::Config {
+            security: SecurityConfig {
+                require_mtls,
+                ..SecurityConfig::default()
+            },
+            kv: KvConfig {
+                allow_insecure_quic: allow_insecure,
+                ..KvConfig::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn policy_fails_closed_on_public_listener_without_mtls() {
+        let public = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 7091);
+        assert!(QuicSecurity::from_config(&cfg(false, false), public).is_err());
+        assert!(matches!(
+            QuicSecurity::from_config(&cfg(false, true), public),
+            Ok(QuicSecurity::Insecure)
+        ));
+    }
+
+    #[test]
+    fn policy_allows_loopback_and_requires_files_for_mtls() {
+        let lo = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 7091);
+        assert!(matches!(
+            QuicSecurity::from_config(&cfg(false, false), lo),
+            Ok(QuicSecurity::Insecure)
+        ));
+        assert!(QuicSecurity::from_config(&cfg(true, false), lo).is_err());
+    }
 }

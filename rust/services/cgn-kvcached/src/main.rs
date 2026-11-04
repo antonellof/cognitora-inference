@@ -46,6 +46,9 @@ async fn main() -> Result<()> {
         .parse()
         .map_err(|e| Error::Config(format!("kv.quic_listen: {e}")))?;
 
+    let quic_security = transport::QuicSecurity::from_config(&cfg, quic_listen)?;
+    transport::install_security(quic_security.clone());
+
     // Background eviction: RAM watermark spill + SSD TTL, at a fixed
     // cadence (default 1 Hz).
     let evict_store = store.clone();
@@ -61,7 +64,7 @@ async fn main() -> Result<()> {
 
     tokio::select! {
         r = grpc::serve(store.clone(), listen, &cfg) => r,
-        r = transport::serve_quic(store.clone(), quic_listen) => r,
+        r = transport::serve_quic(store.clone(), quic_listen, quic_security) => r,
         _ = tokio::signal::ctrl_c() => {
             info!("kvcached shutting down");
             Ok(())

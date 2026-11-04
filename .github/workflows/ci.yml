@@ -102,6 +102,8 @@ jobs:
         run: cargo build --release --no-default-features -p cgn-router -p cgn-agent
       - name: Multi-node KV routing smoke
         run: CGN_E2E_MULTINODE=1 CGN_SKIP_BUILD=1 ./tests/e2e/multi_node_kv.sh
+      - name: Request path (status codes, SSE, auth, retry, drain)
+        run: python3 tests/e2e/request_path.py --bin-dir target/release
 
   helm-lint:
     name: helm lint

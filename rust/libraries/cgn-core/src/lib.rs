@@ -15,6 +15,10 @@ pub mod prefix;
 
 pub use error::{exit_code, Error, Result};
 
+/// Largest router <-> agent gRPC message. Sits above the HTTP body limit
+/// so a base64 image that passes the gateway isn't rejected one hop later.
+pub const MAX_GRPC_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+
 /// Default UNIX domain socket directory used by the daemons.
 pub const DEFAULT_UDS_DIR: &str = "/run/cognitora";
 

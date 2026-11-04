@@ -16,6 +16,7 @@ redis-backend = ["dep:redis", "dep:chrono"]
 
 [dependencies]
 cgn-core      = { workspace = true }
+cgn-auth      = { workspace = true }
 cgn-telemetry = { workspace = true }
 
 axum            = { workspace = true }
