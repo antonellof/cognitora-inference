@@ -18,50 +18,143 @@ spec:
         histogram_quantile(0.99,
           sum(rate(cgn_router_routing_decision_seconds_bucket[5m])) by (le)
         ) * 1e6
-    - record: cgn:router:cache_hit_ratio
+    - record: cgn:router:ttft_p99_seconds
       expr: |
-        sum(rate(cgn_router_kv_cache_hits_total[5m]))
+        histogram_quantile(0.99,
+          sum(rate(cgn_router_chat_ttft_seconds_bucket[5m])) by (le, model)
+        )
+    - record: cgn:router:error_ratio
+      expr: |
+        sum(rate(cgn_router_chat_requests_total{status="5xx"}[5m]))
         /
-        clamp_min(sum(rate(cgn_router_kv_cache_lookups_total[5m])), 1)
-    - record: cgn:cluster:watts_total
+        sum(rate(cgn_router_chat_requests_total[5m]))
+    - record: cgn:router:mean_prefix_overlap
       expr: |
-        sum(cgn_power_watts)
+        sum(rate(cgn_router_prefix_overlap_ratio_sum[15m]))
+        /
+        sum(rate(cgn_router_prefix_overlap_ratio_count[15m]))
+    # Every router reports the same cluster view, so take the highest.
+    - record: cgn:cluster:nodes
+      expr: max(cgn_cluster_nodes_total)
+    - record: cgn:cluster:watts_total
+      expr: max(cgn_cluster_power_watts_total)
 
   - name: cognitora.alerts
     rules:
     - alert: CognitoraRouterDown
-      expr: up{job=~".*cgn-router.*"} == 0
+      expr: up{job="{{ include "cognitora.routerJob" . }}"} == 0
       for: 1m
       labels:
         severity: page
       annotations:
         summary: "cgn-router instance is down ({{ "{{" }} $labels.instance {{ "}}" }})"
-        runbook: "https://docs.cognitora.dev/operations/runbooks/router-down"
+        runbook: "https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/runbooks/router-down.md"
 
-    - alert: CognitoraRoutingDecisionSLO
+    - alert: CognitoraRouterNotScraped
+      expr: absent(up{job="{{ include "cognitora.routerJob" . }}"})
+      for: 5m
+      labels:
+        severity: page
+      annotations:
+        summary: "No cgn-router scrape targets, so no other alert here can fire"
+        runbook: "https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/observability.md"
+
+    - alert: CognitoraNoNodes
+      expr: cgn:cluster:nodes == 0
+      for: 2m
+      labels:
+        severity: page
+      annotations:
+        summary: "The router sees no nodes"
+        runbook: "https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/runbooks/agent-stuck.md"
+
+    - alert: CognitoraHighErrorRatio
+      expr: cgn:router:error_ratio > {{ .Values.metrics.prometheusRule.thresholds.errorRatio }}
+      for: 5m
+      labels:
+        severity: page
+      annotations:
+        summary: "More than {{ .Values.metrics.prometheusRule.thresholds.errorRatio }} of requests are failing"
+        runbook: "https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/runbooks/router-down.md"
+
+    - alert: CognitoraNodeLost
+      expr: cgn:cluster:nodes < max_over_time(cgn:cluster:nodes[1h])
+      for: 5m
+      labels:
+        severity: warn
+      annotations:
+        summary: "Fewer nodes than in the last hour; expected after a scale-down"
+        runbook: "https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/runbooks/agent-stuck.md"
+
+    - alert: CognitoraAgentNotReady
+      expr: max by (node) (cgn_cluster_node_up) == 0
+      for: 5m
+      labels:
+        severity: warn
+      annotations:
+        summary: "cgn-agent on {{ "{{" }} $labels.node {{ "}}" }} is not ready"
+        runbook: "https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/runbooks/agent-stuck.md"
+
+    - alert: CognitoraTtftSlo
+      expr: cgn:router:ttft_p99_seconds > {{ .Values.metrics.prometheusRule.thresholds.ttftP99Seconds }}
+      for: 10m
+      labels:
+        severity: warn
+      annotations:
+        summary: "TTFT p99 for {{ "{{" }} $labels.model {{ "}}" }} is above target"
+        runbook: "https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/slo.md"
+
+    - alert: CognitoraRoutingDecisionSlo
       expr: cgn:router:p99_routing_decision_us > 500
       for: 10m
       labels:
         severity: warn
       annotations:
         summary: "Routing decision p99 > 500 µs for 10m"
-        runbook: "https://docs.cognitora.dev/operations/slo"
+        runbook: "https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/slo.md"
 
-    - alert: CognitoraCacheHitRatioLow
-      expr: cgn:router:cache_hit_ratio < 0.4
-      for: 30m
-      labels:
-        severity: warn
-      annotations:
-        summary: "Cluster cache hit ratio < 0.4 for 30m (target ≥ 0.55)"
-        runbook: "https://docs.cognitora.dev/operations/runbooks/cache-cold"
-
-    - alert: CognitoraAgentNotReady
-      expr: cgn_agent_ready == 0
+    - alert: CognitoraAdmissionRejecting
+      expr: sum by (model) (rate(cgn_router_admission_rejected_total[5m])) > 0
       for: 5m
       labels:
         severity: warn
       annotations:
-        summary: "cgn-agent on {{ "{{" }} $labels.node {{ "}}" }} is not ready"
-        runbook: "https://docs.cognitora.dev/operations/runbooks/agent-stuck"
+        summary: "Requests for {{ "{{" }} $labels.model {{ "}}" }} are being rejected at admission"
+        runbook: "https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/runbooks/router-down.md"
+
+    - alert: CognitoraWaitQueueBacklog
+      expr: sum by (model) (cgn_router_admission_waiting) > 0
+      for: 10m
+      labels:
+        severity: warn
+      annotations:
+        summary: "Requests for {{ "{{" }} $labels.model {{ "}}" }} have been queuing for 10m"
+        runbook: "https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/runbooks/router-down.md"
+
+    - alert: CognitoraNodeOverPowerCap
+      expr: max by (node) (cgn_cluster_node_power_watts) > max by (node) (cgn_cluster_node_watt_limit > 0)
+      for: 15m
+      labels:
+        severity: warn
+      annotations:
+        summary: "{{ "{{" }} $labels.node {{ "}}" }} is over its power cap"
+        runbook: "https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/observability.md"
+
+    - alert: CognitoraLowPrefixOverlap
+      expr: cgn:router:mean_prefix_overlap < {{ .Values.metrics.prometheusRule.thresholds.minPrefixOverlap }}
+      for: 30m
+      labels:
+        severity: info
+      annotations:
+        summary: "Few requests reuse a cached prefix. This depends on the workload"
+        runbook: "https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/runbooks/cache-cold.md"
+
+    - alert: CognitoraTokenizerFallback
+      expr: sum by (model) (rate(cgn_router_tokenizer_fallback_total[15m])) > 0
+      for: 30m
+      labels:
+        severity: info
+      annotations:
+        summary: "{{ "{{" }} $labels.model {{ "}}" }} has no tokenizer, so prefix routing and usage are estimates"
+        runbook: "https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/../reference/config.md"
 {{- end }}

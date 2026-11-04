@@ -22,3 +22,13 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- $tag := .Values.global.image.tag | default .Chart.AppVersion -}}
 {{- printf "%s/%s:%s" .Values.global.image.registry .Values.global.image.repository $tag -}}
 {{- end -}}
+
+{{/* Service that exposes the router's /metrics. */}}
+{{- define "cognitora.routerMetricsService" -}}
+{{- printf "%s-router-metrics" (include "cognitora.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/* `job` label of router scrapes, used by alert rules. */}}
+{{- define "cognitora.routerJob" -}}
+{{- default (include "cognitora.routerMetricsService" .) .Values.metrics.prometheusRule.routerJob -}}
+{{- end -}}

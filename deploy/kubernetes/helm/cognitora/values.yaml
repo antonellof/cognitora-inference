@@ -244,6 +244,20 @@ metrics:
   prometheusRule:
     enabled: false
     labels: {}
+    # `job` label of your router scrape. Empty uses the ServiceMonitor's.
+    routerJob: ""
+    # Alert thresholds. Tune them to your models and traffic.
+    thresholds:
+      ttftP99Seconds: 2.5
+      errorRatio: 0.05
+      minPrefixOverlap: 0.1
+  # Scrapes the router's admin port, which serves /metrics. Requires the
+  # prometheus-operator CRDs. The port stays on a ClusterIP Service, so it
+  # is never exposed through router.service.type.
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
 
 # ---- Operator (CRD reconciliation) ----------------------------------------
 operator:

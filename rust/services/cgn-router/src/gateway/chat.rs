@@ -91,9 +91,8 @@ async fn serve(
         Err(e) => {
             // Nothing has been sent, so streaming clients get a real
             // status too, not a 200 with an empty stream.
-            CHAT_REQUESTS.with_label_values(&[&ctx.model, "5xx"]).inc();
             warn!(error = ?e, "completion failed");
-            return error_json(&e);
+            return count_error(&ctx.model, error_json(&e));
         }
     };
 
@@ -115,11 +114,24 @@ async fn serve(
             buffered_response(g, &ctx)
         }
         Err(e) => {
-            CHAT_REQUESTS.with_label_values(&[&ctx.model, "5xx"]).inc();
             warn!(error = ?e, "completion failed");
-            error_json(&e)
+            count_error(&ctx.model, error_json(&e))
         }
     }
+}
+
+/// Count a failed request. Server faults share one `5xx` label so alerts
+/// can use it for the error rate; client errors and overload keep their
+/// own code, because neither means the service is broken.
+fn count_error(model: &str, resp: Response) -> Response {
+    let status = resp.status();
+    let label = if status.is_server_error() {
+        "5xx"
+    } else {
+        status.as_str()
+    };
+    CHAT_REQUESTS.with_label_values(&[model, label]).inc();
+    resp
 }
 
 fn buffered_response(g: Generated, ctx: &ResponseCtx) -> Response {

@@ -57,6 +57,8 @@ every 5 s, plus `cgn_cluster_nodes_total` and
 | `cgn_router_chat_latency_seconds`         | histogram | `model`, `stream`            |
 | `cgn_router_chat_ttft_seconds`            | histogram | `model`                      |
 | `cgn_router_chat_completion_tokens_total` | counter   | `model`                      |
+| `cgn_router_routing_decision_seconds`     | histogram | `model`                      |
+| `cgn_router_prefix_overlap_ratio`         | histogram | `model`                      |
 | `cgn_router_tenant_tokens_total`          | counter   | `tenant`, `kind`             |
 | `cgn_router_token_limit_rejected_total`   | counter   | `limit`                      |
 | `cgn_router_rate_limited_total`           | counter   | —                            |
@@ -79,17 +81,19 @@ every 5 s, plus `cgn_cluster_nodes_total` and
 
 `cgn-agent` and `cgn-kvcached` export no Prometheus metrics of their own
 yet. Node health reaches Prometheus through the router's `cgn_cluster_node_*`
-gauges, and the block cache reports through its `Kv.Stats` RPC. No metric
-reports the prefix cache hit rate; the router logs `overlap` on each routing
-decision instead.
+gauges, and the block cache reports through its `Kv.Stats` RPC.
+`cgn_cluster_node_up` is 1 for a node that is ready and not draining.
+
+`cgn_router_prefix_overlap_ratio` is what the router believes a node holds,
+not a measured engine cache hit rate.
 
 `cgn_cluster_power_watts_total` sums `cgn_cluster_node_power_watts` across
 live nodes (refreshed every 5 s). `cgn_cluster_tokens_per_watt` is the
 recent completion-token rate divided by fleet power — use it with
 `scripts/bench/energy/` or `scripts/bench/proof/` for J/token numbers.
 
-`status` ∈ {`200`, `429`, `5xx`}, where `5xx` also counts client errors
-returned by the engine. `reason` ∈ {`queue_full`, `wait_timeout`,
+`status` is `200`, a client or overload code such as `400` or `429`, or
+`5xx` for every server fault. `reason` ∈ {`queue_full`, `wait_timeout`,
 `ttft_violation`}. `limit` ∈ {`tpm`, `budget`}. `source` ∈ {`logprobs`,
 `heuristic`}. `kind` ∈ {`prompt`, `completion`}.
 
@@ -110,27 +114,48 @@ Set `metrics.dashboards.enabled = true` in the Helm values to mount it
 into a `grafana_dashboard=1` ConfigMap that the kube-prometheus-stack
 Grafana sidecar picks up automatically. Panels:
 
-- Latency: routing-decision p99, TTFT p50/p95/p99 per model
-- Throughput: requests/s and tokens/s per node
-- Cache: hit ratio over 5m + per-tier hit count
-- Power: watts per chassis vs tokens/s (energy efficiency)
-- Health: ready replicas, queue depth, admission rejects
+- Latency: routing-decision p99, TTFT p99 per model
+- Prefix overlap, requests by status, in-flight by model
+- Power per node
 
 ## Alerting
 
-A `PrometheusRule` ships at
-[`deploy/kubernetes/helm/cognitora/templates/prometheus-rule.yaml`](../../deploy/kubernetes/helm/cognitora/templates/prometheus-rule.yaml),
-enabled with `metrics.prometheusRule.enabled = true`.
+The chart ships both halves of alerting, off by default. Both need the
+prometheus-operator CRDs:
 
-**Most of these rules don't work yet.** Only `CognitoraRouterDown` is built
-on a metric that exists. The others use `cgn_router_routing_decision_seconds`,
-`cgn_router_kv_cache_hits_total`, `cgn_agent_ready` and similar names the code
-doesn't export, so they can never fire. Until the chart is fixed, write alerts
-on the metrics above. Useful ones:
-
-```promql
-cgn_cluster_nodes_total == 0
-histogram_quantile(0.99, sum by (le, model) (rate(cgn_router_chat_ttft_seconds_bucket[5m]))) > 1
-rate(cgn_router_admission_rejected_total[5m]) > 0
-cgn_router_admission_waiting > 0
+```bash
+helm upgrade cognitora ... \
+  --set metrics.serviceMonitor.enabled=true \
+  --set metrics.prometheusRule.enabled=true
 ```
+
+`serviceMonitor` adds a ClusterIP Service for the router's admin port and
+scrapes it. If you scrape another way, set `metrics.prometheusRule.routerJob`
+to your `job` label, or the router-down alerts will look for the wrong job.
+Your Prometheus must also select these objects, which usually means copying
+its selector into `metrics.serviceMonitor.labels` and
+`metrics.prometheusRule.labels`.
+
+| Alert | Severity | Fires when |
+|-------|----------|------------|
+| `CognitoraRouterDown` | page | A router scrape fails for 1 min |
+| `CognitoraRouterNotScraped` | page | No router targets exist for 5 min, which would silence everything below |
+| `CognitoraNoNodes` | page | The router sees no nodes for 2 min |
+| `CognitoraHighErrorRatio` | page | Server errors exceed `thresholds.errorRatio` (5%) for 5 min |
+| `CognitoraNodeLost` | warn | Fewer nodes than at any point in the last hour; clears an hour after a scale-down |
+| `CognitoraAgentNotReady` | warn | A node is unready or draining for 5 min on every router |
+| `CognitoraTtftSlo` | warn | TTFT p99 exceeds `thresholds.ttftP99Seconds` (2.5 s) for 10 min |
+| `CognitoraRoutingDecisionSlo` | warn | Routing decision p99 exceeds 500 µs for 10 min |
+| `CognitoraAdmissionRejecting` | warn | Requests are rejected at admission for 5 min |
+| `CognitoraWaitQueueBacklog` | warn | Requests stay parked in wait queues for 10 min |
+| `CognitoraNodeOverPowerCap` | warn | A node stays above its `watt_limit` for 15 min |
+| `CognitoraLowPrefixOverlap` | info | Mean overlap is below `thresholds.minPrefixOverlap` (0.1) for 30 min |
+| `CognitoraTokenizerFallback` | info | A model has been using the estimate instead of a tokenizer for 30 min |
+
+Set the TTFT threshold from your tier in [SLOs](slo.md); the histogram's top
+bucket is 10 s, so it can't see beyond that. Overload (429) and client errors
+(400) deliberately don't count towards the error ratio.
+
+CI keeps this honest: `scripts/check-helm-metrics.py` fails if the chart uses a
+metric the code doesn't export, and `tests/helm/alerts_test.yaml` runs the rules
+through `promtool` to prove the main alerts fire and stay quiet when they should.

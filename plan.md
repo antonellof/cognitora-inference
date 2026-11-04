@@ -134,9 +134,9 @@ Everything below rests on evidence we don't have yet.
 * **Prefill for images and real KV events.** Prefix digests are computed
   router-side; engine block-hash events would tighten accuracy.
 * **Test depth.** `cgn-tls` and `cgn-telemetry` have no tests.
-* **Alerts and metrics.** Most Helm `PrometheusRule` entries use metrics
-  that don't exist, so they can't fire. `cgn-agent` and `cgn-kvcached`
-  export no metrics, and nothing reports the prefix hit rate.
+* **Metrics coverage.** `cgn-agent` and `cgn-kvcached` export no metrics, so
+  the chart can't alert on engine or block-cache health directly, and
+  prefix overlap is the router's belief rather than a measured hit rate.
 * **Exit codes.** `cgn_core::exit_code` is never called, so every failure
   exits 1.
 * **Deployment.** Terraform modules are stubs, and Helm has no

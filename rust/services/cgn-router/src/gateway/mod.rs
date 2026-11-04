@@ -351,6 +351,23 @@ mod tests {
         assert_eq!(why, "draining");
     }
 
+    /// Overload isn't an outage: alerts page on `5xx`, so a 429 can't use it.
+    #[tokio::test]
+    async fn admission_rejections_are_not_counted_as_server_errors() {
+        let mut cfg = Config::default();
+        cfg.router.admission.max_queue = 0;
+        cfg.router.admission.wait_queue_per_tenant = 0;
+        let body = serde_json::json!({"model": "metrics-429", "messages": []});
+        let (status, _) = call(app(cfg), post("/v1/chat/completions", body)).await;
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        let count = |label: &str| {
+            metrics::CHAT_REQUESTS
+                .with_label_values(&["metrics-429", label])
+                .get()
+        };
+        assert_eq!((count("429"), count("5xx")), (1, 0));
+    }
+
     #[tokio::test]
     async fn readyz_is_ok_without_discovery() {
         let probe = Request::get("/readyz").body(Body::empty()).unwrap();

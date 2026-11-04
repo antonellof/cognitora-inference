@@ -1,0 +1,151 @@
+# promtool unit tests for the chart's alerts. CI renders the chart with release
+# name `check` into rules.yaml next to this file. See .github/workflows/ci.yml.
+rule_files:
+  - rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: no nodes pages
+    interval: 1m
+    input_series:
+      - series: 'cgn_cluster_nodes_total{instance="r1"}'
+        values: '0x10'
+      - series: 'up{job="check-cognitora-router-metrics",instance="r1"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: CognitoraNoNodes
+        exp_alerts:
+          - exp_labels:
+              severity: page
+            exp_annotations:
+              summary: The router sees no nodes
+              runbook: https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/runbooks/agent-stuck.md
+
+  - name: a missing scrape target pages
+    interval: 1m
+    input_series:
+      - series: 'unrelated'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: CognitoraRouterNotScraped
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              job: check-cognitora-router-metrics
+            exp_annotations:
+              summary: No cgn-router scrape targets, so no other alert here can fire
+              runbook: https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/observability.md
+
+  - name: server errors page
+    interval: 1m
+    input_series:
+      - series: 'cgn_router_chat_requests_total{model="m",status="200"}'
+        values: '0+60x30'
+      - series: 'cgn_router_chat_requests_total{model="m",status="5xx"}'
+        values: '0+60x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CognitoraHighErrorRatio
+        exp_alerts:
+          - exp_labels:
+              severity: page
+            exp_annotations:
+              summary: More than 0.05 of requests are failing
+              runbook: https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/runbooks/router-down.md
+
+  - name: overload and client errors do not page
+    interval: 1m
+    input_series:
+      - series: 'cgn_router_chat_requests_total{model="m",status="200"}'
+        values: '0+60x30'
+      - series: 'cgn_router_chat_requests_total{model="m",status="429"}'
+        values: '0+600x30'
+      - series: 'cgn_router_chat_requests_total{model="m",status="400"}'
+        values: '0+600x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CognitoraHighErrorRatio
+        exp_alerts: []
+
+  - name: a node that is not ready warns
+    interval: 1m
+    input_series:
+      - series: 'cgn_cluster_node_up{node="n1",instance="r1"}'
+        values: '0x10'
+      - series: 'cgn_cluster_node_up{node="n2",instance="r1"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: CognitoraAgentNotReady
+        exp_alerts:
+          - exp_labels:
+              severity: warn
+              node: n1
+            exp_annotations:
+              summary: cgn-agent on n1 is not ready
+              runbook: https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/runbooks/agent-stuck.md
+
+  - name: one router seeing the node keeps it ready
+    interval: 1m
+    input_series:
+      - series: 'cgn_cluster_node_up{node="n1",instance="r1"}'
+        values: '0x10'
+      - series: 'cgn_cluster_node_up{node="n1",instance="r2"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: CognitoraAgentNotReady
+        exp_alerts: []
+
+  - name: a node without a power cap never alerts
+    interval: 1m
+    input_series:
+      - series: 'cgn_cluster_node_power_watts{node="n1",instance="r1"}'
+        values: '500x30'
+      - series: 'cgn_cluster_node_watt_limit{node="n1",instance="r1"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CognitoraNodeOverPowerCap
+        exp_alerts: []
+
+  - name: a node over its cap warns
+    interval: 1m
+    input_series:
+      - series: 'cgn_cluster_node_power_watts{node="n1",instance="r1"}'
+        values: '500x30'
+      - series: 'cgn_cluster_node_watt_limit{node="n1",instance="r1"}'
+        values: '400x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CognitoraNodeOverPowerCap
+        exp_alerts:
+          - exp_labels:
+              severity: warn
+              node: n1
+            exp_annotations:
+              summary: n1 is over its power cap
+              runbook: https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/observability.md
+
+  - name: slow first tokens warn
+    interval: 1m
+    input_series:
+      - series: 'cgn_router_chat_ttft_seconds_bucket{model="m",le="2.5"}'
+        values: '0x30'
+      - series: 'cgn_router_chat_ttft_seconds_bucket{model="m",le="5"}'
+        values: '0+60x30'
+      - series: 'cgn_router_chat_ttft_seconds_bucket{model="m",le="+Inf"}'
+        values: '0+60x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: CognitoraTtftSlo
+        exp_alerts:
+          - exp_labels:
+              severity: warn
+              model: m
+            exp_annotations:
+              summary: TTFT p99 for m is above target
+              runbook: https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/slo.md

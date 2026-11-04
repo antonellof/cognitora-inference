@@ -184,7 +184,9 @@ fn refresh(state: &SharedState) {
         let id = n.node_id.as_str();
         // Registry entries exist while the etcd lease is alive; a live
         // lease means the agent heartbeats, which requires engine ready.
-        NODE_UP.with_label_values(&[id]).set(1);
+        NODE_UP
+            .with_label_values(&[id])
+            .set((n.ready && !n.draining) as i64);
         NODE_CORDONED
             .with_label_values(&[id])
             .set(i64::from(n.cordoned));
