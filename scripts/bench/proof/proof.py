@@ -24,6 +24,7 @@ import shutil
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 from datetime import datetime, timezone
@@ -189,24 +190,31 @@ burst = 100000
     return s, ports
 
 
-class PowerSampler:
-    """Combined CPU+GPU power from powermetrics, which needs root."""
+class EnergySampler:
+    """Whole-machine energy over a run, from mac_energy.c (no root needed).
+
+    Counts the aggregate CPU, GPU, DRAM and ANE channels; `GPU0`, `PACC0_CPU`
+    and similar are parts of those. Includes the router, agents and load
+    generator, plus whatever else the machine is doing.
+    """
+
+    COUNTED = ("CPU Energy", "GPU Energy", "DRAM0", "ANE0")
 
     def __init__(self):
-        self.proc = None
-        if subprocess.run(["sudo", "-n", "true"], capture_output=True).returncode == 0:
-            self.proc = subprocess.Popen(
-                ["sudo", "-n", "powermetrics", "--samplers", "cpu_power,gpu_power", "-i", "1000"],
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        source = Path(__file__).with_name("mac_energy.c")
+        self.binary = Path(tempfile.mkdtemp(prefix="cgn-energy-")) / "mac_energy"
+        subprocess.run(["clang", "-O2", str(source), "-o", str(self.binary), "-lIOReport",
+                        "-framework", "CoreFoundation"], check=True, capture_output=True)
+        self.proc = subprocess.Popen([str(self.binary)], stdout=subprocess.PIPE, text=True)
+        time.sleep(0.2)
 
     def stop(self):
-        if not self.proc:
-            return None
-        subprocess.run(["sudo", "-n", "pkill", "powermetrics"], capture_output=True)
+        """Return {channel: joules} for the counted channels."""
+        self.proc.terminate()
         out = self.proc.communicate()[0]
-        mw = [float(l.split(":")[1].split()[0]) for l in out.splitlines()
-              if l.startswith("Combined Power")]
-        return statistics.mean(mw) / 1000 if mw else None
+        shutil.rmtree(self.binary.parent, ignore_errors=True)
+        read = dict(line.split("\t") for line in out.splitlines())
+        return {k: float(read[k]) for k in self.COUNTED if k in read}
 
 
 def real_checks(s, a):
@@ -250,18 +258,19 @@ def cmd_metal(a):
     requests = conversations(a.sessions, a.turns, a.system_chars)
     for r in requests:
         r["temperature"] = 0
+        r["max_tokens"] = a.max_tokens
     for label, weights in (("kv_aware", default),
                            ("load_only", "kv = 0.0\nload = 1.0\npower = 0.0\ncapacity = 0.0")):
         s, ports = metal_stack(a, weights)  # fresh engines: empty caches
         try:
             base = metric_sum(scrape(s.admin("/metrics")), "cgn_router_chat_completion_tokens_total")
-            power = PowerSampler()
+            energy = EnergySampler()
             start = time.time()
             url = s.url("/v1/chat/completions")
             with cf.ThreadPoolExecutor(a.concurrency) as ex:
                 ttfts = [t for t, _ in ex.map(lambda r: stream_ttft(url, r, AUTH), requests)]
             elapsed = time.time() - start
-            watts = power.stop()
+            joules = energy.stop()
             m = scrape(s.admin("/metrics"))
             tokens = metric_sum(m, "cgn_router_chat_completion_tokens_total") - base
             results[label] = {
@@ -269,8 +278,9 @@ def cmd_metal(a):
                 "ttft_p50_ms": statistics.median(ttfts) * 1e3,
                 "ttft_p95_ms": pct(ttfts, 95) * 1e3,
                 "per_node": {"elapsed_s": round(elapsed, 1), "completion_tokens": int(tokens)},
-                "mean_watts": watts,
-                "joules_per_token": watts * elapsed / tokens if watts and tokens else None,
+                "joules": joules,
+                "mean_watts": sum(joules.values()) / elapsed,
+                "joules_per_token": sum(joules.values()) / tokens if tokens else None,
             }
         finally:
             s.cleanup(False)
@@ -355,7 +365,9 @@ def report(path, mode, r):
         lines += [
             "**Real inference on an Apple GPU (Metal), not NVIDIA and not vLLM.** Two `llama-server`",
             "processes share one laptop GPU with the load generator, so absolute numbers are low",
-            "and don't predict a datacenter. Prefix reuse here is llama.cpp's own slot cache.", "",
+            "and don't predict a datacenter. Prefix reuse here is llama.cpp's own slot cache.",
+            "Energy comes from IOReport (`mac_energy.c`), is whole-machine, and includes idle draw,",
+            "the router, the agents and the load generator.", "",
             "GPU evidence:", "```", r.pop("gpu", ""), "```", "",
             "Real-engine checks:", "```json", json.dumps(r.pop("real_checks", {}), indent=2), "```", "",
         ]
@@ -380,9 +392,9 @@ def report(path, mode, r):
                     if "elapsed_s" not in k["per_node"] else
                     [f"| Elapsed | {k['per_node']['elapsed_s']} s | {l['per_node']['elapsed_s']} s |",
                      f"| Completion tokens | {k['per_node']['completion_tokens']} | {l['per_node']['completion_tokens']} |",
-                     "| J/token (CPU+GPU) | " + " | ".join(
-                         f"{x['joules_per_token']:.2f}" if x.get("joules_per_token") else
-                         "not measured (powermetrics needs root)" for x in (k, l)) + " |"]),
+                     f"| Energy, CPU+GPU+DRAM+ANE | {sum(k['joules'].values()):.0f} J | {sum(l['joules'].values()):.0f} J |",
+                     f"| Mean power | {k['mean_watts']:.1f} W | {l['mean_watts']:.1f} W |",
+                     f"| J per completion token | {k['joules_per_token']:.2f} | {l['joules_per_token']:.2f} |"]),
                   ""]
     for key, v in r.items():
         if mode == "gpu" and isinstance(v, dict) and "joules_per_token" in v:
@@ -413,6 +425,7 @@ def main():
     me.add_argument("--gguf", required=True)
     me.add_argument("--slots", type=int, default=4)
     me.add_argument("--ctx", type=int, default=32768)
+    me.add_argument("--max-tokens", type=int, default=64)
     me.set_defaults(fn=cmd_metal)
     g = sub.add_parser("gpu", parents=[common])
     g.add_argument("--router", required=True, help="router base URL")
