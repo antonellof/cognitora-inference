@@ -76,8 +76,8 @@ not the internal module names of either project.
 | Capability filtering | yes: per-model `min_vram_mb` / `require_gpu` matched against GPU identity (name, vendor, VRAM) in the heartbeat | no (homogeneous workers assumed per deployment) |
 | Load / capacity signals | live engine telemetry: vLLM/SGLang `/metrics` queue depth + KV occupancy scraped into the heartbeat | engine KV events + forward-pass metrics |
 | SLO / deadline propagation | yes (`cgn-router::deadline`) | yes (Planner SLA targets) |
-| Admission control | per-(model, role) inflight counters; queue caps; rate limiting | similar |
-| Dispatch retry / failover | pre-token retry against next-best node (failed node excluded) | in-flight request migration |
+| Admission control | per-(model, role) slots, per-tenant wait queues with round-robin release; rate limiting | similar |
+| Dispatch retry / failover | retry until the first token, on engine failures and stalls too (failed node excluded) | in-flight request migration |
 | Cascade (SLM → Mid → LLM) | yes (confidence gating, buffered **and** streaming) | — |
 
 ### Engines
@@ -126,7 +126,7 @@ sits above all of them**.
 
 | Concern | Cognitora | Dynamo |
 |---------|-----------|--------|
-| Runtime artefact | Six single-file binaries; no Python control plane, JVM, or operator runtime | Rust core + Python frontend / extensibility |
+| Runtime artefact | Seven single-file binaries; no Python control plane, JVM, or operator runtime | Rust core + Python frontend / extensibility |
 | Service discovery | etcd, or UDP gossip with `state_backend = "gossip"` (single-node needs nothing) | K8s-native, etcd, or file backends (etcd/NATS optional as of 1.x) |
 | Coordination plane | etcd (`nodes`, `routing/policy` keys) or gossip membership (`docs/architecture/gossip.md`) | pluggable planes (TCP/NATS request, ZMQ/NATS events) |
 | External hard dependencies | none (etcd optional; gossip mode is dependency-free) | none on Kubernetes; etcd/NATS on Slurm/bare-metal paths |
@@ -145,7 +145,7 @@ sits above all of them**.
 | Workload simulator | not yet | AIConfigurator (search 10K configs) |
 | Topology-aware gang scheduling | basic (cgn-operator + node selectors) | Grove (NVL72-aware) |
 | Federation (cross-cluster) | `cgn-router::federation` (concurrent peer probe, lowest-latency reachable peer wins, single-hop) + `cgn-kvcached` QUIC peer fetch | not shipped |
-| Multi-tenancy | OIDC SSO + group → scope mapping; in-process and Redis rate-limit | similar |
+| Multi-tenancy | OIDC group → scope mapping, virtual keys with token budgets, per-tenant KV salting; in-process rate limit | similar |
 | Energy / power telemetry | yes (Redfish + NVML, rocm-smi on AMD; IPMI/DCGM planned) | no |
 | Heterogeneous fleets (mixed GPU vendors / sizes) | yes: agents publish GPU identity, router filters per-model | assumes homogeneous workers per deployment |
 
@@ -156,11 +156,11 @@ sits above all of them**.
 | Text LLM | yes | yes |
 | Tool calling | yes: `tools` / `tool_choice` passthrough, streaming tool-call deltas, buffered aggregation | yes (built-in agent toolkit) |
 | Structured output | yes: `response_format` passthrough (engine guided decoding) | yes (engine-side) |
-| Multimodal (images) | yes: OpenAI content-parts passthrough; text-only prefix hashing | yes (E/P/D pipeline + embedding cache) |
+| Multimodal (images) | yes: OpenAI content-parts passthrough; prefix hashing covers text and image references | yes (E/P/D pipeline + embedding cache) |
 | Multimodal (audio) / disaggregated multimodal | not yet | yes |
 | Video generation | not yet | yes (FastVideo, SGLang Diffusion) |
 | Speculative decoding | yes (engine-side, passthrough) | yes (engine-side, passthrough) |
-| LoRA / adapters | yes (engine-side, passthrough) | yes (engine-side + multi-LoRA scheduling) |
+| LoRA / adapters | yes: `[models.*.lora]` on vLLM and SGLang, routed by adapter name; not yet run on a real engine | yes (engine-side + multi-LoRA scheduling) |
 
 ### Fault tolerance
 
@@ -168,8 +168,8 @@ sits above all of them**.
 |------------|-----------|--------|
 | Health checks (router + agent) | yes | yes |
 | In-flight request migration | not yet | yes (canary + migration on worker failure) |
-| Drain / cordon | yes (etcd `drain` flag, picked up by router scoring) | yes |
-| Idempotent retries | yes | yes |
+| Drain / cordon | yes: `cgn-ctl` cordon, plus drain on SIGTERM for agents and routers | yes |
+| Retries | yes, until the first token | yes |
 
 ### Observability
 
@@ -177,7 +177,7 @@ sits above all of them**.
 |---------|-----------|--------|
 | Prometheus metrics | yes | yes |
 | OpenTelemetry traces | yes | yes |
-| Per-tier KV metrics | yes (`cgn_kvcached_*`) | yes (KVBM + planner) |
+| Per-tier KV metrics | through the `Kv.Stats` RPC; no Prometheus export yet | yes (KVBM + planner) |
 | Power metrics | yes (`cgn_power_watts`, `cgn_cluster_node_watt_limit` draw-vs-cap) | no |
 | Cluster gauges + TTFT histogram | yes (`cgn_cluster_node_*`, `cgn_router_chat_ttft_seconds`) | planner metrics |
 | Bundled dashboard | yes (`dashboard/`: zero-dependency, polls any `/metrics` endpoint) | Grafana reference dashboards |
@@ -195,7 +195,7 @@ Differentiators where Cognitora is currently ahead:
    one-line installer with cosign-verified release tarballs, and
    Terraform recipes for the four major clouds, without requiring
    Kubernetes.
-3. **Pure-binary runtime.** Six static binaries, no Python control
+3. **Pure-binary runtime.** Seven static binaries, no Python control
    plane, no JVM, no operator install required. The same artifacts
    work under systemd, Helm, or `kubectl run`.
 4. **Sequence-chained KV digests.** Routing scores are computed on
@@ -244,8 +244,9 @@ Areas where Dynamo is currently ahead:
    harnesses (`scripts/bench/`) but no auto-search yet.
 6. **In-flight request migration.** When a Dynamo worker dies,
    in-flight requests can migrate to a healthy replica. Cognitora
-   restarts the agent and retries idempotent requests; mid-stream
-   migration is future work.
+   retries on another node until the first token; after that the
+   stream fails with an error event. Mid-stream migration is future
+   work.
 7. **Zero-config deploy (DGDR).** Specify model + SLA in one YAML and
    Dynamo profiles + plans + deploys. Our equivalent is the
    `recipes/` tree: pre-baked, not generated.

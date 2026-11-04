@@ -17,7 +17,8 @@ The router scores candidate workers using
 **sequence-chained BLAKE3 prefix digests** + **longest-prefix overlap**
 plus load, power, and capacity terms, then forwards via gRPC mTLS to the
 right `cgn-agent`. It also handles admission (deadline, quota, rate
-limit), the multi-model SLM→LLM cascade, prefill/decode disaggregation,
+limit, scopes, token budgets, per-tenant wait queues), retry before the
+first token, the multi-model SLM→LLM cascade, prefill/decode disaggregation,
 and cross-cluster federation.
 
 ## Install

@@ -23,27 +23,37 @@ A request travels:
 1. **HTTP ingress**: `cgn-router` accepts an OpenAI-compatible request
    on `:8080`. Auth is checked by `cgn-auth` (API key in
    `Authorization: Bearer ...` or OIDC bearer with JWKS rotation).
-   Rate limiting is applied by `cgn-ratelimit` keyed on the
-   authenticated subject.
-2. **Approximation**: the gateway hashes the prompt prefix into a
-   tree of **sequence-chained BLAKE3 digests** (each chunk's digest
-   covers all preceding tokens). The digests are the input to the
-   routing score and ensure that two requests with identical chunks
-   in different positions never collide.
-3. **Score**: for every healthy node that hosts the requested model,
-   `routing::score` computes
+   Rate limiting is applied by `cgn-ratelimit`, keyed on the
+   authenticated principal, else the client IP. Handlers then check
+   scopes, model access and token limits.
+2. **Tokenize**: the prompt becomes token ids through the model's
+   `tokenizer.json`, or a built-in estimate when none is configured.
+3. **Admission**: `Admission::admit` takes a slot for the (model, role)
+   pair. At `max_queue` the request parks in its tenant's wait queue,
+   and freed slots rotate across tenants. A full queue or a wait
+   timeout returns 429.
+4. **Digest**: the gateway hashes the ids into **sequence-chained
+   BLAKE3 digests** (each chunk's digest covers all preceding tokens),
+   salted by model and tenant. Two requests with identical chunks in
+   different positions never collide, and tenants never share a digest.
+5. **Score**: for every ready node serving the requested model or
+   adapter, `routing::score` computes
    `total = w_kv·longest_prefix + w_load·load + w_pwr·power + w_cap·capacity`
-   using the policy from etcd (live-updated via `arc_swap`). The router
-   selects the highest-scoring node; ties break on prefix hash.
-4. **Admission**: `admission::try_admit` increments an inflight
-   counter for the (model, role) pair; the request is rejected with
-   429 if the global queue is full.
-5. **Forward**: the gateway opens an `Agent.Generate` gRPC stream over
-   mTLS. `cgn-agent` proxies the stream to the engine subprocess
-   (`vllm`, `sglang`, `llama_cpp`, `mlx`, or `openai_compat`, selected by
+   using the policy from etcd (live-updated via `arc_swap`). The load
+   term includes the router's own in-flight count, and a session's
+   rendezvous-hashed node gets a bonus. The highest score wins.
+6. **Forward**: the gateway opens an `Agent.Generate` gRPC stream on a
+   pooled channel (mTLS when `require_mtls` is on). `cgn-agent` proxies
+   the stream to the engine subprocess (`vllm`, `sglang`, `llama_cpp`,
+   `mlx`, `tensorrt_llm`, `cgn_infer` or `openai_compat`, selected by
    `[engine].kind`; pluggable through the `Engine` trait).
-6. **Stream out**: tokens flow back through the gRPC stream and are
-   re-encoded as OpenAI SSE chunks by `gateway::sse`.
+7. **First token**: the gateway waits for it before committing to a
+   response. Failures so far retry on another node, up to three
+   attempts, or return a real HTTP error.
+8. **Stream out**: tokens flow back through the gRPC stream and are
+   re-encoded as OpenAI SSE chunks by `gateway::sse`, followed by usage
+   from the engine. A later failure ends the stream with an error
+   event and no `[DONE]`.
 
 For long prompts, the optional **disagg** path replaces step 5 with a
 two-stage flow: a prefill agent runs the first forward pass and emits
@@ -112,11 +122,15 @@ toward energy-efficient nodes when the operator turns the weight up.
 
 ## 6. Security
 
-* **mTLS everywhere** by default. `cgn-tls` provides one helper for
-  loading PEM material and another for generating dev PKI material on
-  install (rcgen).
-* **API auth**: API keys (sha256-hashed, hot-reloaded from disk) and
-  OpenID Connect bearer tokens (validated against JWKS).
+* **mTLS** covers gRPC and QUIC when `[security].require_mtls = true`.
+  It is off by default for local use, and a public QUIC listener refuses
+  to start without it unless explicitly allowed. `cgn-tls` loads PEM
+  material and generates dev PKI (rcgen).
+* **API auth**: API keys (sha256-hashed, re-read every 15 s) and OpenID
+  Connect bearer tokens (validated against JWKS). Scopes grant endpoints
+  and models, assign tenants, and set token limits.
+* **Tenant isolation**: prefix digests are salted per tenant, and vLLM
+  gets a matching `cache_salt`.
 * **Distroless images** with `nonroot` UID; no shell in production
   containers.
 * All commits land on a release branch only after `clippy -D warnings`,
@@ -126,17 +140,18 @@ toward energy-efficient nodes when the operator turns the weight up.
 
 | Area                    | What ships                                                          |
 |-------------------------|---------------------------------------------------------------------|
-| Engines                 | vLLM · SGLang · llama.cpp · OpenAI-compat (TRT-LLM via thin driver) |
+| Engines                 | vLLM · SGLang · llama.cpp · MLX · TensorRT-LLM · cgn-infer · OpenAI-compat |
 | Single-node serving     | `cgn-router` + `cgn-agent` + `cgn-kvcached` + OpenAI HTTP/SSE       |
 | Multi-node routing      | Sequence-chained BLAKE3 digests + longest-prefix overlap + load / power / capacity scoring |
 | KV offload backends     | `none / nixl / lmcache / hicache / kvbm`: one TOML knob, auto-rendered into engine argv |
-| Cross-node KV transport | QUIC frame codec; RDMA behind a feature flag; prefill/decode disagg |
-| Multi-tenancy           | OIDC SSO with group → scope mapping; in-process and Redis rate limit|
-| Cascade                 | SLM → Mid → LLM via `cascade::Cascade::run`                         |
+| Cross-node KV transport | QUIC frame codec with mTLS; RDMA is a stub; prefill/decode disagg   |
+| Multi-tenancy           | OIDC group → scope mapping, virtual keys, fair queuing, in-process rate limit |
+| Reliability             | Retry until the first token, drain on SIGTERM, real `/readyz`       |
+| Cascade                 | SLM → Mid → LLM gated on engine logprobs                            |
 | Kubernetes              | `cgn-operator` reconciles `InferenceCluster`, `ModelPool`, `RoutingPolicy` |
 | Federation              | Cross-cluster forwarder in `cgn-router::federation`                 |
 | Energy-aware autoscale  | Closed-loop drain hints written to etcd, picked up by the operator  |
-| SLO admission           | Per-tenant deadline propagation in `cgn-router::deadline`           |
+| SLO admission           | Deadline checks in `cgn-router::deadline`, from `x-cgn-deadline-ms` or the TTFT SLO |
 
-The [`tests/perf/`](../tests/perf) harness gates every PR against the
-performance targets in the README.
+The [`tests/perf/`](../tests/perf) harness reports criterion benches on
+every PR. The gate is soft, so a regression does not fail the build.

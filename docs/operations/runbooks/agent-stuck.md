@@ -1,6 +1,6 @@
 # Runbook: agent stuck / engine not ready
 
-**Symptoms**: `cgn_agent_engine_ready{node_id=...} == 0` for > 2 min,
+**Symptoms**: `cgn_cluster_node_up{node=...}` is missing or 0 for > 2 min,
 the router is rejecting traffic for a model with `503 unavailable: no
 live node serving model …`.
 
@@ -8,7 +8,7 @@ live node serving model …`.
 
 1. Identify the offender:
    ```promql
-   cgn_agent_engine_ready == 0
+   cgn_cluster_node_up == 0
    ```
    then on the host:
    ```bash
@@ -48,5 +48,5 @@ live node serving model …`.
   true` does this).
 - Set generous `livenessProbe.timeoutSeconds` on the agent for
   multi-tens-of-GB models.
-- Run NVML telemetry alongside the engine; `cgn_agent_gpu_mem_used`
-  near max for > 1 min is the canary for OOM crashes.
+- Watch GPU memory with your NVML exporter; sustained usage near the
+  maximum is the canary for OOM crashes.

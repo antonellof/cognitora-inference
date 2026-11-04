@@ -17,6 +17,7 @@ http://router:8080/healthz` hangs / errors.
    ```bash
    kubectl -n cognitora port-forward svc/cognitora-router 9091:9091
    curl localhost:9091/healthz
+   curl -i localhost:9091/readyz   # 503 "draining" or "no ready nodes"
    curl localhost:9091/metrics | grep cgn_router_admission_inflight
    ```
    - 200 + low inflight → 502 originates further upstream (LB,
@@ -51,7 +52,7 @@ http://router:8080/healthz` hangs / errors.
    - Increase `[router.admission].max_queue` if it's a transient
      spike.
    - More common cause: an agent is stuck waiting on the engine.
-     Check `cgn_agent_engine_ready` per node; restart the agent on
+     Check `cgn_cluster_node_up` and `cgn_cluster_node_queue_depth` per node; restart the agent on
      the offender.
 
 7. etcd watcher failed. The router will keep serving traffic from

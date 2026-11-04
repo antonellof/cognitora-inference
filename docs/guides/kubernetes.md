@@ -90,6 +90,10 @@ helm upgrade cognitora ./deploy/kubernetes/helm/cognitora \
   --set router.service.type=LoadBalancer
 ```
 
+Behind an ingress or load balancer, list its addresses in
+`router.rateLimit.trustedProxies`. Otherwise unauthenticated clients all
+share the proxy's rate-limit bucket.
+
 Or wire your existing IngressController:
 
 ```yaml
@@ -138,3 +142,17 @@ Every binary exposes Prometheus on its admin port (`:9091` for
 router/agent/kvcached, `:9092` for metrics). The chart ships a
 `PodMonitor` (in `templates/podmonitor.yaml`, generated when the Prom
 operator CRDs are present).
+
+## Security checklist
+
+The chart's defaults are for trying things out, not production:
+
+- Set `security.require_mtls=true` and provide certificates. Without it,
+  gRPC is unauthenticated and the chart opts in to plain QUIC with
+  `allow_insecure_quic`, so anything that can reach those ports can read and
+  write KV blocks.
+- Issue peer certificates with the `cognitora` SAN, or change
+  `[kv].quic_server_name`.
+- Keep the router's gRPC port internal. It has no API-key auth or limits.
+- Leave `terminationGracePeriodSeconds` above `drain_timeout`. The chart
+  uses 45 s against a 30 s default.

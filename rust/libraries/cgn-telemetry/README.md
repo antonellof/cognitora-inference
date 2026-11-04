@@ -11,7 +11,8 @@ binary.
 `RUST_LOG`), optionally enables OTLP-over-tonic export when an endpoint is
 configured, and registers a process-wide Prometheus registry. The
 `admin_router` returns an axum `Router` that serves `/metrics`,
-`/healthz`, and `/readyz` for use by the orchestrator and load balancers.
+`/healthz`, and `/readyz` for use by the orchestrator and load balancers;
+`admin_router_with_ready` plugs in a real readiness check.
 
 ## Use
 

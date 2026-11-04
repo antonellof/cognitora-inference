@@ -12,10 +12,11 @@ Two strategies, both enabled at the same time:
 1. **API keys** — bearer tokens of the form `cgn-<base32 payload>`. Keys
    are stored on disk as their SHA-256; the plaintext only appears in the
    operator's `cgn-ctl key create` output. Each key carries a
-   comma-separated scope list (`chat`, `embed`, `admin`).
+   comma-separated scope list: `chat`, `embed`, `*`, plus policy scopes
+   `model:<name>`, `tenant:<id>`, `tpm:<n>` and `budget:<n>`.
 2. **OIDC ID-tokens** — verified against a configurable issuer's JWKS.
-   The token's `sub` is recorded on the request span; scopes come from a
-   configurable claim.
+   The `sub` claim is the subject; scopes come from the `scope` claim and an
+   optional group-to-scope map.
 
 Exposed as a tower `Layer` that composes with the rest of the axum router.
 
