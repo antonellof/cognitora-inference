@@ -387,6 +387,28 @@ def test_readiness(s):
     check("readyz ok with live nodes (admin)", st == 200, st)
 
 
+def test_metrics(s):
+    """Series the Helm alerts depend on, as a real router exports them."""
+    chat(s, model="no-such-model")
+    chat(s, headers={"authorization": "Bearer limited-key"}, model="big")
+    m = http(s.admin("/metrics"))[1]
+    for name in ("cgn_router_routing_decision_seconds_bucket", "cgn_router_prefix_overlap_ratio_sum",
+                 "cgn_router_chat_ttft_seconds_bucket", "cgn_cluster_nodes_total"):
+        check(f"exports {name}", f"\n{name}" in m)
+    check("server errors carry the 5xx label",
+          'cgn_router_chat_requests_total{model="no-such-model",status="5xx"}' in m)
+    time.sleep(6)  # cluster gauges refresh every 5 s
+    m = http(s.admin("/metrics"))[1]
+    check("ready nodes report up", 'cgn_cluster_node_up{node="a"} 1' in m)
+
+
+def test_metrics_after_drain(s):
+    time.sleep(6)
+    m = http(s.admin("/metrics"))[1]
+    check("drained node leaves or reports down",
+          f'cgn_cluster_node_up{{node="{s.drained}"}} 1' not in m, s.drained)
+
+
 def stream_in_background(s, result):
     def run():
         result["r"] = http(s.url("/v1/chat/completions"), {**CHAT, "stream": True}, AUTH, timeout=30)
@@ -405,6 +427,7 @@ def test_agent_drain(s):
     time.sleep(1.0)
     busy = next(n for n in ("a", "b") if s.hits(n) > before[n])
     s.survivor = "a" if busy == "b" else "b"
+    s.drained = busy
     s.procs[f"agent-{busy}"].send_signal(signal.SIGTERM)
     t.join(30)
     st, raw, _ = result["r"]
@@ -456,7 +479,8 @@ def main() -> int:
         for test in (test_legacy_completions, test_usage_and_params, test_stream_framing,
                      test_retry_before_first_token, test_stream_failures, test_auth, test_budget,
                      test_session_affinity, test_cascade, test_disconnect_cancels_engine,
-                     test_readiness, test_agent_drain, test_router_drain):
+                     test_readiness, test_metrics, test_agent_drain, test_metrics_after_drain,
+                     test_router_drain):
             print(f"-- {test.__name__}")
             test(s)
     finally:

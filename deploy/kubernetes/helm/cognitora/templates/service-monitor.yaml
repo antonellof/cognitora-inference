@@ -1,0 +1,36 @@
+{{- if .Values.metrics.serviceMonitor.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cognitora.routerMetricsService" . }}
+  labels:
+    {{- include "cognitora.labels" . | nindent 4 }}
+    app.kubernetes.io/component: router-metrics
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "cognitora.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: router
+  ports:
+    - { name: admin, port: 9091, targetPort: admin }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "cognitora.routerMetricsService" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cognitora.labels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "cognitora.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: router-metrics
+  endpoints:
+    - port: admin
+      path: /metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+{{- end }}

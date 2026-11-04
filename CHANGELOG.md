@@ -89,12 +89,23 @@ clients observe.
 - Bodies over 2 MB got a 413, and gRPC limited messages to 4 MB, which blocked
   base64 images. See `[router].max_body_mb` (default 32).
 - `/healthz` could pass before the HTTP port was bound.
+- **Helm alerts could not fire.** Most rules and dashboard panels used metrics
+  that didn't exist, the `job` selector matched nothing, and the chart gave
+  Prometheus no way to scrape the router. Rules are rewritten against real
+  metrics, and `metrics.serviceMonitor.enabled` adds the scrape.
+- `cgn_router_chat_requests_total` counted 429 and 400 as `5xx`, and
+  `cgn_cluster_node_up` was 1 for unready nodes. Dashboards or alerts built on
+  either will see different values.
 - `[kv]` keys in the Helm chart and example config were ignored because they
   used the wrong names, as were several `[router.admission]` and
   `[router.rate_limit]` keys.
 
 ### Added
 
+- **`cgn_router_routing_decision_seconds`** and
+  **`cgn_router_prefix_overlap_ratio`** histograms.
+- **`scripts/check-helm-metrics.py`** and `promtool` rule tests in CI, so chart
+  alerts can't drift from the metrics the code exports.
 - **Retry before the first token.** Engine failures, stalls
   (`[router].first_token_timeout`) and empty streams now retry on another node.
   Client errors such as a 400 are not retried.

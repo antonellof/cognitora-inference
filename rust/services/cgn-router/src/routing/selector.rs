@@ -15,15 +15,35 @@
 //!    bonus, and queue depth includes the router's own in-flight count, so
 //!    identical idle nodes share a burst instead of one taking all of it.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use cgn_core::{Error, Result};
 use cgn_proto::v1::NodeRole;
+use cgn_telemetry::histogram_vec;
+use cgn_telemetry::prometheus::HistogramVec;
 
 use crate::cluster::NodeEntry;
 use crate::state::SharedState;
 
 use super::score::{score_node, Score};
+
+static DECISION_SECONDS: LazyLock<HistogramVec> = LazyLock::new(|| {
+    histogram_vec!(
+        "cgn_router_routing_decision_seconds",
+        "Time to filter and score candidates for one request.",
+        &["model"],
+        vec![25e-6, 50e-6, 100e-6, 250e-6, 500e-6, 1e-3, 2.5e-3, 5e-3, 10e-3, 50e-3]
+    )
+});
+
+static PREFIX_OVERLAP: LazyLock<HistogramVec> = LazyLock::new(|| {
+    histogram_vec!(
+        "cgn_router_prefix_overlap_ratio",
+        "Share of a prompt's chunks the chosen node is believed to hold.",
+        &["model"],
+        vec![0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0]
+    )
+});
 
 /// Outcome of `pick`.
 #[derive(Debug, Clone)]
@@ -88,6 +108,7 @@ pub async fn pick_excluding(
     role: NodeRole,
     exclude: &[String],
 ) -> Result<RoutingDecision> {
+    let started = std::time::Instant::now();
     let model = key.model;
     let mut candidates = state.nodes.nodes_for(role, Some(model));
     candidates.retain(|n| !exclude.iter().any(|x| x == &n.node_id));
@@ -178,6 +199,13 @@ pub async fn pick_excluding(
         }
     }
     let (node, score, overlap) = best.expect("non-empty candidates");
+    // Only reached for models a live node serves, so labels stay bounded.
+    DECISION_SECONDS
+        .with_label_values(&[model])
+        .observe(started.elapsed().as_secs_f64());
+    PREFIX_OVERLAP
+        .with_label_values(&[model])
+        .observe(overlap as f64);
 
     tracing::debug!(
         node = %node.node_id,

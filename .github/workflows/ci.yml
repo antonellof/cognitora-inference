@@ -113,6 +113,21 @@ jobs:
       - uses: azure/setup-helm@v4
         with: { version: v3.15.0 }
       - run: helm lint deploy/kubernetes/helm/cognitora
+      - name: Alerts use metrics the code exports
+        run: python3 scripts/check-helm-metrics.py
+      - name: Alerts fire when they should
+        run: |
+          PROM_VER=2.53.0
+          curl -fsSL "https://github.com/prometheus/prometheus/releases/download/v${PROM_VER}/prometheus-${PROM_VER}.linux-amd64.tar.gz" \
+            | tar xz -C /tmp
+          helm template check deploy/kubernetes/helm/cognitora \
+            --set metrics.prometheusRule.enabled=true \
+            --show-only templates/prometheus-rule.yaml \
+            | sed -n '/^spec:/,$p' | tail -n +2 | sed 's/^  //' > "$RUNNER_TEMP/rules.yaml"
+          cp tests/helm/alerts_test.yaml "$RUNNER_TEMP/"
+          cd "$RUNNER_TEMP"
+          "/tmp/prometheus-${PROM_VER}.linux-amd64/promtool" check rules rules.yaml
+          "/tmp/prometheus-${PROM_VER}.linux-amd64/promtool" test rules alerts_test.yaml
 
   bench-validate:
     name: bench harness (no GPU)
