@@ -13,7 +13,8 @@ J/token. Its modes share a client, so results are comparable:
 # Any machine, stub engines. Proves router cost and routing decisions only.
 python3 scripts/bench/proof/proof.py local --out reports/benchmark-request-path-local.md
 
-# Real inference on an Apple GPU: two llama-server engines on Metal.
+# Real inference on an Apple GPU: two llama-server engines on Metal. Reads
+# energy through scripts/bench/proof/mac_energy.c, which needs no root.
 python3 scripts/bench/proof/proof.py metal --gguf model.gguf \
   --out reports/benchmark-request-path-metal.md
 

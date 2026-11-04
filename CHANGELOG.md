@@ -125,8 +125,9 @@ clients observe.
 - **`scripts/bench/proof/proof.py`** measures overhead, KV routing gain and
   J/token, against stubs (`local`), Apple GPUs (`metal`) or a cluster (`gpu`).
   [`reports/benchmark-request-path-metal.md`](reports/benchmark-request-path-metal.md)
-  has real inference on an M2 Pro. NVIDIA and vLLM numbers, and J/token, are
-  still outstanding.
+  has real inference on an M2 Pro, including J/token from
+  `scripts/bench/proof/mac_energy.c`, which needs no root. NVIDIA and vLLM
+  numbers are still outstanding.
 
 ## [0.9.2] - 2026-09-23
 

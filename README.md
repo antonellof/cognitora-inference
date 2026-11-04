@@ -359,11 +359,11 @@ cognitora/
 ## Performance targets
 
 Measured so far, on one M2 Pro with two `llama-server` engines on Metal and no
-TLS ([report](reports/benchmark-request-path-metal.md)): the router adds 1 to
-2 ms p50 and 1.5 to 4 ms p99, so the p99 target isn't reliably met yet. KV-aware
-routing cut p50 TTFT from about 1.5 s to 0.2 s on a multi-turn workload. The
-other rows are targets, not results. NVIDIA, vLLM and J/token numbers aren't
-published yet.
+TLS ([report](reports/benchmark-request-path-metal.md)): the router adds 0.9 to
+2 ms p50 and up to 3.75 ms p99, so the p99 target isn't always met. On a
+multi-turn workload with long shared prefixes, KV-aware routing cut p50 TTFT from
+1.3 s to 0.2 s and energy from 1.35 to 0.94 J per token. The rows below are
+targets, not results. NVIDIA and vLLM numbers aren't published yet.
 
 | Metric                                      | Target          |
 | ------------------------------------------- | --------------- |

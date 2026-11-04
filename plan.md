@@ -112,12 +112,11 @@ Refreshed for the release after 0.9.2. Older milestones are in
 
 Everything below rests on evidence we don't have yet.
 
-* **Datacenter GPU benchmark.** Real inference is measured only on an M2 Pro
-  with llama.cpp ([report](reports/benchmark-request-path-metal.md)). Run
+* **Datacenter GPU benchmark.** Overhead, KV routing gain and J/token are
+  measured only on an M2 Pro with llama.cpp
+  ([report](reports/benchmark-request-path-metal.md)). Run
   `scripts/bench/proof/proof.py gpu` on NVIDIA with vLLM to cover the
   deployment this project targets, including TLS.
-* **J/token.** Not measured anywhere yet. `proof.py` needs root for
-  `powermetrics` on macOS, or NVML on Linux.
 * **LoRA on a real engine.** Covered only by argument and routing tests.
 * **Disaggregation end to end.** The prefill path is not proven on GPUs, and
   `prefill_only` is not yet honoured by the agent.
