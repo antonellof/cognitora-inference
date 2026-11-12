@@ -22,7 +22,7 @@ use crate::carbon::{self, CarbonAdmission, RequestPriority};
 use crate::cascade::Cascade;
 use crate::state::SharedState;
 
-use super::authz::{authorize, Caller};
+use super::authz::{authorize, known_model, Caller, UNKNOWN_MODEL};
 use super::generate::{self, error_json, Generated, Resolved, ResponseCtx, Surface};
 use super::metrics::{CHAT_LATENCY, CHAT_REQUESTS};
 use super::types::{
@@ -59,6 +59,9 @@ async fn serve(
     ctx: ResponseCtx,
     stream: bool,
 ) -> Response {
+    if let Err(resp) = known_model(&state, &ctx.model) {
+        return count_error(UNKNOWN_MODEL, resp);
+    }
     let priority = headers
         .get("x-cgn-priority")
         .and_then(|v| v.to_str().ok())

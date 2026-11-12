@@ -167,6 +167,9 @@ confidence_threshold = -1.0
 
 [models."router-cascade"]
 cascade = ["small", "big"]
+
+# Configured, but no agent loads it.
+[models."idle"]
 {extra}
 ''')
         self.spawn("router", [str(self.bin_dir / "cgn-router"), "--config", str(cfg)])
@@ -268,8 +271,11 @@ def test_stream_framing(s):
 
 def test_stream_failures(s):
     st, body, _ = http(s.url("/v1/chat/completions"),
-                       {"model": "no-such-model", "stream": True, "messages": []}, AUTH)
+                       {"model": "idle", "stream": True, "messages": []}, AUTH)
     check("streaming with no nodes is 503, not an empty 200", st == 503, f"{st} {body}")
+    st, body, _ = chat(s, model="no-such-model")
+    check("unknown model is 404 model_not_found",
+          st == 404 and "model_not_found" in str(body), f"{st} {body}")
     for n in ("a", "b"):
         s.behave(n, cut_after=2)
     st, raw, _ = http(s.url("/v1/chat/completions"), {**CHAT, "stream": True}, AUTH)
@@ -389,6 +395,7 @@ def test_readiness(s):
 
 def test_metrics(s):
     """Series the Helm alerts depend on, as a real router exports them."""
+    chat(s, model="idle")
     chat(s, model="no-such-model")
     chat(s, headers={"authorization": "Bearer limited-key"}, model="big")
     m = http(s.admin("/metrics"))[1]
@@ -396,7 +403,10 @@ def test_metrics(s):
                  "cgn_router_chat_ttft_seconds_bucket", "cgn_cluster_nodes_total"):
         check(f"exports {name}", f"\n{name}" in m)
     check("server errors carry the 5xx label",
-          'cgn_router_chat_requests_total{model="no-such-model",status="5xx"}' in m)
+          'cgn_router_chat_requests_total{model="idle",status="5xx"}' in m)
+    check("unknown models share one label",
+          'cgn_router_chat_requests_total{model="unknown",status="404"}' in m
+          and "no-such-model" not in m)
     time.sleep(6)  # cluster gauges refresh every 5 s
     m = http(s.admin("/metrics"))[1]
     check("ready nodes report up", 'cgn_cluster_node_up{node="a"} 1' in m)

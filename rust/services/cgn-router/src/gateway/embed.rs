@@ -50,6 +50,9 @@ pub async fn embeddings(
             "input must be a non-empty string or array",
         );
     }
+    if let Err(resp) = super::authz::known_model(&state, &req.model) {
+        return resp;
+    }
 
     let token_ids = state
         .tokenizers

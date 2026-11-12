@@ -79,6 +79,43 @@ pub fn authorize(
     })
 }
 
+/// Metric label for models that are neither configured nor loaded, so
+/// client-chosen names can't create series.
+pub const UNKNOWN_MODEL: &str = "unknown";
+
+/// Refuse a model that is neither in `[models.*]` nor on any registered
+/// node. Run after `authorize`, so only callers allowed to use the name
+/// learn whether it exists.
+///
+/// An empty registry can't tell a typo from a cluster that is still
+/// starting or has lost every node, so that case stays a retryable 503.
+pub fn known_model(state: &SharedState, model: &str) -> Result<(), Response> {
+    let configured = state
+        .cfg
+        .models
+        .iter()
+        .any(|(name, mc)| name == model || mc.lora.contains_key(model));
+    if configured || state.nodes.knows_model(model) {
+        return Ok(());
+    }
+    if state.nodes.is_empty() {
+        return Err(super::generate::error_json(&cgn_core::Error::Unavailable(
+            format!("no live node serving model {model}"),
+        )));
+    }
+    Err((
+        StatusCode::NOT_FOUND,
+        Json(json!({
+            "error": {
+                "message": format!("The model `{model}` does not exist or you do not have access to it."),
+                "type": "invalid_request_error",
+                "code": "model_not_found",
+            }
+        })),
+    )
+        .into_response())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,6 +136,55 @@ mod tests {
 
     fn status(r: Result<Caller, Response>) -> StatusCode {
         r.map(|_| StatusCode::OK).unwrap_or_else(|e| e.status())
+    }
+
+    /// A state with one registered node serving `base` and adapter `sql`.
+    fn state_with_node(ready: bool) -> SharedState {
+        let s = state();
+        let node = json!({
+            "node_id": "a", "address": "http://a:7070", "role": 3,
+            "model": "base", "queue_depth": 0, "free_blocks": 0,
+            "total_blocks": 0, "power_watts": 0.0,
+            "ready": ready, "adapters": ["sql"],
+        });
+        s.nodes.upsert(serde_json::from_value(node).unwrap());
+        s
+    }
+
+    fn known(s: &SharedState, model: &str) -> StatusCode {
+        known_model(s, model)
+            .map(|_| StatusCode::OK)
+            .unwrap_or_else(|e| e.status())
+    }
+
+    #[test]
+    fn a_model_no_node_carries_is_404() {
+        let s = state_with_node(true);
+        assert_eq!(known(&s, "typo"), StatusCode::NOT_FOUND);
+        assert_eq!(known(&s, "base"), StatusCode::OK);
+        assert_eq!(known(&s, "sql"), StatusCode::OK);
+    }
+
+    /// A node that is still loading makes its model unavailable, not unknown.
+    #[test]
+    fn a_model_on_an_unready_node_is_known() {
+        assert_eq!(known(&state_with_node(false), "base"), StatusCode::OK);
+    }
+
+    #[test]
+    fn configured_models_and_adapters_are_known_without_nodes() {
+        let mut cfg = Config::default();
+        let mc = cfg.models.entry("big".into()).or_default();
+        mc.lora.insert("big-sql".into(), "/adapters/sql".into());
+        let s = SharedState::build(cfg);
+        assert_eq!(known(&s, "big"), StatusCode::OK);
+        assert_eq!(known(&s, "big-sql"), StatusCode::OK);
+    }
+
+    /// With no nodes at all a typo and an outage look the same.
+    #[test]
+    fn an_empty_registry_is_503_not_404() {
+        assert_eq!(known(&state(), "anything"), StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[test]

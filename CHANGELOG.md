@@ -10,6 +10,22 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+### Breaking
+
+- **An unknown model is a 404**, not a 503. A model that is neither in
+  `[models.*]` nor on any registered node returns `invalid_request_error`
+  with `code: "model_not_found"`, as OpenAI does. A known model with no ready
+  node is still a 503, and so is any model while no node is registered,
+  because a typo and an outage look the same then.
+
+### Fixed
+
+- Client-chosen model names became metric series and counted as `5xx` in
+  `cgn_router_chat_requests_total`, so typos fed the error-ratio alert and
+  any key holder could grow the series count without limit. Unknown models
+  are now counted under `model="unknown"` and stop before admission and
+  routing.
+
 ## [0.10.0] - 2026-11-12
 
 The "production path" release. A review of the request path found API and
