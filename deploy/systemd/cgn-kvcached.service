@@ -1,6 +1,6 @@
 [Unit]
 Description=Cognitora KV cache daemon (RAM/SSD tiers + QUIC transfer)
-Documentation=https://github.com/cognitora/cognitora
+Documentation=https://github.com/antonellof/cognitora-inference
 After=network-online.target
 Wants=network-online.target
 

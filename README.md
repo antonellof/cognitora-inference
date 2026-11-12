@@ -171,7 +171,7 @@ That URL redirects to the same script as the canonical GitHub raw path:
 Pin a version, choose a custom prefix, or point at a fork:
 
 ```bash
-curl -fsSL https://inference.cognitora.dev/install | CGN_VERSION=v0.1.0 sh
+curl -fsSL https://inference.cognitora.dev/install | CGN_VERSION=v0.10.0 sh
 curl -fsSL https://inference.cognitora.dev/install | CGN_PREFIX=$HOME/.local sh
 curl -fsSL https://inference.cognitora.dev/install | CGN_REPO=acme/cognitora-fork sh
 ```

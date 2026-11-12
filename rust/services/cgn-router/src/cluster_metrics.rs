@@ -182,8 +182,8 @@ fn refresh(state: &SharedState) {
     let mut power_sum = 0.0_f64;
     for n in &nodes {
         let id = n.node_id.as_str();
-        // Registry entries exist while the etcd lease is alive; a live
-        // lease means the agent heartbeats, which requires engine ready.
+        // A registry entry only proves the agent heartbeats. The engine
+        // can still be loading or draining, so report those as down.
         NODE_UP
             .with_label_values(&[id])
             .set((n.ready && !n.draining) as i64);

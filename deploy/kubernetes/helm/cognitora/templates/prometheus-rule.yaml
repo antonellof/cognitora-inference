@@ -156,5 +156,5 @@ spec:
         severity: info
       annotations:
         summary: "{{ "{{" }} $labels.model {{ "}}" }} has no tokenizer, so prefix routing and usage are estimates"
-        runbook: "https://github.com/antonellof/cognitora-inference/blob/main/docs/operations/../reference/config.md"
+        runbook: "https://github.com/antonellof/cognitora-inference/blob/main/docs/reference/config.md"
 {{- end }}

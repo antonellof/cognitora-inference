@@ -10,6 +10,8 @@ each one is called out under **Breaking** below.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-12
+
 The "production path" release. A review of the request path found API and
 security bugs that unit tests could not see, so this release fixes them and
 adds `tests/e2e/request_path.py`, which drives real binaries and asserts what
@@ -99,6 +101,12 @@ clients observe.
 - `[kv]` keys in the Helm chart and example config were ignored because they
   used the wrong names, as were several `[router.admission]` and
   `[router.rate_limit]` keys.
+- **The Helm chart's default image did not exist.** `global.image.tag` fell
+  back to `appVersion: 0.1.0`, and images are tagged `vX.Y.Z`. The chart is
+  now versioned with the release and defaults to this release's image.
+- The Kubernetes guide pointed at an OCI chart that was never published, and
+  the API reference listed a `404 model_not_found` the router does not
+  return. An unknown model is a 503, like any model with no live node.
 
 ### Added
 
