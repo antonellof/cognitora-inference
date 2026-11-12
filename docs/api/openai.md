@@ -136,13 +136,13 @@ All errors return the OpenAI-shaped JSON:
 |-----:|--------------------|----------------------------------------------------------|
 | 401  | `auth_error`       | missing / invalid bearer                                 |
 | 403  | `permission_error` | valid token, but lacking the scope or model              |
-| 404  | `model_not_found`  | unknown model name                                       |
+| 404  | `not_found_error`  | the engine reported the model or resource as missing     |
 | 400  | `invalid_request_error` | bad request, including one the engine rejected      |
 | 413  | (none)             | body over `[router].max_body_mb`                         |
 | 429  | (none)             | `cgn-ratelimit` request quota exhausted                  |
 | 429  | `insufficient_quota` | a key's `tpm` or `budget` limit                        |
 | 429  | `server_error`     | admission queue full or wait timed out                   |
-| 503  | `server_error`     | no live node serving the model for the requested role    |
+| 503  | `server_error`     | no live node serving the model for the requested role, including a model name no node knows |
 | 5xx  | `server_error`     | upstream failure (engine crash, transport)               |
 
 ## OpenAPI

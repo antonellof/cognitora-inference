@@ -104,7 +104,7 @@ The following are explicit non-goals for the 0.x line. They are not
 
 ## Roadmap
 
-Refreshed for the release after 0.9.2. Older milestones are in
+Refreshed for 0.10.0. Older milestones are in
 [`CHANGELOG.md`](CHANGELOG.md). Comparisons with other projects live in
 [`docs/architecture/vs-dynamo.md`](docs/architecture/vs-dynamo.md).
 

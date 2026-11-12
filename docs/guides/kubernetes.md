@@ -32,12 +32,10 @@ helm install cognitora ./deploy/kubernetes/helm/cognitora \
   --set kvcached.ramGib=16
 ```
 
-Or from the GHCR OCI repository:
-
-```bash
-helm install cognitora oci://ghcr.io/cognitora/charts/cognitora \
-  --namespace cognitora --create-namespace --version 0.1.0
-```
+The chart is not published to a registry yet, so install it from a checkout
+of the release tag. The image defaults to the chart's `appVersion`, which
+matches that tag. To run a different release, set
+`--set global.image.tag=vX.Y.Z`.
 
 ## Declarative model loading
 
