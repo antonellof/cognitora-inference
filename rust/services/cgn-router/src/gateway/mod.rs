@@ -222,6 +222,7 @@ mod tests {
     #[tokio::test]
     async fn streaming_admission_rejection_is_429() {
         let mut cfg = Config::default();
+        cfg.models.entry("m".into()).or_default();
         cfg.router.admission.max_queue = 0;
         cfg.router.admission.wait_queue_per_tenant = 0;
         let body = serde_json::json!({
@@ -355,6 +356,7 @@ mod tests {
     #[tokio::test]
     async fn admission_rejections_are_not_counted_as_server_errors() {
         let mut cfg = Config::default();
+        cfg.models.entry("metrics-429".into()).or_default();
         cfg.router.admission.max_queue = 0;
         cfg.router.admission.wait_queue_per_tenant = 0;
         let body = serde_json::json!({"model": "metrics-429", "messages": []});
@@ -366,6 +368,21 @@ mod tests {
                 .get()
         };
         assert_eq!((count("429"), count("5xx")), (1, 0));
+    }
+
+    /// Client-chosen model names must not become metric series.
+    #[tokio::test]
+    async fn unknown_models_share_one_metric_label() {
+        let body = serde_json::json!({"model": "metrics-typo", "messages": []});
+        let (status, _) = call(app(Config::default()), post("/v1/chat/completions", body)).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        let families = cgn_telemetry::registry().gather();
+        let leaked = families
+            .iter()
+            .flat_map(|f| f.get_metric())
+            .flat_map(|m| m.get_label())
+            .any(|l| l.get_value() == "metrics-typo");
+        assert!(!leaked);
     }
 
     #[tokio::test]

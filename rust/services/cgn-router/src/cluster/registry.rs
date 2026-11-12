@@ -123,6 +123,11 @@ impl NodeRegistry {
         *guard = Arc::new(next);
     }
 
+    /// Whether any registered node carries `model`, ready or not.
+    pub fn knows_model(&self, model: &str) -> bool {
+        self.inner.iter().any(|kv| kv.value().read().serves(model))
+    }
+
     pub fn len(&self) -> usize {
         self.inner.len()
     }
